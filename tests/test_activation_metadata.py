@@ -179,7 +179,16 @@ def test_env_validate_hint_points_to_config_init() -> None:
 
 
 def test_user_facing_files_do_not_reference_dev_extras_or_optional_groups() -> None:
-    for relative_path in ("README.md", "activate"):
+    for relative_path in ("README.md", "activate", ".github/workflows/ci.yml"):
         text = _load_text(_project_root() / relative_path)
         assert ".[dev]" not in text, relative_path
         assert "optional-dependencies.dev" not in text, relative_path
+
+
+def test_ci_uses_current_single_install_set() -> None:
+    ci = _load_text(_project_root() / ".github" / "workflows" / "ci.yml")
+
+    assert 'PYTHON_VERSION: "3.12"' in ci
+    assert "python -m pip install -e ." in ci
+    assert "daylily-tapdb==5.1.0" not in ci
+    assert '".[dev,auth]"' not in ci
