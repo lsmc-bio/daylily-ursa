@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "last_updated": "2026-04-29",
+  "last_updated": "2026-05-07",
   "components": {
     "daylily-ursa": {
       "repo": "Daylily-Informatics/daylily-ursa",
@@ -20,7 +20,7 @@
     },
     "daylily-tapdb": {
       "repo": "Daylily-Informatics/daylily-tapdb",
-      "current": "6.0.8"
+      "current": "6.0.9"
     },
     "cli-core-yo": {
       "repo": "Daylily-Informatics/cli-core-yo",
@@ -28,7 +28,7 @@
     },
     "zebra_day": {
       "repo": "Daylily-Informatics/zebra_day",
-      "current": "6.0.1"
+      "current": "6.0.2"
     },
     "daylily-omics-references": {
       "repo": "Daylily-Informatics/daylily-omics-references",
@@ -37,16 +37,16 @@
   },
   "tested_combinations": [
     {
-      "date": "2026-04-29",
+      "date": "2026-05-07",
       "ursa": "2.0.1",
       "ephemeral_cluster": "2.1.12",
       "omics_analysis": "0.7.641",
       "cognito": "2.1.5",
-      "tapdb": "6.0.8",
+      "tapdb": "6.0.9",
       "cli_core_yo": "2.1.1",
-      "zebra_day": "6.0.1",
+      "zebra_day": "6.0.2",
       "omics_references": "0.3.1",
-      "notes": "Pinned daylily-ephemeral-cluster to 2.1.12, daylily-auth-cognito to 2.1.5, daylily-tapdb to 6.0.8, cli-core-yo to 2.1.1, zebra_day to 6.0.1, and daylily-omics-analysis to GitHub release 0.7.641"
+      "notes": "Pinned daylily-ephemeral-cluster to 2.1.12, daylily-auth-cognito to 2.1.5, daylily-tapdb to 6.0.9, cli-core-yo to 2.1.1, zebra_day to 6.0.2, and daylily-omics-analysis to GitHub release 0.7.641"
     },
     {
       "date": "2026-03-03",
