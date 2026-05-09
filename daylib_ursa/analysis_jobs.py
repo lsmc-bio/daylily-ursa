@@ -38,7 +38,7 @@ def _parse_launch_markers(stdout: str) -> dict[str, str]:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec 2.1.12."""
+    """Launch manager for Ursa analysis jobs through daylily-ec 2.2.4."""
 
     def __init__(
         self,

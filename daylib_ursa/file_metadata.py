@@ -24,9 +24,9 @@ from typing import Dict, List, Optional, Tuple
 
 from daylib_ursa.ephemeral_cluster.runner import (
     DAYLILY_EC_DISTRIBUTION,
+    DAYLILY_EC_INSTALL_SPEC,
     REQUIRED_DAYLILY_EC_VERSION,
 )
-
 
 ANALYSIS_SAMPLES_TEMPLATE_PACKAGE = "daylily_ec.resources.payload"
 ANALYSIS_SAMPLES_TEMPLATE_RESOURCE = "etc/analysis_samples_template.tsv"
@@ -39,7 +39,7 @@ def require_daylily_ec_template_version() -> str:
     except importlib_metadata.PackageNotFoundError as exc:
         raise RuntimeError(
             f"{DAYLILY_EC_DISTRIBUTION} is not installed. Install "
-            f"{DAYLILY_EC_DISTRIBUTION}=={REQUIRED_DAYLILY_EC_VERSION} in the active Ursa environment."
+            f"{DAYLILY_EC_INSTALL_SPEC} in the active Ursa environment."
         ) from exc
     if installed != REQUIRED_DAYLILY_EC_VERSION:
         raise RuntimeError(
@@ -285,18 +285,24 @@ class AnalysisInput:
             "RUN_ID": self.run_id,
             "SAMPLE_ID": self.sample_id,
             "EXPERIMENTID": self.experiment_id or self.sample_id,
-            "SAMPLE_TYPE": self.sample_type.value
-            if isinstance(self.sample_type, SampleType)
-            else self.sample_type,
-            "LIB_PREP": self.lib_prep.value
-            if isinstance(self.lib_prep, LibraryPrep)
-            else self.lib_prep,
-            "SEQ_VENDOR": self.seq_vendor.value
-            if isinstance(self.seq_vendor, SequencingVendor)
-            else self.seq_vendor,
-            "SEQ_PLATFORM": self.seq_platform.value
-            if isinstance(self.seq_platform, SequencingPlatform)
-            else self.seq_platform,
+            "SAMPLE_TYPE": (
+                self.sample_type.value
+                if isinstance(self.sample_type, SampleType)
+                else self.sample_type
+            ),
+            "LIB_PREP": (
+                self.lib_prep.value if isinstance(self.lib_prep, LibraryPrep) else self.lib_prep
+            ),
+            "SEQ_VENDOR": (
+                self.seq_vendor.value
+                if isinstance(self.seq_vendor, SequencingVendor)
+                else self.seq_vendor
+            ),
+            "SEQ_PLATFORM": (
+                self.seq_platform.value
+                if isinstance(self.seq_platform, SequencingPlatform)
+                else self.seq_platform
+            ),
             "LANE": str(self.lane),
             "SEQBC_ID": self.barcode_id,
             "PATH_TO_CONCORDANCE_DATA_DIR": self.concordance_dir,

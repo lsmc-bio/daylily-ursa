@@ -29,6 +29,7 @@ ANALYSIS_SAMPLES_SOURCE_COLUMNS = (
     "PACBIO_R2_FQ",
     "ONT_R1_FQ",
     "ONT_R2_FQ",
+    "ONT_FASTQ_PREFIX",
     "UG_R1_FQ",
     "UG_R2_FQ",
     "ULTIMA_CRAM",

@@ -9,9 +9,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, cast
 
-
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "2.1.12"
+REQUIRED_DAYLILY_EC_VERSION = "2.2.4"
+DAYLILY_EC_INSTALL_SPEC = (
+    f"{DAYLILY_EC_DISTRIBUTION} @ "
+    f"git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
+)
 
 
 def require_daylily_ec_version() -> str:
@@ -22,7 +25,7 @@ def require_daylily_ec_version() -> str:
     except importlib_metadata.PackageNotFoundError as exc:
         raise RuntimeError(
             f"{DAYLILY_EC_DISTRIBUTION} is not installed. Install "
-            f"{DAYLILY_EC_DISTRIBUTION}=={REQUIRED_DAYLILY_EC_VERSION} in the active Ursa environment."
+            f"{DAYLILY_EC_INSTALL_SPEC} in the active Ursa environment."
         ) from exc
     if installed != REQUIRED_DAYLILY_EC_VERSION:
         raise RuntimeError(
@@ -91,7 +94,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 2.1.12 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 2.2.4 contract."""
 
     def __init__(
         self,
@@ -298,7 +301,7 @@ def write_dayec_cluster_config(
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write a non-interactive cluster request through the day-ec 2.1.12 library."""
+    """Write a non-interactive cluster request through the day-ec 2.2.4 library."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.config")

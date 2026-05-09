@@ -10,7 +10,11 @@ from daylib_ursa.ephemeral_cluster import runner
 def test_run_json_raises_when_daylily_ec_returns_empty_stdout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(runner, "require_daylily_ec_version", lambda: "2.1.12")
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
 
     def fake_run(*_args, **_kwargs) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
@@ -31,7 +35,11 @@ def test_run_json_raises_when_daylily_ec_returns_empty_stdout(
 def test_run_json_parses_object_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(runner, "require_daylily_ec_version", lambda: "2.1.12")
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
     captured: dict[str, object] = {}
 
     def fake_run(command, **kwargs) -> subprocess.CompletedProcess[str]:  # noqa: ANN001
@@ -60,11 +68,15 @@ def test_run_json_parses_object_payload(
     ]
 
 
-def test_stage_samples_builds_daylily_ec_2111_argv(
+def test_stage_samples_builds_daylily_ec_224_argv(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    monkeypatch.setattr(runner, "require_daylily_ec_version", lambda: "2.1.12")
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
 
     captured: dict[str, object] = {}
 
@@ -107,11 +119,15 @@ def test_stage_samples_builds_daylily_ec_2111_argv(
     ]
 
 
-def test_aws_validate_all_builds_daylily_ec_2111_argv(
+def test_aws_validate_all_builds_daylily_ec_224_argv(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    monkeypatch.setattr(runner, "require_daylily_ec_version", lambda: "2.1.12")
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
     captured: dict[str, object] = {}
 
     def fake_run(command, **kwargs):  # noqa: ANN001
@@ -157,7 +173,11 @@ def test_create_dry_run_builds_daylily_ec_create_with_day_break(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    monkeypatch.setattr(runner, "require_daylily_ec_version", lambda: "2.1.12")
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
     captured: dict[str, object] = {}
 
     def fake_run(command, **kwargs):  # noqa: ANN001

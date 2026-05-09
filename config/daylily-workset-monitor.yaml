@@ -29,7 +29,7 @@ cluster:
   template_path: config/cluster-configs/example.yaml
   # Contact email exported for cluster creation when not present in template overrides.
   contact_email: you@email.com
-  repo_tag: 0.7.641
+  repo_tag: 0.7.726
   preferred_availability_zone: us-east-1a
   auto_teardown: false
   idle_teardown_minutes: 20
@@ -75,7 +75,7 @@ pipeline:
 
 
 # optional if you want the monitor to fetch your repo/branch on the headnode
-day-clone: "--repo Daylily-Informatics/daylily-omics-analysis --branch 0.7.641"
+day-clone: "--repository daylily-omics-analysis --git-tag 0.7.726 --destination daylily-omics-analysis"
 
 # required: appended to run_prefix
 dy-r: "--name runme14 --samples config/samples.tsv --outdir results/runme14 --profile slurm --jobs 192 --rerun-incomplete"

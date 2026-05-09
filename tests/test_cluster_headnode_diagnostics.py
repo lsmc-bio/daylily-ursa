@@ -34,9 +34,11 @@ class FakeDaylilyEcClient:
                 {
                     "name": "cluster-1",
                     "status": "CREATE_COMPLETE",
-                    "details": self.cluster_describe(cluster_name="cluster-1", region=region)
-                    if details
-                    else {},
+                    "details": (
+                        self.cluster_describe(cluster_name="cluster-1", region=region)
+                        if details
+                        else {}
+                    ),
                 }
             ]
         }
@@ -74,7 +76,7 @@ def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
         return SimpleNamespace(
             stdout=(
                 "__DAYLILY_EC_VERSION_BEGIN__\n"
-                '{"app": "daylily-ec", "version": "2.1.12", "git_hash": "abc123"}\n'
+                '{"app": "daylily-ec", "version": "2.2.4", "git_hash": "abc123"}\n'
                 "__DAYLILY_EC_VERSION_END__\n"
                 "__DAY_CLONE_HELP_BEGIN__\n"
                 "Usage: day-clone [OPTIONS]\n"
@@ -96,7 +98,7 @@ def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
     assert first["cached"] is False
     assert second["cached"] is True
     assert listed[0].headnode_probes["static"]["cached"] is True
-    assert second["data"]["remote_daylily_ec_version"] == "2.1.12"
+    assert second["data"]["remote_daylily_ec_version"] == "2.2.4"
     assert second["data"]["remote_git_hash"] == "abc123"
     assert second["data"]["day_clone_available"] is True
     assert "day-clone --help" in calls[0]
