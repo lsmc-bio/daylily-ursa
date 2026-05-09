@@ -139,6 +139,7 @@ class AnalysisJobManager:
             job.job_euid
         )
         argv = command.launch_argv(
+            destination=str(request.get("destination") or "").strip() or None,
             profile=aws_profile,
             region=job.region,
             cluster=job.cluster_name,

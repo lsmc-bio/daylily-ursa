@@ -662,6 +662,7 @@ class AnalysisCommandPreviewRequest(BaseModel):
     cluster_name: str | None = None
     stage_dir: str | None = None
     session_name: str | None = None
+    destination: str | None = None
     project: str | None = None
     dry_run: bool = False
 
@@ -684,6 +685,7 @@ class AnalysisJobCreateRequest(BaseModel):
     reference_bucket: str | None = None
     analysis_command_id: str
     optional_features: list[str] = Field(default_factory=list)
+    destination: str | None = None
     session_name: str | None = None
     project: str | None = None
     aws_profile: str | None = None
@@ -3357,6 +3359,7 @@ def create_app(
                     cluster_name=request.cluster_name,
                     stage_dir=request.stage_dir,
                     session_name=request.session_name,
+                    destination=request.destination,
                     project=request.project,
                     dry_run=request.dry_run,
                 )
@@ -3754,6 +3757,7 @@ def create_app(
         request_payload = {
             "analysis_command_id": request.analysis_command_id,
             "optional_features": list(request.optional_features),
+            "destination": request.destination,
             "reference_bucket": request.reference_bucket,
             "session_name": request.session_name,
             "project": request.project,
