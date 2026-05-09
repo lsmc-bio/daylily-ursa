@@ -69,6 +69,13 @@
                     <input id="reference_bucket" class="form-control" placeholder="s3://bucket/path">
                 </div>
                 <div class="form-group">
+                    <label for="destination" class="form-label">Destination</label>
+                    <input id="destination" class="form-control" placeholder="daylily-ec destination">
+                </div>
+            </div>
+
+            <div class="grid grid-2">
+                <div class="form-group">
                     <label for="stage_target" class="form-label">Stage Target</label>
                     <input id="stage_target" class="form-control mono" value="/data/staged_sample_data" required>
                 </div>
@@ -201,6 +208,7 @@
             cluster_name: clusterSelect?.value || '',
             region: document.getElementById('region')?.value || '',
             reference_bucket: document.getElementById('reference_bucket')?.value || '',
+            destination: document.getElementById('destination')?.value || '',
             analysis_command_id: document.getElementById('analysis_command_id')?.value || '',
             optional_features: features(),
             project: document.getElementById('project')?.value || null,
@@ -269,6 +277,7 @@
                     optional_features: payload.optional_features,
                     region: payload.region,
                     cluster_name: payload.cluster_name,
+                    destination: payload.destination,
                     project: payload.project,
                     dry_run: payload.dry_run,
                     stage_dir: `${payload.stage_target || '/data/staged_sample_data'}/<staging-job>`,

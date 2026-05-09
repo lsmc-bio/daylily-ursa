@@ -1070,6 +1070,7 @@ def test_analysis_command_catalog_and_preview_routes_use_user_api() -> None:
                 "optional_features": ["tiddit"],
                 "region": "us-west-2",
                 "cluster_name": "cluster-1",
+                "destination": "at-sanity",
             },
         )
 
@@ -1121,6 +1122,7 @@ def test_analysis_job_routes_define_launch_refresh_and_logs() -> None:
                 "reference_bucket": "s3://reference-bucket",
                 "analysis_command_id": "illumina_snv_alignstats",
                 "optional_features": ["tiddit"],
+                "destination": "at-sanity",
             },
         )
         listed = client.get("/api/v1/analysis-jobs", headers=_auth_headers())
@@ -1145,6 +1147,7 @@ def test_analysis_job_routes_define_launch_refresh_and_logs() -> None:
     assert created.status_code == 201, created.text
     assert created.json()["state"] == "DEFINED"
     assert created.json()["request"]["analysis_command_id"] == "illumina_snv_alignstats"
+    assert created.json()["request"]["destination"] == "at-sanity"
     assert listed.status_code == 200, listed.text
     assert listed.json()[0]["job_euid"] == created.json()["job_euid"]
     assert detail.status_code == 200, detail.text

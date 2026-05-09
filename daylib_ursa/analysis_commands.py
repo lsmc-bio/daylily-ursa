@@ -61,6 +61,7 @@ def preview_analysis_command(
     cluster_name: str | None = None,
     stage_dir: str | None = None,
     session_name: str | None = None,
+    destination: str | None = None,
     project: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -71,6 +72,7 @@ def preview_analysis_command(
         cluster=cluster_name,
         stage_dir=stage_dir,
         session_name=session_name,
+        destination=destination,
         project=project,
         dry_run=dry_run,
     )
