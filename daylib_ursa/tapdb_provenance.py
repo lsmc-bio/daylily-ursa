@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-TAPDB_GRAPH_SCHEMA_VERSION = "ursa.explicit-dag-provenance.v1"
-
-
 def explicit_ref(
     *,
     service: str,
@@ -18,10 +15,14 @@ def explicit_ref(
     if not euid:
         return None
     ref: dict[str, Any] = {
+        "system": service,
         "service": service,
+        "root_euid": euid,
         "relationship_type": relationship_type,
         "target_euid": euid,
         "field_path": field_path,
+        "source_field": field_path,
+        "label": f"{relationship_type}: {euid}",
         "recorded_at": timestamp,
         "inferred": False,
     }
@@ -50,12 +51,8 @@ def compact_refs(refs: list[dict[str, Any] | None]) -> list[dict[str, Any]]:
 
 
 def tapdb_graph_payload(*, refs: list[dict[str, Any] | None], timestamp: str) -> dict[str, Any]:
-    return {
-        "schema_version": TAPDB_GRAPH_SCHEMA_VERSION,
-        "generated_at": timestamp,
-        "refs": compact_refs(refs),
-        "inferred_only_dependencies": [],
-    }
+    del timestamp
+    return compact_refs(refs)
 
 
 def payload_with_tapdb_graph(

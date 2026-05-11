@@ -351,10 +351,9 @@ def test_resource_store_writes_manifest_and_job_graph_payloads() -> None:
 
     manifest_instance = _instance_for_euid(backend, manifest.manifest_euid)
     manifest_graph = _graph_payload(manifest_instance)
-    assert manifest_graph["generated_at"] == from_json_addl(manifest_instance)["created_at"]
-    assert manifest_graph["inferred_only_dependencies"] == []
-    assert not any(ref["inferred"] for ref in manifest_graph["refs"])
-    assert {(ref["relationship_type"], ref["target_euid"]) for ref in manifest_graph["refs"]} >= {
+    assert isinstance(manifest_graph, list)
+    assert not any(ref["inferred"] for ref in manifest_graph)
+    assert {(ref["relationship_type"], ref["target_euid"]) for ref in manifest_graph} >= {
         ("uses_fastq_artifact", "AS-1"),
         ("uses_fastq_artifact", "AT-1"),
         ("uses_fastq_artifact", "AT-2"),
@@ -364,8 +363,7 @@ def test_resource_store_writes_manifest_and_job_graph_payloads() -> None:
 
     analysis_job_instance = _instance_for_euid(backend, analysis_job.job_euid)
     analysis_graph = _graph_payload(analysis_job_instance)
-    assert analysis_graph["refs"] == []
-    assert analysis_graph["inferred_only_dependencies"] == []
+    assert analysis_graph == []
     assert from_json_addl(analysis_job_instance)["graph"]["fanout"] == {
         "classification": "expected",
         "relationship_type": "event",
@@ -374,8 +372,7 @@ def test_resource_store_writes_manifest_and_job_graph_payloads() -> None:
 
     staging_job_instance = _instance_for_euid(backend, staging_job.job_euid)
     staging_graph = _graph_payload(staging_job_instance)
-    assert staging_graph["refs"] == []
-    assert staging_graph["inferred_only_dependencies"] == []
+    assert staging_graph == []
     assert from_json_addl(staging_job_instance)["graph"]["fanout"] == {
         "classification": "expected",
         "relationship_type": "event",

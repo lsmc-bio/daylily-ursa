@@ -296,10 +296,9 @@ def test_analysis_store_writes_explicit_tapdb_graph_refs_and_timestamps():
     atlas_return = _created_instance(store.backend, ATLAS_RETURN_TEMPLATE)
 
     analysis_graph = _graph_payload(analysis)
-    assert analysis_graph["generated_at"]
-    assert analysis_graph["inferred_only_dependencies"] == []
-    assert not any(ref["inferred"] for ref in analysis_graph["refs"])
-    assert {(ref["relationship_type"], ref["target_euid"]) for ref in analysis_graph["refs"]} >= {
+    assert isinstance(analysis_graph, list)
+    assert not any(ref["inferred"] for ref in analysis_graph)
+    assert {(ref["relationship_type"], ref["target_euid"]) for ref in analysis_graph} >= {
         ("uses_fastq_artifact", "AT-INPUT-1"),
         ("uses_fastq_artifact", "AS-INPUT-1"),
         ("uses_fastq_artifact", "AT-INPUT-2"),
@@ -311,8 +310,8 @@ def test_analysis_store_writes_explicit_tapdb_graph_refs_and_timestamps():
     }
 
     context_graph = _graph_payload(context)
-    assert context_graph["inferred_only_dependencies"] == []
-    assert {(ref["relationship_type"], ref["target_euid"]) for ref in context_graph["refs"]} >= {
+    assert isinstance(context_graph, list)
+    assert {(ref["relationship_type"], ref["target_euid"]) for ref in context_graph} >= {
         ("uses_bloom_run", "RUN-4"),
         ("uses_bloom_library", "SQA-4"),
         ("uses_bloom_pool", "POOL-4"),
@@ -323,18 +322,17 @@ def test_analysis_store_writes_explicit_tapdb_graph_refs_and_timestamps():
     assert from_json_addl(context)["sequencing_pool_euid"] == "POOL-4"
 
     artifact_graph = _graph_payload(artifact_instance)
-    assert artifact_graph["inferred_only_dependencies"] == []
-    assert artifact_graph["refs"][0]["relationship_type"] == "registered_result_artifact"
-    assert artifact_graph["refs"][0]["target_euid"] == "AT-RESULT-1"
+    assert isinstance(artifact_graph, list)
+    assert artifact_graph[0]["relationship_type"] == "registered_result_artifact"
+    assert artifact_graph[0]["target_euid"] == "AT-RESULT-1"
     assert (
-        artifact_graph["refs"][0]["recorded_at"] == from_json_addl(artifact_instance)["created_at"]
+        artifact_graph[0]["recorded_at"] == from_json_addl(artifact_instance)["created_at"]
     )
 
     atlas_return_graph = _graph_payload(atlas_return)
-    assert atlas_return_graph["generated_at"] == from_json_addl(atlas_return)["returned_at"]
-    assert atlas_return_graph["inferred_only_dependencies"] == []
+    assert isinstance(atlas_return_graph, list)
     assert {
-        (ref["relationship_type"], ref["target_euid"]) for ref in atlas_return_graph["refs"]
+        (ref["relationship_type"], ref["target_euid"]) for ref in atlas_return_graph
     } >= {
         ("returned_to_atlas", "ASR-4"),
         ("returned_to_atlas", "RES-4"),
