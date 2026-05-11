@@ -390,7 +390,7 @@ def mount_gui(app: FastAPI) -> None:
                     template_code=USER_TOKEN_TEMPLATE,
                     limit=500,
                 )
-                return [service._token_record(session, token) for token in tokens]
+                return [service._token_record(token) for token in tokens]
 
     def _cluster_service():
         service = getattr(app.state, "cluster_service", None)

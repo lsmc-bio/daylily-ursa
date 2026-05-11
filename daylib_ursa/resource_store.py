@@ -18,13 +18,10 @@ MANIFEST_EDITOR_OPTION_TEMPLATE = "RGX/manifest/editor-option/1.0/"
 DEWEY_IMPORT_TEMPLATE = "RGX/artifact/dewey-import/1.0/"
 CLIENT_REGISTRATION_TEMPLATE = "RGX/auth/client-registration/1.0/"
 CLUSTER_JOB_TEMPLATE = "RGX/cluster/ephemeral-job/1.0/"
-CLUSTER_JOB_REVISION_TEMPLATE = "RGX/cluster/ephemeral-job-revision/1.0/"
 CLUSTER_JOB_EVENT_TEMPLATE = "RGX/cluster/ephemeral-job-event/1.0/"
 ANALYSIS_JOB_TEMPLATE = "RGX/analysis/launch-job/1.0/"
-ANALYSIS_JOB_REVISION_TEMPLATE = "RGX/analysis/launch-job-revision/1.0/"
 ANALYSIS_JOB_EVENT_TEMPLATE = "RGX/analysis/launch-job-event/1.0/"
 STAGING_JOB_TEMPLATE = "RGX/staging/job/1.0/"
-STAGING_JOB_REVISION_TEMPLATE = "RGX/staging/job-revision/1.0/"
 STAGING_JOB_EVENT_TEMPLATE = "RGX/staging/job-event/1.0/"
 STAGING_JOB_STATES = frozenset({"DEFINED", "STAGING", "COMPLETED", "FAILED"})
 LINKED_BUCKET_TEMPLATE = "RGX/storage/linked-bucket/1.0/"
@@ -241,6 +238,13 @@ class ResourceStore:
         return uuid.UUID(str(value or "").strip())
 
     @staticmethod
+    def _parse_optional_int(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _manifest_from_instance(instance, *, workset_euid: str) -> ManifestRecord:
         payload = from_json_addl(instance)
         return ManifestRecord(
@@ -299,22 +303,6 @@ class ResourceStore:
         )
 
     @staticmethod
-    def _cluster_job_revision_sort_key(instance: Any) -> int:
-        payload = from_json_addl(instance)
-        return int(payload.get("revision_no") or 0)
-
-    def _latest_cluster_job_revision(self, session, job_instance) -> Any | None:
-        revisions = self.backend.list_children(
-            session,
-            parent=job_instance,
-            relationship_type="revision",
-        )
-        if not revisions:
-            return None
-        revisions.sort(key=self._cluster_job_revision_sort_key, reverse=True)
-        return revisions[0]
-
-    @staticmethod
     def _cluster_job_event_from_instance(instance) -> ClusterJobEventRecord:
         payload = from_json_addl(instance)
         return ClusterJobEventRecord(
@@ -330,8 +318,6 @@ class ResourceStore:
 
     def _cluster_job_from_instance(self, session, instance) -> ClusterJobRecord:
         payload = from_json_addl(instance)
-        latest_revision = self._latest_cluster_job_revision(session, instance)
-        revision_payload = from_json_addl(latest_revision) if latest_revision is not None else {}
         events = [
             self._cluster_job_event_from_instance(child)
             for child in self.backend.list_children(
@@ -341,12 +327,6 @@ class ResourceStore:
             )
         ]
         events.sort(key=lambda item: item.created_at, reverse=True)
-        state = str(revision_payload.get("state") or payload.get("state") or instance.bstatus)
-        return_code_raw = revision_payload.get("return_code")
-        try:
-            return_code = int(return_code_raw) if return_code_raw is not None else None
-        except (TypeError, ValueError):
-            return_code = None
         return ClusterJobRecord(
             job_euid=str(instance.euid),
             job_name=str(
@@ -358,39 +338,18 @@ class ResourceStore:
             tenant_id=ResourceStore._parse_tenant_uuid(payload.get("tenant_id")),
             owner_user_id=str(payload.get("owner_user_id") or ""),
             sponsor_user_id=str(payload.get("sponsor_user_id") or ""),
-            state=state,
+            state=str(payload.get("state") or ""),
             created_at=str(payload.get("created_at") or utc_now_iso()),
-            updated_at=str(
-                revision_payload.get("created_at")
-                or payload.get("updated_at")
-                or payload.get("created_at")
-                or utc_now_iso()
-            ),
-            started_at=str(revision_payload.get("started_at") or "").strip() or None,
-            completed_at=str(revision_payload.get("completed_at") or "").strip() or None,
-            return_code=return_code,
-            error=str(revision_payload.get("error") or "").strip() or None,
-            output_summary=str(revision_payload.get("output_summary") or "").strip() or None,
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
+            started_at=str(payload.get("started_at") or "").strip() or None,
+            completed_at=str(payload.get("completed_at") or "").strip() or None,
+            return_code=ResourceStore._parse_optional_int(payload.get("return_code")),
+            error=str(payload.get("error") or "").strip() or None,
+            output_summary=str(payload.get("output_summary") or "").strip() or None,
             request=dict(payload.get("request") or {}),
-            cluster=dict(revision_payload.get("cluster") or {}),
+            cluster=dict(payload.get("cluster") or {}),
             events=events,
         )
-
-    @staticmethod
-    def _analysis_job_revision_sort_key(instance: Any) -> int:
-        payload = from_json_addl(instance)
-        return int(payload.get("revision_no") or 0)
-
-    def _latest_analysis_job_revision(self, session, job_instance) -> Any | None:
-        revisions = self.backend.list_children(
-            session,
-            parent=job_instance,
-            relationship_type="revision",
-        )
-        if not revisions:
-            return None
-        revisions.sort(key=self._analysis_job_revision_sort_key, reverse=True)
-        return revisions[0]
 
     @staticmethod
     def _analysis_job_event_from_instance(instance) -> AnalysisJobEventRecord:
@@ -408,8 +367,6 @@ class ResourceStore:
 
     def _analysis_job_from_instance(self, session, instance) -> AnalysisJobRecord:
         payload = from_json_addl(instance)
-        latest_revision = self._latest_analysis_job_revision(session, instance)
-        revision_payload = from_json_addl(latest_revision) if latest_revision is not None else {}
         events = [
             self._analysis_job_event_from_instance(child)
             for child in self.backend.list_children(
@@ -419,12 +376,6 @@ class ResourceStore:
             )
         ]
         events.sort(key=lambda item: item.created_at, reverse=True)
-        state = str(revision_payload.get("state") or payload.get("state") or instance.bstatus)
-        return_code_raw = revision_payload.get("return_code")
-        try:
-            return_code = int(return_code_raw) if return_code_raw is not None else None
-        except (TypeError, ValueError):
-            return_code = None
         return AnalysisJobRecord(
             job_euid=str(instance.euid),
             job_name=str(instance.name or payload.get("job_name") or payload.get("name") or ""),
@@ -434,39 +385,18 @@ class ResourceStore:
             region=str(payload.get("region") or ""),
             tenant_id=ResourceStore._parse_tenant_uuid(payload.get("tenant_id")),
             owner_user_id=str(payload.get("owner_user_id") or ""),
-            state=state,
+            state=str(payload.get("state") or ""),
             created_at=str(payload.get("created_at") or utc_now_iso()),
-            updated_at=str(
-                revision_payload.get("created_at")
-                or payload.get("updated_at")
-                or payload.get("created_at")
-                or utc_now_iso()
-            ),
-            started_at=str(revision_payload.get("started_at") or "").strip() or None,
-            completed_at=str(revision_payload.get("completed_at") or "").strip() or None,
-            return_code=return_code,
-            error=str(revision_payload.get("error") or "").strip() or None,
-            output_summary=str(revision_payload.get("output_summary") or "").strip() or None,
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
+            started_at=str(payload.get("started_at") or "").strip() or None,
+            completed_at=str(payload.get("completed_at") or "").strip() or None,
+            return_code=ResourceStore._parse_optional_int(payload.get("return_code")),
+            error=str(payload.get("error") or "").strip() or None,
+            output_summary=str(payload.get("output_summary") or "").strip() or None,
             request=dict(payload.get("request") or {}),
-            launch=dict(revision_payload.get("launch") or {}),
+            launch=dict(payload.get("launch") or {}),
             events=events,
         )
-
-    @staticmethod
-    def _staging_job_revision_sort_key(instance: Any) -> int:
-        payload = from_json_addl(instance)
-        return int(payload.get("revision_no") or 0)
-
-    def _latest_staging_job_revision(self, session, job_instance) -> Any | None:
-        revisions = self.backend.list_children(
-            session,
-            parent=job_instance,
-            relationship_type="revision",
-        )
-        if not revisions:
-            return None
-        revisions.sort(key=self._staging_job_revision_sort_key, reverse=True)
-        return revisions[0]
 
     @staticmethod
     def _staging_job_event_from_instance(instance) -> StagingJobEventRecord:
@@ -484,8 +414,6 @@ class ResourceStore:
 
     def _staging_job_from_instance(self, session, instance) -> StagingJobRecord:
         payload = from_json_addl(instance)
-        latest_revision = self._latest_staging_job_revision(session, instance)
-        revision_payload = from_json_addl(latest_revision) if latest_revision is not None else {}
         events = [
             self._staging_job_event_from_instance(child)
             for child in self.backend.list_children(
@@ -495,12 +423,6 @@ class ResourceStore:
             )
         ]
         events.sort(key=lambda item: item.created_at, reverse=True)
-        state = str(revision_payload.get("state") or payload.get("state") or instance.bstatus)
-        return_code_raw = revision_payload.get("return_code")
-        try:
-            return_code = int(return_code_raw) if return_code_raw is not None else None
-        except (TypeError, ValueError):
-            return_code = None
         return StagingJobRecord(
             job_euid=str(instance.euid),
             job_name=str(instance.name or payload.get("job_name") or payload.get("name") or ""),
@@ -510,21 +432,16 @@ class ResourceStore:
             region=str(payload.get("region") or ""),
             tenant_id=ResourceStore._parse_tenant_uuid(payload.get("tenant_id")),
             owner_user_id=str(payload.get("owner_user_id") or ""),
-            state=state,
+            state=str(payload.get("state") or ""),
             created_at=str(payload.get("created_at") or utc_now_iso()),
-            updated_at=str(
-                revision_payload.get("created_at")
-                or payload.get("updated_at")
-                or payload.get("created_at")
-                or utc_now_iso()
-            ),
-            started_at=str(revision_payload.get("started_at") or "").strip() or None,
-            completed_at=str(revision_payload.get("completed_at") or "").strip() or None,
-            return_code=return_code,
-            error=str(revision_payload.get("error") or "").strip() or None,
-            output_summary=str(revision_payload.get("output_summary") or "").strip() or None,
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
+            started_at=str(payload.get("started_at") or "").strip() or None,
+            completed_at=str(payload.get("completed_at") or "").strip() or None,
+            return_code=ResourceStore._parse_optional_int(payload.get("return_code")),
+            error=str(payload.get("error") or "").strip() or None,
+            output_summary=str(payload.get("output_summary") or "").strip() or None,
             request=dict(payload.get("request") or {}),
-            stage=dict(revision_payload.get("stage") or {}),
+            stage=dict(payload.get("stage") or {}),
             events=events,
         )
 
@@ -1153,18 +1070,8 @@ class ResourceStore:
                     "request": dict(request or {}),
                     "created_at": now,
                     "updated_at": now,
-                    "state": "QUEUED",
-                },
-                bstatus="QUEUED",
-                tenant_id=tenant_id,
-            )
-            revision = self.backend.create_instance(
-                session,
-                CLUSTER_JOB_REVISION_TEMPLATE,
-                f"revision:{job.euid}:1",
-                json_addl={
-                    "job_euid": str(job.euid),
-                    "revision_no": 1,
+                    "created_by": sponsor_user_id,
+                    "updated_by": sponsor_user_id,
                     "state": "QUEUED",
                     "started_at": None,
                     "completed_at": None,
@@ -1172,16 +1079,9 @@ class ResourceStore:
                     "error": None,
                     "output_summary": None,
                     "cluster": {},
-                    "created_by": sponsor_user_id,
-                    "created_at": now,
                 },
                 bstatus="QUEUED",
-            )
-            self.backend.create_lineage(
-                session,
-                parent=job,
-                child=revision,
-                relationship_type="revision",
+                tenant_id=tenant_id,
             )
             return self._cluster_job_from_instance(session, job)
 
@@ -1207,51 +1107,33 @@ class ResourceStore:
             )
             if job is None:
                 raise KeyError(f"cluster job not found: {job_euid}")
-            latest_revision = self._latest_cluster_job_revision(session, job)
-            latest_payload = from_json_addl(latest_revision) if latest_revision is not None else {}
-            revision_no = int(latest_payload.get("revision_no") or 0) + 1
+            payload = from_json_addl(job)
             created_at = utc_now_iso()
-            revision = self.backend.create_instance(
-                session,
-                CLUSTER_JOB_REVISION_TEMPLATE,
-                f"revision:{job.euid}:{revision_no}",
-                json_addl={
-                    "job_euid": str(job.euid),
-                    "revision_no": revision_no,
-                    "state": state,
-                    "started_at": started_at
-                    if started_at is not None
-                    else latest_payload.get("started_at"),
-                    "completed_at": completed_at
-                    if completed_at is not None
-                    else latest_payload.get("completed_at"),
-                    "return_code": return_code
-                    if return_code is not None
-                    else latest_payload.get("return_code"),
-                    "error": error if error is not None else latest_payload.get("error"),
-                    "output_summary": (
-                        output_summary
-                        if output_summary is not None
-                        else latest_payload.get("output_summary")
-                    ),
-                    "cluster": dict(cluster or latest_payload.get("cluster") or {}),
-                    "created_by": created_by,
-                    "created_at": created_at,
-                },
-                bstatus=state,
-            )
-            self.backend.create_lineage(
-                session,
-                parent=job,
-                child=revision,
-                relationship_type="revision",
-            )
             self.backend.update_instance_json(
                 session,
                 job,
                 {
-                    "updated_at": created_at,
                     "state": state,
+                    "started_at": started_at
+                    if started_at is not None
+                    else payload.get("started_at"),
+                    "completed_at": (
+                        completed_at if completed_at is not None else payload.get("completed_at")
+                    ),
+                    "return_code": (
+                        return_code if return_code is not None else payload.get("return_code")
+                    ),
+                    "error": error if error is not None else payload.get("error"),
+                    "output_summary": (
+                        output_summary
+                        if output_summary is not None
+                        else payload.get("output_summary")
+                    ),
+                    "cluster": dict(
+                        cluster if cluster is not None else payload.get("cluster") or {}
+                    ),
+                    "updated_by": created_by,
+                    "updated_at": created_at,
                 },
             )
             job.bstatus = state
@@ -1386,18 +1268,8 @@ class ResourceStore:
                     "request": dict(request or {}),
                     "created_at": now,
                     "updated_at": now,
-                    "state": "DEFINED",
-                },
-                bstatus="DEFINED",
-                tenant_id=tenant_id,
-            )
-            revision = self.backend.create_instance(
-                session,
-                ANALYSIS_JOB_REVISION_TEMPLATE,
-                f"revision:{job.euid}:1",
-                json_addl={
-                    "job_euid": str(job.euid),
-                    "revision_no": 1,
+                    "created_by": owner_user_id,
+                    "updated_by": owner_user_id,
                     "state": "DEFINED",
                     "started_at": None,
                     "completed_at": None,
@@ -1405,16 +1277,9 @@ class ResourceStore:
                     "error": None,
                     "output_summary": None,
                     "launch": {},
-                    "created_by": owner_user_id,
-                    "created_at": now,
                 },
                 bstatus="DEFINED",
-            )
-            self.backend.create_lineage(
-                session,
-                parent=job,
-                child=revision,
-                relationship_type="revision",
+                tenant_id=tenant_id,
             )
             self.backend.create_lineage(
                 session,
@@ -1459,53 +1324,31 @@ class ResourceStore:
             )
             if job is None:
                 raise KeyError(f"analysis job not found: {job_euid}")
-            latest_revision = self._latest_analysis_job_revision(session, job)
-            latest_payload = from_json_addl(latest_revision) if latest_revision is not None else {}
-            revision_no = int(latest_payload.get("revision_no") or 0) + 1
+            payload = from_json_addl(job)
             created_at = utc_now_iso()
-            revision = self.backend.create_instance(
-                session,
-                ANALYSIS_JOB_REVISION_TEMPLATE,
-                f"revision:{job.euid}:{revision_no}",
-                json_addl={
-                    "job_euid": str(job.euid),
-                    "revision_no": revision_no,
-                    "state": state,
-                    "started_at": started_at
-                    if started_at is not None
-                    else latest_payload.get("started_at"),
-                    "completed_at": completed_at
-                    if completed_at is not None
-                    else latest_payload.get("completed_at"),
-                    "return_code": return_code
-                    if return_code is not None
-                    else latest_payload.get("return_code"),
-                    "error": error if error is not None else latest_payload.get("error"),
-                    "output_summary": (
-                        output_summary
-                        if output_summary is not None
-                        else latest_payload.get("output_summary")
-                    ),
-                    "launch": dict(
-                        launch if launch is not None else latest_payload.get("launch") or {}
-                    ),
-                    "created_by": created_by,
-                    "created_at": created_at,
-                },
-                bstatus=state,
-            )
-            self.backend.create_lineage(
-                session,
-                parent=job,
-                child=revision,
-                relationship_type="revision",
-            )
             self.backend.update_instance_json(
                 session,
                 job,
                 {
-                    "updated_at": created_at,
                     "state": state,
+                    "started_at": started_at
+                    if started_at is not None
+                    else payload.get("started_at"),
+                    "completed_at": (
+                        completed_at if completed_at is not None else payload.get("completed_at")
+                    ),
+                    "return_code": (
+                        return_code if return_code is not None else payload.get("return_code")
+                    ),
+                    "error": error if error is not None else payload.get("error"),
+                    "output_summary": (
+                        output_summary
+                        if output_summary is not None
+                        else payload.get("output_summary")
+                    ),
+                    "launch": dict(launch if launch is not None else payload.get("launch") or {}),
+                    "updated_by": created_by,
+                    "updated_at": created_at,
                 },
             )
             job.bstatus = state
@@ -1648,18 +1491,8 @@ class ResourceStore:
                     "request": dict(request or {}),
                     "created_at": now,
                     "updated_at": now,
-                    "state": "DEFINED",
-                },
-                bstatus="DEFINED",
-                tenant_id=tenant_id,
-            )
-            revision = self.backend.create_instance(
-                session,
-                STAGING_JOB_REVISION_TEMPLATE,
-                f"revision:{job.euid}:1",
-                json_addl={
-                    "job_euid": str(job.euid),
-                    "revision_no": 1,
+                    "created_by": owner_user_id,
+                    "updated_by": owner_user_id,
                     "state": "DEFINED",
                     "started_at": None,
                     "completed_at": None,
@@ -1667,16 +1500,9 @@ class ResourceStore:
                     "error": None,
                     "output_summary": None,
                     "stage": {},
-                    "created_by": owner_user_id,
-                    "created_at": now,
                 },
                 bstatus="DEFINED",
-            )
-            self.backend.create_lineage(
-                session,
-                parent=job,
-                child=revision,
-                relationship_type="revision",
+                tenant_id=tenant_id,
             )
             self.backend.create_lineage(
                 session,
@@ -1723,53 +1549,31 @@ class ResourceStore:
             )
             if job is None:
                 raise KeyError(f"staging job not found: {job_euid}")
-            latest_revision = self._latest_staging_job_revision(session, job)
-            latest_payload = from_json_addl(latest_revision) if latest_revision is not None else {}
-            revision_no = int(latest_payload.get("revision_no") or 0) + 1
+            payload = from_json_addl(job)
             created_at = utc_now_iso()
-            revision = self.backend.create_instance(
-                session,
-                STAGING_JOB_REVISION_TEMPLATE,
-                f"revision:{job.euid}:{revision_no}",
-                json_addl={
-                    "job_euid": str(job.euid),
-                    "revision_no": revision_no,
-                    "state": state,
-                    "started_at": started_at
-                    if started_at is not None
-                    else latest_payload.get("started_at"),
-                    "completed_at": completed_at
-                    if completed_at is not None
-                    else latest_payload.get("completed_at"),
-                    "return_code": return_code
-                    if return_code is not None
-                    else latest_payload.get("return_code"),
-                    "error": error if error is not None else latest_payload.get("error"),
-                    "output_summary": (
-                        output_summary
-                        if output_summary is not None
-                        else latest_payload.get("output_summary")
-                    ),
-                    "stage": dict(
-                        stage if stage is not None else latest_payload.get("stage") or {}
-                    ),
-                    "created_by": created_by,
-                    "created_at": created_at,
-                },
-                bstatus=state,
-            )
-            self.backend.create_lineage(
-                session,
-                parent=job,
-                child=revision,
-                relationship_type="revision",
-            )
             self.backend.update_instance_json(
                 session,
                 job,
                 {
-                    "updated_at": created_at,
                     "state": state,
+                    "started_at": started_at
+                    if started_at is not None
+                    else payload.get("started_at"),
+                    "completed_at": (
+                        completed_at if completed_at is not None else payload.get("completed_at")
+                    ),
+                    "return_code": (
+                        return_code if return_code is not None else payload.get("return_code")
+                    ),
+                    "error": error if error is not None else payload.get("error"),
+                    "output_summary": (
+                        output_summary
+                        if output_summary is not None
+                        else payload.get("output_summary")
+                    ),
+                    "stage": dict(stage if stage is not None else payload.get("stage") or {}),
+                    "updated_by": created_by,
+                    "updated_at": created_at,
                 },
             )
             job.bstatus = state

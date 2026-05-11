@@ -57,6 +57,26 @@ def test_template_definitions_cover_phase_one_objects() -> None:
     assert "RGX/auth/client-registration/1.0/" in codes
 
 
+def test_template_definitions_exclude_revision_objects() -> None:
+    removed_codes = {
+        "RGX/auth/user-token-revision/1.0/",
+        "RGX/cluster/ephemeral-job-revision/1.0/",
+        "RGX/analysis/launch-job-revision/1.0/",
+        "RGX/staging/job-revision/1.0/",
+    }
+    codes = {spec.template_code for spec in TEMPLATE_DEFINITIONS}
+    assert codes.isdisjoint(removed_codes)
+
+    template_pack = yaml.safe_load(
+        Path("config/tapdb_templates/ursa/templates.json").read_text(encoding="utf-8")
+    )
+    pack_codes = {
+        f"{template['category']}/{template['type']}/{template['subtype']}/{template['version']}/"
+        for template in template_pack["templates"]
+    }
+    assert pack_codes.isdisjoint(removed_codes)
+
+
 def test_template_definitions_are_template_spec_instances() -> None:
     for spec in URSA_TEMPLATE_DEFINITIONS:
         assert isinstance(spec, TemplateSpec)

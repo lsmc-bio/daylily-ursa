@@ -82,7 +82,6 @@ class MemoryBackend:
         self._uid += 1
         prefix = {
             "RGX/auth/user-token/1.0/": "UT",
-            "RGX/auth/user-token-revision/1.0/": "UR",
             "RGX/auth/user-token-usage/1.0/": "UG",
         }.get(template_code, "GI")
         now = datetime.now(timezone.utc)
@@ -134,7 +133,9 @@ class MemoryBackend:
         for instance in self.instances:
             if instance.template_code != template_code:
                 continue
-            if str(instance.json_addl.get(key) or "") == value:
+            properties = instance.json_addl.get("properties")
+            property_value = properties.get(key) if isinstance(properties, dict) else None
+            if str(instance.json_addl.get(key) or property_value or "") == value:
                 return instance
         return None
 
@@ -154,6 +155,15 @@ class MemoryBackend:
         _ = session
         rows = [instance for instance in self.instances if instance.template_code == template_code]
         return list(reversed(rows))[:limit]
+
+    def update_instance_json(self, session, instance, updates):
+        _ = session
+        properties = instance.json_addl.get("properties")
+        if isinstance(properties, dict):
+            properties.update(dict(updates))
+        else:
+            instance.json_addl.update(dict(updates))
+        instance.modified_dt = datetime.now(timezone.utc)
 
 
 class DummyAuthProvider:

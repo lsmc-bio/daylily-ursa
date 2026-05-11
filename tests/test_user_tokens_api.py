@@ -56,7 +56,6 @@ class MemoryBackend:
         self._uid += 1
         prefix = {
             "RGX/auth/user-token/1.0/": "UT",
-            "RGX/auth/user-token-revision/1.0/": "UR",
             "RGX/auth/user-token-usage/1.0/": "UG",
         }.get(template_code, "GI")
         now = datetime.now(timezone.utc)
@@ -108,7 +107,9 @@ class MemoryBackend:
         for instance in self.instances:
             if instance.template_code != template_code:
                 continue
-            if str(instance.json_addl.get(key) or "") == value:
+            properties = instance.json_addl.get("properties")
+            property_value = properties.get(key) if isinstance(properties, dict) else None
+            if str(instance.json_addl.get(key) or property_value or "") == value:
                 return instance
         return None
 
@@ -128,6 +129,15 @@ class MemoryBackend:
         _ = session
         rows = [instance for instance in self.instances if instance.template_code == template_code]
         return list(reversed(rows))[:limit]
+
+    def update_instance_json(self, session, instance, updates):
+        _ = session
+        properties = instance.json_addl.get("properties")
+        if isinstance(properties, dict):
+            properties.update(dict(updates))
+        else:
+            instance.json_addl.update(dict(updates))
+        instance.modified_dt = datetime.now(timezone.utc)
 
 
 class DummyResourceStore:
@@ -213,6 +223,20 @@ def test_user_token_service_create_validate_revoke_and_usage_flow() -> None:
     assert revoked.status == "REVOKED"
     with pytest.raises(AuthError, match="revoked"):
         service.validate_token(plaintext)
+    token_instances = [
+        instance
+        for instance in backend.instances
+        if instance.template_code == "RGX/auth/user-token/1.0/"
+    ]
+    assert [instance.euid for instance in token_instances] == [record.token_euid]
+    assert (
+        backend.list_children(object(), parent=token_instances[0], relationship_type="revision")
+        == []
+    )
+    assert not any("revision" in instance.template_code for instance in backend.instances)
+    assert token_instances[0].json_addl["status"] == "REVOKED"
+    assert token_instances[0].json_addl["revoked_at"]
+    assert token_instances[0].json_addl["last_used_at"]
 
 
 def test_user_token_service_rejects_tokens_without_snapshot() -> None:
@@ -231,7 +255,13 @@ def test_user_token_service_rejects_tokens_without_snapshot() -> None:
                 "tenant_id": str(TENANT_ID),
                 "token_name": "snapshotless token",
                 "token_prefix": service.display_prefix(plaintext),
+                "token_hash": token_hash,
                 "scope": "internal_rw",
+                "status": "ACTIVE",
+                "expires_at": "2099-03-25T00:00:00Z",
+                "last_used_at": None,
+                "revoked_at": None,
+                "note": None,
                 "created_by": USER_ID,
                 "created_at": "2026-03-25T00:00:00Z",
                 "updated_at": "2026-03-25T00:00:00Z",
@@ -239,28 +269,7 @@ def test_user_token_service_rejects_tokens_without_snapshot() -> None:
             bstatus="ACTIVE",
             tenant_id=TENANT_ID,
         )
-        revision = backend.create_instance(
-            session,
-            "RGX/auth/user-token-revision/1.0/",
-            "revision:snapshotless:1",
-            json_addl={
-                "token_euid": token.euid,
-                "token_hash": token_hash,
-                "revision_no": 1,
-                "status": "ACTIVE",
-                "expires_at": "2099-03-25T00:00:00Z",
-                "created_by": USER_ID,
-                "created_at": "2026-03-25T00:00:00Z",
-            },
-            bstatus="ACTIVE",
-            tenant_id=TENANT_ID,
-        )
-        backend.create_lineage(
-            session,
-            parent=token,
-            child=revision,
-            relationship_type="revision",
-        )
+        assert token.euid
 
     with pytest.raises(AuthError, match="snapshot missing; reissue required"):
         service.validate_token(plaintext)
