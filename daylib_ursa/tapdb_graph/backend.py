@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as package_version
 import logging
 import uuid
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import String, cast, or_
+from sqlalchemy.orm.attributes import flag_modified
 
 from daylily_tapdb import generic_instance, generic_instance_lineage, utc_now_iso
 
@@ -379,7 +381,7 @@ class TapDBBackend:
         instance,
         updates: dict[str, Any],
     ) -> None:
-        raw = dict(instance.json_addl or {})
+        raw = deepcopy(instance.json_addl or {})
         props = raw.get("properties")
         if not isinstance(props, dict):
             props = {}
@@ -388,8 +390,9 @@ class TapDBBackend:
         for key, value in normalized.items():
             props[key] = value
         if "tenant_id" in normalized:
-            instance.tenant_id = _coerce_tenant_uuid(normalized.get("tenant_id"))
+                instance.tenant_id = _coerce_tenant_uuid(normalized.get("tenant_id"))
         instance.json_addl = raw
+        flag_modified(instance, "json_addl")
         session.flush()
 
 

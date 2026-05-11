@@ -107,6 +107,59 @@ def test_from_json_addl_handles_none() -> None:
     assert from_json_addl(_FakeInstance()) == {}
 
 
+def test_update_instance_json_replaces_nested_properties_and_marks_dirty(monkeypatch) -> None:
+    flagged: list[tuple[object, str]] = []
+
+    class _FakeSession:
+        flushed = False
+
+        def flush(self) -> None:
+            self.flushed = True
+
+    class _FakeInstance:
+        tenant_id = None
+
+        def __init__(self) -> None:
+            self.original_json = {
+                "properties": {
+                    "state": "DEFINED",
+                    "stage": {},
+                }
+            }
+            self.json_addl = self.original_json
+
+    monkeypatch.setattr(
+        backend_module,
+        "flag_modified",
+        lambda instance, field: flagged.append((instance, field)),
+    )
+
+    instance = _FakeInstance()
+    session = _FakeSession()
+    backend = TapDBBackend.__new__(TapDBBackend)
+
+    backend.update_instance_json(
+        session,
+        instance,
+        {
+            "state": "COMPLETED",
+            "stage": {
+                "stage_dir": "/data/staged_sample_data/example",
+                "stdout": "Remote FSx stage directory: /data/staged_sample_data/example\n",
+            },
+        },
+    )
+
+    assert session.flushed
+    assert flagged == [(instance, "json_addl")]
+    assert instance.json_addl is not instance.original_json
+    assert instance.original_json["properties"]["stage"] == {}
+    assert instance.json_addl["properties"]["state"] == "COMPLETED"
+    assert instance.json_addl["properties"]["stage"]["stage_dir"] == (
+        "/data/staged_sample_data/example"
+    )
+
+
 def test_to_action_history_entry_structure() -> None:
     entry = to_action_history_entry("a", "b", key="val")
     assert entry == {"args": ["a", "b"], "kwargs": {"key": "val"}}
