@@ -238,6 +238,20 @@ def test_wrapped_analysis_payload_updates_survive_review_and_return():
     assert returned.state == "RETURNED"
     assert returned.atlas_return["fulfillment_output_euid"] == "RES-1"
 
+    analysis = _created_instance(store.backend, ANALYSIS_TEMPLATE)
+    payload = from_json_addl(analysis)
+    payload["state"] = "REVIEWED"
+    analysis.bstatus = "REVIEWED"
+    analysis.json_addl = {"properties": payload}
+
+    replayed = store.mark_returned(
+        record.analysis_euid,
+        atlas_return={"fulfillment_output_euid": "RES-1"},
+        idempotency_key="return-1",
+    )
+
+    assert replayed.state == "RETURNED"
+
 
 def test_analysis_store_writes_explicit_tapdb_graph_refs_and_timestamps():
     store = AnalysisStore.__new__(AnalysisStore)

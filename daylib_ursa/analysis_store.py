@@ -653,6 +653,27 @@ class AnalysisStore:
             ):
                 event_payload = from_json_addl(event)
                 if str(event_payload.get("idempotency_key") or "") == idempotency_key:
+                    if payload.get("state") != AnalysisState.RETURNED.value:
+                        returned_at = str(event_payload.get("returned_at") or utc_now_iso())
+                        payload["state"] = AnalysisState.RETURNED.value
+                        payload["result_status"] = str(
+                            event_payload.get("result_status")
+                            or payload.get("result_status")
+                            or "RETURNED"
+                        )
+                        payload["updated_at"] = returned_at
+                        history = list(payload.get("history") or [])
+                        history.append(
+                            {
+                                "timestamp": returned_at,
+                                "state": AnalysisState.RETURNED.value,
+                                "reason": "ATLAS_RETURNED_REPLAY",
+                            }
+                        )
+                        payload["history"] = history
+                        analysis.bstatus = AnalysisState.RETURNED.value
+                        replace_instance_properties(analysis, payload)
+                        session.flush()
                     return self._record_from_instance(
                         session, analysis, self._artifacts(session, analysis)
                     )
