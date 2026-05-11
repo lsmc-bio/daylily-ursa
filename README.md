@@ -26,10 +26,10 @@ Ursa does not own:
 The current package and runtime contracts are intentionally pinned:
 
 - `daylily-ephemeral-cluster @ git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@2.2.4`
-- `daylily-tapdb==6.0.9`
+- `daylily-tapdb @ git+https://github.com/Daylily-Informatics/daylily-tapdb.git@6.0.10`
 - `daylily-auth-cognito==2.1.5`
 - `cli-core-yo==2.1.1`
-- `zebra_day==6.0.2`
+- `zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.4`
 - Python dependencies live only in `pyproject.toml`
 - `environment.yaml` is limited to Python, pip, setuptools, and system/runtime packages
 

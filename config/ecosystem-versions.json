@@ -20,7 +20,7 @@
     },
     "daylily-tapdb": {
       "repo": "Daylily-Informatics/daylily-tapdb",
-      "current": "6.0.9"
+      "current": "6.0.10"
     },
     "cli-core-yo": {
       "repo": "Daylily-Informatics/cli-core-yo",
@@ -28,7 +28,7 @@
     },
     "zebra_day": {
       "repo": "Daylily-Informatics/zebra_day",
-      "current": "6.0.2"
+      "current": "6.0.4"
     },
     "daylily-omics-references": {
       "repo": "Daylily-Informatics/daylily-omics-references",
@@ -42,11 +42,11 @@
       "ephemeral_cluster": "2.2.4",
       "omics_analysis": "0.7.726",
       "cognito": "2.1.5",
-      "tapdb": "6.0.9",
+      "tapdb": "6.0.10",
       "cli_core_yo": "2.1.1",
-      "zebra_day": "6.0.2",
+      "zebra_day": "6.0.4",
       "omics_references": "0.3.1",
-      "notes": "Pinned lsmc-bio daylily-ephemeral-cluster to GitHub tag 2.2.4, daylily-auth-cognito to 2.1.5, daylily-tapdb to 6.0.9, cli-core-yo to 2.1.1, zebra_day to 6.0.2, and lsmc-bio daylily-omics-analysis to GitHub release 0.7.726"
+      "notes": "Pinned lsmc-bio daylily-ephemeral-cluster to GitHub tag 2.2.4, daylily-auth-cognito to 2.1.5, daylily-tapdb to 6.0.10, cli-core-yo to 2.1.1, zebra_day to 6.0.4, and lsmc-bio daylily-omics-analysis to GitHub release 0.7.726"
     },
     {
       "date": "2026-03-03",
