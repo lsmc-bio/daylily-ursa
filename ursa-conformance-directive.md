@@ -17,7 +17,7 @@ Ursa should remain a peer service to Atlas and Bloom. Auth, tenant isolation, da
 | CLI root | Done | `daylib_ursa.cli` builds a `cli-core-yo==2.1.1` `CliSpec` with XDG config, runtime guards, prereqs, JSON policy, and explicit plugins. |
 | CLI callbacks | Partially done | Command modules register through `cli-core-yo`, but several callbacks still use `typer` annotations and exits internally. |
 | TapDB runtime | Done | Ursa uses TapDB `6.0.10`, `TapdbClientBundle`, `TAPDBConnection`, `TemplateManager`, `InstanceFactory`, explicit config paths, and namespace-aware runtime env derivation. |
-| Zebra dependency | Done | Ursa declares Zebra Day `6.0.4` as a direct Python dependency in the single package install set. |
+| Zebra dependency | Done | Ursa declares Zebra Day `6.0.5` as a direct Python dependency in the single package install set. |
 | TapDB backend | Done | `TapDBBackend` writes Ursa resource templates through the TapDB 6.x runtime surface and enforces tenant-aware instance creation/listing patterns. |
 | TapDB admin mount | Done | `/admin/tapdb` mounts the TapDB admin app inside Ursa when enabled, with explicit TapDB context forwarding and `X-API-Key` gating. |
 | Auth package shape | Done | Auth lives under `daylib_ursa/auth/` with `CurrentUser`, web/API auth dependencies, JWT/session handling, user tokens, and user directory integration. |
