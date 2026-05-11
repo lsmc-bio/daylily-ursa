@@ -92,6 +92,11 @@ def expected_fanout_graph(
 ) -> dict[str, Any]:
     return {
         "node_kind": node_kind,
+        "role": node_kind,
+        "expected_fanout_max": int(expected_fanout_max),
+        "fanout_reason": (
+            f"{node_kind} intentionally fans out through {relationship_type} relationships"
+        ),
         "fanout": {
             "classification": "expected",
             "relationship_type": relationship_type,
