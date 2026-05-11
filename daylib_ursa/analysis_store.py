@@ -10,6 +10,13 @@ import uuid
 from daylily_tapdb import generic_instance
 
 from daylib_ursa.tapdb_graph import TapDBBackend, from_json_addl, utc_now_iso
+from daylib_ursa.tapdb_provenance import (
+    dewey_refs_from_inputs,
+    expected_fanout_graph,
+    explicit_ref,
+    payload_with_tapdb_graph,
+    replace_instance_properties,
+)
 from daylib_ursa.tapdb_templates import seed_ursa_templates
 
 
@@ -46,6 +53,7 @@ class RunResolution:
     atlas_trf_euid: str
     atlas_test_euid: str
     atlas_test_fulfillment_item_euid: str
+    sequencing_pool_euid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +142,98 @@ class AnalysisStore:
         payload = dict(from_json_addl(instance))
         payload.pop("properties", None)
         return payload
+
+    @staticmethod
+    def _analysis_graph_metadata() -> dict[str, Any]:
+        return expected_fanout_graph(
+            node_kind="ursa_analysis",
+            relationship_type="analysis_artifact",
+            expected_fanout_max=250,
+        )
+
+    @staticmethod
+    def _resolved_context_refs(
+        resolution: RunResolution, *, timestamp: str
+    ) -> list[dict[str, Any] | None]:
+        return [
+            explicit_ref(
+                service="bloom",
+                relationship_type="uses_bloom_run",
+                target_euid=resolution.run_euid,
+                field_path="run_euid",
+                timestamp=timestamp,
+                target_kind="run",
+            ),
+            explicit_ref(
+                service="bloom",
+                relationship_type="uses_bloom_library",
+                target_euid=resolution.sequenced_library_assignment_euid,
+                field_path="sequenced_library_assignment_euid",
+                timestamp=timestamp,
+                target_kind="sequenced_library_assignment",
+            ),
+            explicit_ref(
+                service="bloom",
+                relationship_type="uses_bloom_pool",
+                target_euid=resolution.sequencing_pool_euid,
+                field_path="sequencing_pool_euid",
+                timestamp=timestamp,
+                target_kind="sequencing_pool",
+            ),
+            explicit_ref(
+                service="atlas",
+                relationship_type="for_atlas_trf",
+                target_euid=resolution.atlas_trf_euid,
+                field_path="atlas_trf_euid",
+                timestamp=timestamp,
+                target_kind="test_request_fulfillment",
+            ),
+            explicit_ref(
+                service="atlas",
+                relationship_type="for_atlas_test",
+                target_euid=resolution.atlas_test_euid,
+                field_path="atlas_test_euid",
+                timestamp=timestamp,
+                target_kind="test",
+            ),
+            explicit_ref(
+                service="atlas",
+                relationship_type="for_atlas_test",
+                target_euid=resolution.atlas_test_fulfillment_item_euid,
+                field_path="atlas_test_fulfillment_item_euid",
+                timestamp=timestamp,
+                target_kind="test_fulfillment_item",
+            ),
+        ]
+
+    @staticmethod
+    def _atlas_return_refs(
+        atlas_return: dict[str, Any], *, timestamp: str
+    ) -> list[dict[str, Any] | None]:
+        refs: list[dict[str, Any] | None] = []
+        for field_path in ("fulfillment_run_euid", "fulfillment_output_euid"):
+            refs.append(
+                explicit_ref(
+                    service="atlas",
+                    relationship_type="returned_to_atlas",
+                    target_euid=atlas_return.get(field_path),
+                    field_path=field_path,
+                    timestamp=timestamp,
+                    target_kind=field_path.removesuffix("_euid"),
+                )
+            )
+        for index, artifact_euid in enumerate(list(atlas_return.get("artifact_euids") or [])):
+            refs.append(
+                explicit_ref(
+                    service="dewey",
+                    relationship_type="registered_result_artifact",
+                    target_euid=artifact_euid,
+                    field_path=f"artifact_euids[{index}]",
+                    timestamp=timestamp,
+                    target_kind="artifact",
+                )
+            )
+        return refs
 
     def _artifact_from_instance(self, instance: generic_instance) -> AnalysisArtifact:
         payload = from_json_addl(instance)
@@ -287,46 +387,61 @@ class AnalysisStore:
                 session,
                 ANALYSIS_TEMPLATE,
                 f"analysis:{resolution.run_euid}:{resolution.lane}:{resolution.library_barcode}",
-                json_addl={
-                    "analysis_type": analysis_type,
-                    "state": AnalysisState.INGESTED.value,
-                    "review_state": ReviewState.PENDING.value,
-                    "result_status": "PENDING",
-                    "internal_bucket": internal_bucket,
-                    "run_folder": f"s3://{internal_bucket}/{resolution.run_euid}/",
-                    "input_references": list(input_references or []),
-                    "metadata": dict(metadata or {}),
-                    "ingest_idempotency_key": idempotency_key,
-                    "created_at": now,
-                    "updated_at": now,
-                    "result_payload": {},
-                    "history": [
-                        {
-                            "timestamp": now,
-                            "state": AnalysisState.INGESTED.value,
-                            "reason": "INGESTED",
-                        }
-                    ],
-                },
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "analysis_type": analysis_type,
+                        "state": AnalysisState.INGESTED.value,
+                        "review_state": ReviewState.PENDING.value,
+                        "result_status": "PENDING",
+                        "internal_bucket": internal_bucket,
+                        "run_folder": f"s3://{internal_bucket}/{resolution.run_euid}/",
+                        "input_references": list(input_references or []),
+                        "metadata": dict(metadata or {}),
+                        "ingest_idempotency_key": idempotency_key,
+                        "created_at": now,
+                        "updated_at": now,
+                        "result_payload": {},
+                        "history": [
+                            {
+                                "timestamp": now,
+                                "state": AnalysisState.INGESTED.value,
+                                "reason": "INGESTED",
+                            }
+                        ],
+                    },
+                    refs=dewey_refs_from_inputs(
+                        input_references=input_references,
+                        timestamp=now,
+                    ),
+                    timestamp=now,
+                    graph=self._analysis_graph_metadata(),
+                ),
                 bstatus=AnalysisState.INGESTED.value,
                 tenant_id=resolution.tenant_id,
             )
+            context_payload = {
+                "run_euid": resolution.run_euid,
+                "flowcell_id": resolution.flowcell_id,
+                "lane": resolution.lane,
+                "library_barcode": resolution.library_barcode,
+                "sequenced_library_assignment_euid": (resolution.sequenced_library_assignment_euid),
+                "tenant_id": str(resolution.tenant_id),
+                "atlas_trf_euid": resolution.atlas_trf_euid,
+                "atlas_test_euid": resolution.atlas_test_euid,
+                "atlas_test_fulfillment_item_euid": (resolution.atlas_test_fulfillment_item_euid),
+                "created_at": now,
+            }
+            if resolution.sequencing_pool_euid:
+                context_payload["sequencing_pool_euid"] = resolution.sequencing_pool_euid
             context = self.backend.create_instance(
                 session,
                 RESOLVED_CONTEXT_TEMPLATE,
                 f"context:{analysis.euid}",
-                json_addl={
-                    "run_euid": resolution.run_euid,
-                    "flowcell_id": resolution.flowcell_id,
-                    "lane": resolution.lane,
-                    "library_barcode": resolution.library_barcode,
-                    "sequenced_library_assignment_euid": resolution.sequenced_library_assignment_euid,
-                    "tenant_id": str(resolution.tenant_id),
-                    "atlas_trf_euid": resolution.atlas_trf_euid,
-                    "atlas_test_euid": resolution.atlas_test_euid,
-                    "atlas_test_fulfillment_item_euid": resolution.atlas_test_fulfillment_item_euid,
-                    "created_at": now,
-                },
+                json_addl=payload_with_tapdb_graph(
+                    context_payload,
+                    refs=self._resolved_context_refs(resolution, timestamp=now),
+                    timestamp=now,
+                ),
                 bstatus="active",
                 tenant_id=resolution.tenant_id,
             )
@@ -373,7 +488,7 @@ class AnalysisStore:
             )
             payload["history"] = history
             analysis.bstatus = state.value
-            analysis.json_addl = payload
+            replace_instance_properties(analysis, payload)
             session.flush()
             return self._record_from_instance(session, analysis, self._artifacts(session, analysis))
 
@@ -401,25 +516,39 @@ class AnalysisStore:
                 parent=analysis,
                 relationship_type="analysis_artifact",
             ):
-                payload = dict(child.json_addl or {})
+                payload = from_json_addl(child)
                 if str(payload.get("artifact_euid") or "") == dewey_artifact_euid:
                     return self._artifact_from_instance(child)
 
+            artifact_created_at = utc_now_iso()
             artifact = self.backend.create_instance(
                 session,
                 ARTIFACT_TEMPLATE,
                 filename,
-                json_addl={
-                    "artifact_euid": dewey_artifact_euid,
-                    "artifact_type": artifact_type,
-                    "storage_uri": storage_uri,
-                    "filename": filename,
-                    "mime_type": mime_type,
-                    "checksum_sha256": checksum_sha256,
-                    "size_bytes": size_bytes,
-                    "metadata": dict(metadata or {}),
-                    "created_at": utc_now_iso(),
-                },
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "artifact_euid": dewey_artifact_euid,
+                        "artifact_type": artifact_type,
+                        "storage_uri": storage_uri,
+                        "filename": filename,
+                        "mime_type": mime_type,
+                        "checksum_sha256": checksum_sha256,
+                        "size_bytes": size_bytes,
+                        "metadata": dict(metadata or {}),
+                        "created_at": artifact_created_at,
+                    },
+                    refs=[
+                        explicit_ref(
+                            service="dewey",
+                            relationship_type="registered_result_artifact",
+                            target_euid=dewey_artifact_euid,
+                            field_path="artifact_euid",
+                            timestamp=artifact_created_at,
+                            target_kind="artifact",
+                        )
+                    ],
+                    timestamp=artifact_created_at,
+                ),
                 bstatus="active",
             )
             self.backend.create_lineage(
@@ -441,7 +570,7 @@ class AnalysisStore:
             )
             payload["history"] = history
             analysis.bstatus = AnalysisState.REVIEW_PENDING.value
-            analysis.json_addl = payload
+            replace_instance_properties(analysis, payload)
             session.flush()
             return self._artifact_from_instance(artifact)
 
@@ -476,7 +605,7 @@ class AnalysisStore:
                 }
             )
             payload["history"] = history
-            analysis.json_addl = payload
+            replace_instance_properties(analysis, payload)
             session.flush()
 
             event = self.backend.create_instance(
@@ -522,7 +651,7 @@ class AnalysisStore:
                 parent=analysis,
                 relationship_type="atlas_return",
             ):
-                event_payload = dict(event.json_addl or {})
+                event_payload = from_json_addl(event)
                 if str(event_payload.get("idempotency_key") or "") == idempotency_key:
                     return self._record_from_instance(
                         session, analysis, self._artifacts(session, analysis)
@@ -544,18 +673,22 @@ class AnalysisStore:
             )
             payload["history"] = history
             analysis.bstatus = AnalysisState.RETURNED.value
-            analysis.json_addl = payload
+            replace_instance_properties(analysis, payload)
             session.flush()
 
             event = self.backend.create_instance(
                 session,
                 RETURN_EVENT_TEMPLATE,
                 f"atlas-return:{analysis_euid}:{returned_at}",
-                json_addl={
-                    **dict(atlas_return),
-                    "idempotency_key": idempotency_key,
-                    "returned_at": returned_at,
-                },
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        **dict(atlas_return),
+                        "idempotency_key": idempotency_key,
+                        "returned_at": returned_at,
+                    },
+                    refs=self._atlas_return_refs(atlas_return, timestamp=returned_at),
+                    timestamp=returned_at,
+                ),
                 bstatus="returned",
             )
             self.backend.create_lineage(

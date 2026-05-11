@@ -106,4 +106,8 @@ class BloomResolverClient:
             atlas_trf_euid=str(body["atlas_trf_euid"]),
             atlas_test_euid=str(body["atlas_test_euid"]),
             atlas_test_fulfillment_item_euid=str(body["atlas_test_fulfillment_item_euid"]),
+            sequencing_pool_euid=str(
+                body.get("sequencing_pool_euid") or body.get("pool_euid") or ""
+            ).strip()
+            or None,
         )

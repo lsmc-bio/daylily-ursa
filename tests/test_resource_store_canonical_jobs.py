@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from daylib_ursa.tapdb_graph import from_json_addl
 from daylib_ursa.resource_store import (
     ANALYSIS_JOB_TEMPLATE,
     CLUSTER_JOB_TEMPLATE,
@@ -110,7 +111,7 @@ class MemoryBackend:
             instance
             for instance in self.instances
             if instance.template_code == template_code
-            and str(instance.json_addl.get(key) or "") == value
+            and str(from_json_addl(instance).get(key) or "") == value
         ]
         return list(reversed(rows))[:limit]
 
@@ -182,6 +183,10 @@ def _assert_no_revision_objects(backend: MemoryBackend, instance: _Instance) -> 
     assert not any("revision" in instance.template_code for instance in backend.instances)
 
 
+def _graph_payload(instance: _Instance) -> dict:
+    return instance.json_addl["properties"]["external_payload"]["tapdb_graph"]
+
+
 def test_cluster_job_statuses_mutate_canonical_job_and_keep_events_as_events() -> None:
     store, backend = _store_with_backend()
 
@@ -233,11 +238,12 @@ def test_cluster_job_statuses_mutate_canonical_job_and_keep_events_as_events() -
         if instance.template_code == CLUSTER_JOB_TEMPLATE
     ] == [queued.job_euid]
     job = _instance_for_euid(backend, queued.job_euid)
-    assert job.json_addl["state"] == "FAILED"
-    assert job.json_addl["started_at"] == "2026-05-11T00:01:00Z"
-    assert job.json_addl["completed_at"] == "2026-05-11T00:02:00Z"
-    assert job.json_addl["return_code"] == 1
-    assert job.json_addl["error"] == "retry failed"
+    job_payload = from_json_addl(job)
+    assert job_payload["state"] == "FAILED"
+    assert job_payload["started_at"] == "2026-05-11T00:01:00Z"
+    assert job_payload["completed_at"] == "2026-05-11T00:02:00Z"
+    assert job_payload["return_code"] == 1
+    assert job_payload["error"] == "retry failed"
     _assert_no_revision_objects(backend, job)
     event_children = backend.list_children(object(), parent=job, relationship_type="event")
     assert [child.euid for child in event_children] == [event.event_euid]
@@ -288,12 +294,93 @@ def test_analysis_job_statuses_mutate_canonical_job_without_revision_children() 
         if instance.template_code == ANALYSIS_JOB_TEMPLATE
     ] == [defined.job_euid]
     job = _instance_for_euid(backend, defined.job_euid)
-    assert job.json_addl["state"] == "FAILED"
-    assert job.json_addl["started_at"] == "2026-05-11T00:03:00Z"
-    assert job.json_addl["completed_at"] == "2026-05-11T00:04:00Z"
-    assert job.json_addl["launch"] == {"slurm_job_id": "42"}
-    assert job.json_addl["return_code"] == 2
+    job_payload = from_json_addl(job)
+    assert job_payload["state"] == "FAILED"
+    assert job_payload["started_at"] == "2026-05-11T00:03:00Z"
+    assert job_payload["completed_at"] == "2026-05-11T00:04:00Z"
+    assert job_payload["launch"] == {"slurm_job_id": "42"}
+    assert job_payload["return_code"] == 2
     _assert_no_revision_objects(backend, job)
+
+
+def test_resource_store_writes_manifest_and_job_graph_payloads() -> None:
+    store, backend = _store_with_backend()
+
+    workset = store.create_workset(
+        name="workset",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        artifact_set_euids=[],
+        metadata={},
+    )
+    manifest = store.create_manifest(
+        workset_euid=workset.workset_euid,
+        name="manifest",
+        artifact_set_euid="AS-1",
+        artifact_euids=["AT-1"],
+        input_references=[
+            {"reference_type": "artifact_euid", "value": "AT-2"},
+            {
+                "reference_type": "artifact_set_euid",
+                "value": "AS-2",
+                "artifact_euids": ["AT-3"],
+            },
+        ],
+        metadata={},
+    )
+    analysis_job = store.create_analysis_job(
+        job_name="analysis",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="cluster",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        request={},
+    )
+    staging_job = store.create_staging_job(
+        job_name="staging",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="cluster",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        request={},
+    )
+
+    manifest_instance = _instance_for_euid(backend, manifest.manifest_euid)
+    manifest_graph = _graph_payload(manifest_instance)
+    assert manifest_graph["generated_at"] == from_json_addl(manifest_instance)["created_at"]
+    assert manifest_graph["inferred_only_dependencies"] == []
+    assert not any(ref["inferred"] for ref in manifest_graph["refs"])
+    assert {(ref["relationship_type"], ref["target_euid"]) for ref in manifest_graph["refs"]} >= {
+        ("uses_fastq_artifact", "AS-1"),
+        ("uses_fastq_artifact", "AT-1"),
+        ("uses_fastq_artifact", "AT-2"),
+        ("uses_fastq_artifact", "AS-2"),
+        ("uses_fastq_artifact", "AT-3"),
+    }
+
+    analysis_job_instance = _instance_for_euid(backend, analysis_job.job_euid)
+    analysis_graph = _graph_payload(analysis_job_instance)
+    assert analysis_graph["refs"] == []
+    assert analysis_graph["inferred_only_dependencies"] == []
+    assert from_json_addl(analysis_job_instance)["graph"]["fanout"] == {
+        "classification": "expected",
+        "relationship_type": "event",
+        "expected_fanout_max": 500,
+    }
+
+    staging_job_instance = _instance_for_euid(backend, staging_job.job_euid)
+    staging_graph = _graph_payload(staging_job_instance)
+    assert staging_graph["refs"] == []
+    assert staging_graph["inferred_only_dependencies"] == []
+    assert from_json_addl(staging_job_instance)["graph"]["fanout"] == {
+        "classification": "expected",
+        "relationship_type": "event",
+        "expected_fanout_max": 500,
+    }
 
 
 def test_staging_job_statuses_mutate_canonical_job_without_revision_children() -> None:
@@ -341,9 +428,10 @@ def test_staging_job_statuses_mutate_canonical_job_without_revision_children() -
         if instance.template_code == STAGING_JOB_TEMPLATE
     ] == [defined.job_euid]
     job = _instance_for_euid(backend, defined.job_euid)
-    assert job.json_addl["state"] == "FAILED"
-    assert job.json_addl["started_at"] == "2026-05-11T00:05:00Z"
-    assert job.json_addl["completed_at"] == "2026-05-11T00:06:00Z"
-    assert job.json_addl["stage"] == {"attempt": 1}
-    assert job.json_addl["return_code"] == 3
+    job_payload = from_json_addl(job)
+    assert job_payload["state"] == "FAILED"
+    assert job_payload["started_at"] == "2026-05-11T00:05:00Z"
+    assert job_payload["completed_at"] == "2026-05-11T00:06:00Z"
+    assert job_payload["stage"] == {"attempt": 1}
+    assert job_payload["return_code"] == 3
     _assert_no_revision_objects(backend, job)

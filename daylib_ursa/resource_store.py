@@ -9,6 +9,11 @@ from daylib_ursa.manifest_editor_options import (
     validate_editor_option_type,
 )
 from daylib_ursa.tapdb_graph import TapDBBackend, from_json_addl, utc_now_iso
+from daylib_ursa.tapdb_provenance import (
+    dewey_refs_from_inputs,
+    expected_fanout_graph,
+    payload_with_tapdb_graph,
+)
 from daylib_ursa.tapdb_templates import seed_ursa_templates
 
 
@@ -243,6 +248,22 @@ class ResourceStore:
             return int(value) if value is not None else None
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _analysis_job_graph_metadata() -> dict[str, Any]:
+        return expected_fanout_graph(
+            node_kind="ursa_analysis_launch_job",
+            relationship_type="event",
+            expected_fanout_max=500,
+        )
+
+    @staticmethod
+    def _staging_job_graph_metadata() -> dict[str, Any]:
+        return expected_fanout_graph(
+            node_kind="ursa_staging_job",
+            relationship_type="event",
+            expected_fanout_max=500,
+        )
 
     @staticmethod
     def _manifest_from_instance(instance, *, workset_euid: str) -> ManifestRecord:
@@ -521,18 +542,27 @@ class ResourceStore:
                 session,
                 MANIFEST_TEMPLATE,
                 name,
-                json_addl={
-                    "workset_euid": workset_euid,
-                    "tenant_id": str(workset_payload.get("tenant_id") or ""),
-                    "owner_user_id": str(workset_payload.get("owner_user_id") or ""),
-                    "artifact_set_euid": artifact_set_euid,
-                    "artifact_euids": list(artifact_euids or []),
-                    "input_references": [dict(item) for item in list(input_references or [])],
-                    "metadata": dict(metadata or {}),
-                    "created_at": now,
-                    "updated_at": now,
-                    "state": "ACTIVE",
-                },
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "workset_euid": workset_euid,
+                        "tenant_id": str(workset_payload.get("tenant_id") or ""),
+                        "owner_user_id": str(workset_payload.get("owner_user_id") or ""),
+                        "artifact_set_euid": artifact_set_euid,
+                        "artifact_euids": list(artifact_euids or []),
+                        "input_references": [dict(item) for item in list(input_references or [])],
+                        "metadata": dict(metadata or {}),
+                        "created_at": now,
+                        "updated_at": now,
+                        "state": "ACTIVE",
+                    },
+                    refs=dewey_refs_from_inputs(
+                        artifact_set_euid=artifact_set_euid,
+                        artifact_euids=list(artifact_euids or []),
+                        input_references=input_references,
+                        timestamp=now,
+                    ),
+                    timestamp=now,
+                ),
                 bstatus="ACTIVE",
                 tenant_id=self._parse_tenant_uuid(workset_payload.get("tenant_id")),
             )
@@ -1257,27 +1287,32 @@ class ResourceStore:
                 session,
                 ANALYSIS_JOB_TEMPLATE,
                 job_name,
-                json_addl={
-                    "job_name": job_name,
-                    "workset_euid": workset_euid,
-                    "manifest_euid": manifest_euid,
-                    "cluster_name": cluster_name,
-                    "region": region,
-                    "tenant_id": str(tenant_id),
-                    "owner_user_id": owner_user_id,
-                    "request": dict(request or {}),
-                    "created_at": now,
-                    "updated_at": now,
-                    "created_by": owner_user_id,
-                    "updated_by": owner_user_id,
-                    "state": "DEFINED",
-                    "started_at": None,
-                    "completed_at": None,
-                    "return_code": None,
-                    "error": None,
-                    "output_summary": None,
-                    "launch": {},
-                },
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "job_name": job_name,
+                        "workset_euid": workset_euid,
+                        "manifest_euid": manifest_euid,
+                        "cluster_name": cluster_name,
+                        "region": region,
+                        "tenant_id": str(tenant_id),
+                        "owner_user_id": owner_user_id,
+                        "request": dict(request or {}),
+                        "created_at": now,
+                        "updated_at": now,
+                        "created_by": owner_user_id,
+                        "updated_by": owner_user_id,
+                        "state": "DEFINED",
+                        "started_at": None,
+                        "completed_at": None,
+                        "return_code": None,
+                        "error": None,
+                        "output_summary": None,
+                        "launch": {},
+                    },
+                    refs=[],
+                    timestamp=now,
+                    graph=self._analysis_job_graph_metadata(),
+                ),
                 bstatus="DEFINED",
                 tenant_id=tenant_id,
             )
@@ -1480,27 +1515,32 @@ class ResourceStore:
                 session,
                 STAGING_JOB_TEMPLATE,
                 job_name,
-                json_addl={
-                    "job_name": job_name,
-                    "workset_euid": workset_euid,
-                    "manifest_euid": manifest_euid,
-                    "cluster_name": cluster_name,
-                    "region": region,
-                    "tenant_id": str(tenant_id),
-                    "owner_user_id": owner_user_id,
-                    "request": dict(request or {}),
-                    "created_at": now,
-                    "updated_at": now,
-                    "created_by": owner_user_id,
-                    "updated_by": owner_user_id,
-                    "state": "DEFINED",
-                    "started_at": None,
-                    "completed_at": None,
-                    "return_code": None,
-                    "error": None,
-                    "output_summary": None,
-                    "stage": {},
-                },
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "job_name": job_name,
+                        "workset_euid": workset_euid,
+                        "manifest_euid": manifest_euid,
+                        "cluster_name": cluster_name,
+                        "region": region,
+                        "tenant_id": str(tenant_id),
+                        "owner_user_id": owner_user_id,
+                        "request": dict(request or {}),
+                        "created_at": now,
+                        "updated_at": now,
+                        "created_by": owner_user_id,
+                        "updated_by": owner_user_id,
+                        "state": "DEFINED",
+                        "started_at": None,
+                        "completed_at": None,
+                        "return_code": None,
+                        "error": None,
+                        "output_summary": None,
+                        "stage": {},
+                    },
+                    refs=[],
+                    timestamp=now,
+                    graph=self._staging_job_graph_metadata(),
+                ),
                 bstatus="DEFINED",
                 tenant_id=tenant_id,
             )
