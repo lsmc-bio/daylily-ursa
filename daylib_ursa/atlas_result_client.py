@@ -60,6 +60,7 @@ class AtlasResultClient:
         result_payload: dict[str, Any],
         artifacts: list[AtlasResultArtifact],
         idempotency_key: str,
+        launch_job_euid: str | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         url = (
@@ -96,6 +97,9 @@ class AtlasResultClient:
                 for artifact in artifacts
             ],
         }
+        clean_launch_job_euid = str(launch_job_euid or "").strip()
+        if clean_launch_job_euid:
+            payload["launch_job_euid"] = clean_launch_job_euid
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",

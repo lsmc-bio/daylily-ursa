@@ -31,6 +31,10 @@ def _parse_stage_dir(stdout: str) -> str:
     return match.group("path").strip()
 
 
+def _combined_output(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part for part in (result.stdout or "", result.stderr or "") if part)
+
+
 def _tail_lines(value: str, lines: int) -> str:
     if lines <= 0:
         raise ValueError("lines must be greater than zero")
@@ -79,7 +83,12 @@ class StagingJobManager:
         )
         if result.returncode != 0:
             raise RuntimeError(_summarize_process_output(result))
-        return result, _parse_stage_dir(result.stdout or "")
+        try:
+            stage_dir = _parse_stage_dir(_combined_output(result))
+        except RuntimeError as exc:
+            summary = _summarize_process_output(result)
+            raise RuntimeError(f"{exc}: {summary}") from exc
+        return result, stage_dir
 
     def run_job(self, job_euid: str, *, actor_user_id: str) -> StagingJobRecord:
         job = self.resource_store.get_staging_job(job_euid)

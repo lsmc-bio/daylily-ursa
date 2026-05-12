@@ -992,6 +992,20 @@ def _analysis_response(record: AnalysisRecord) -> AnalysisResponse:
     )
 
 
+def _analysis_launch_job_euid(
+    record: AnalysisRecord, result_payload: dict[str, Any]
+) -> str | None:
+    for source in (
+        result_payload,
+        record.result_payload,
+        record.metadata,
+    ):
+        value = str((source or {}).get("analysis_job_euid") or "").strip()
+        if value:
+            return value
+    return None
+
+
 def _manifest_response(record: ManifestRecord) -> ManifestResponse:
     return ManifestResponse(**record.__dict__)
 
@@ -3292,6 +3306,7 @@ def create_app(
                 result_payload=payload.result_payload,
                 artifacts=atlas_artifacts,
                 idempotency_key=str(idempotency_key),
+                launch_job_euid=_analysis_launch_job_euid(record, payload.result_payload),
                 request_id=str(getattr(request.state, "request_id", "") or ""),
             )
             record_observed_dependency("atlas")
