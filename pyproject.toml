@@ -25,7 +25,7 @@ dependencies = [
     # TapDB graph persistence
     "daylily-tapdb @ git+https://github.com/Daylily-Informatics/daylily-tapdb.git@6.0.10",
     # Ephemeral cluster API/CLI contract
-    "daylily-ephemeral-cluster @ git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@2.2.4",
+    "daylily-ephemeral-cluster @ git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@2.2.8",
     # Shared Zebra runtime contract
     "zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.5",
     "fastapi>=0.104.0",
