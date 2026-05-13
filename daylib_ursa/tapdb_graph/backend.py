@@ -41,6 +41,7 @@ URSA_TEMPLATE_DEFINITIONS: list[TemplateSpec] = [
     TemplateSpec("RGX/artifact/analysis-output/1.0/"),
     TemplateSpec("RGX/analysis/review-event/1.0/"),
     TemplateSpec("RGX/analysis/atlas-return/1.0/"),
+    TemplateSpec("RGX/queue/beta-record/1.0/"),
     TemplateSpec("RGX/reference/sequenced-assignment-context/1.0/"),
     TemplateSpec("RGX/workset/gui-ready/1.0/"),
     TemplateSpec("RGX/manifest/dewey-bound/1.0/"),

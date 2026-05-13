@@ -54,6 +54,19 @@
       "json_addl": {}
     },
     {
+      "name": "Ursa Beta Queue Record",
+      "polymorphic_discriminator": "action_template",
+      "category": "RGX",
+      "type": "queue",
+      "subtype": "beta-record",
+      "version": "1.0",
+      "instance_prefix": "RGX",
+      "instance_polymorphic_identity": "action_instance",
+      "bstatus": "active",
+      "is_singleton": false,
+      "json_addl": {}
+    },
+    {
       "name": "Ursa Sequenced Assignment Context",
       "polymorphic_discriminator": "generic_template",
       "category": "RGX",

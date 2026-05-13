@@ -13,6 +13,7 @@ from daylib_ursa.analysis_store import (
     AnalysisState,
     ReviewState,
     RunResolution,
+    UrsaQueueRecord,
 )
 from daylib_ursa.auth import CurrentUser, Role
 from daylib_ursa.config import Settings
@@ -50,6 +51,8 @@ class DummyStore:
             artifacts=[],
         )
         self.last_ingest = None
+        self.queue_records: dict[str, UrsaQueueRecord] = {}
+        self.queue_record_calls: list[dict[str, object]] = []
 
     def ingest_analysis(self, **kwargs):
         self.last_ingest = kwargs
@@ -117,6 +120,59 @@ class DummyStore:
             updated_at="2026-03-07T04:00:00Z",
         )
         return self.record
+
+    def list_queue_records(self, *, queue_name, tenant_id=None, state=None, limit=200):
+        _ = limit
+        records = [
+            record
+            for record in self.queue_records.values()
+            if record.queue_name == queue_name
+            and (tenant_id is None or record.tenant_id == tenant_id)
+            and (not state or record.state == state)
+        ]
+        return records
+
+    def get_queue_record(self, queue_record_euid: str):
+        return self.queue_records.get(queue_record_euid)
+
+    def create_queue_record(self, **kwargs):
+        self.queue_record_calls.append(kwargs)
+        existing = next(
+            (
+                record
+                for record in self.queue_records.values()
+                if record.idempotency_key == kwargs["idempotency_key"]
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        record = UrsaQueueRecord(
+            queue_record_euid=f"UQ-{len(self.queue_records) + 1}",
+            queue_name=kwargs["queue_name"],
+            object_euid=kwargs["object_euid"],
+            object_type=kwargs["object_type"],
+            tenant_id=kwargs["tenant_id"],
+            state=kwargs["state"],
+            idempotency_key=kwargs["idempotency_key"],
+            metadata=kwargs.get("metadata") or {},
+            related_euids=kwargs.get("related_euids") or {},
+            created_at="2026-03-07T05:00:00Z",
+            updated_at="2026-03-07T05:00:00Z",
+        )
+        self.queue_records[record.queue_record_euid] = record
+        return record
+
+    def transition_queue_record(self, queue_record_euid: str, **kwargs):
+        record = self.queue_records[queue_record_euid]
+        updated = replace(
+            record,
+            state=kwargs["state"],
+            metadata={**record.metadata, **(kwargs.get("metadata") or {})},
+            updated_at="2026-03-07T06:00:00Z",
+        )
+        self.queue_records[queue_record_euid] = updated
+        return updated
 
 
 class DummyBloomClient:
@@ -319,6 +375,73 @@ def test_analysis_list_get_and_status_routes() -> None:
     assert status_update.json()["state"] == "REVIEW_PENDING"
     assert status_update.json()["result_status"] == "RUNNING"
     assert status_update.json()["metadata"]["phase"] == "qc"
+
+
+def test_beta_queue_routes_create_list_and_transition_records() -> None:
+    store = DummyStore()
+    app = _create_test_app(
+        store,
+        bloom_client=DummyBloomClient(),
+        auth_provider=DummyAuthProvider(),
+        settings=_settings(),
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/beta/queues/analysis_ready/items",
+            headers={
+                "Authorization": "Bearer atlas-token",
+                "Idempotency-Key": "analysis-ready-1",
+            },
+            json={
+                "object_euid": "DWY-FASTQ-1",
+                "object_type": "dewey_fastq_artifact",
+                "metadata": {"product_code": "ILMN_PROBAND"},
+                "related_euids": {
+                    "atlas_test_euid": "TST-1",
+                    "bloom_run_euid": "RUN-1",
+                    "dewey_artifact_euid": "DWY-FASTQ-1",
+                },
+            },
+        )
+        listed = client.get(
+            "/api/v1/beta/queues/analysis_ready/items",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        transitioned = client.post(
+            "/api/v1/beta/queues/analysis_ready/items/UQ-1/transition",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={"state": "selected", "metadata": {"manifest_euid": "MF-1"}},
+        )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["queue_name"] == "analysis_ready"
+    assert created.json()["object_euid"] == "DWY-FASTQ-1"
+    assert created.json()["metadata"]["product_code"] == "ILMN_PROBAND"
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["queue_record_euid"] == "UQ-1"
+    assert transitioned.status_code == 200, transitioned.text
+    assert transitioned.json()["state"] == "selected"
+    assert transitioned.json()["metadata"]["manifest_euid"] == "MF-1"
+
+
+def test_beta_queue_create_requires_idempotency_key() -> None:
+    app = _create_test_app(
+        DummyStore(),
+        bloom_client=DummyBloomClient(),
+        auth_provider=DummyAuthProvider(),
+        settings=_settings(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/beta/queues/analysis_ready/items",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={"object_euid": "DWY-FASTQ-1", "object_type": "dewey_fastq_artifact"},
+        )
+
+    assert response.status_code == 400
+    assert "Idempotency-Key" in response.text
 
 
 def test_settings_reject_non_https_cross_service_urls():

@@ -41,11 +41,11 @@ def _parse_launch_markers(stdout: str) -> dict[str, str]:
 def _snakemake_log_reports_success(text: str) -> bool:
     if not text:
         return False
-    if re.search(r"\b(error|failed|traceback)\b", text, re.IGNORECASE):
-        return False
     for match in _SNAKEMAKE_COMPLETE_RE.finditer(text):
         if match.group("done") == match.group("total"):
             return True
+    if re.search(r"\b(error|failed|traceback)\b", text, re.IGNORECASE):
+        return False
     return False
 
 

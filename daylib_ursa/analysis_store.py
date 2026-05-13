@@ -39,7 +39,30 @@ ANALYSIS_TEMPLATE = "RGX/analysis/run-linked/1.0/"
 ARTIFACT_TEMPLATE = "RGX/artifact/analysis-output/1.0/"
 REVIEW_EVENT_TEMPLATE = "RGX/analysis/review-event/1.0/"
 RETURN_EVENT_TEMPLATE = "RGX/analysis/atlas-return/1.0/"
+QUEUE_RECORD_TEMPLATE = "RGX/queue/beta-record/1.0/"
 RESOLVED_CONTEXT_TEMPLATE = "RGX/reference/sequenced-assignment-context/1.0/"
+BETA_QUEUE_NAMES = {
+    "analysis_ready",
+    "analysis_qc",
+    "report_generation",
+    "analysis_exception",
+    "report_generation_exception",
+}
+QUEUE_RELATED_EUID_GRAPH_REFS = {
+    "atlas_test_euid": ("atlas", "for_atlas_test", "test"),
+    "atlas_trf_euid": ("atlas", "for_atlas_trf", "trf"),
+    "bloom_library_euid": ("bloom", "uses_bloom_library", "library"),
+    "bloom_pool_euid": ("bloom", "uses_bloom_pool", "pool"),
+    "bloom_run_euid": ("bloom", "uses_bloom_run", "run"),
+    "dewey_fastq_r1_euid": ("dewey", "uses_fastq_artifact", "fastq_artifact"),
+    "dewey_fastq_r2_euid": ("dewey", "uses_fastq_artifact", "fastq_artifact"),
+    "dewey_result_directory_euid": (
+        "dewey",
+        "registered_result_artifact",
+        "result_directory",
+    ),
+    "dewey_vcf_artifact_euid": ("dewey", "registered_result_artifact", "vcf_artifact"),
+}
 
 
 @dataclass(frozen=True)
@@ -97,6 +120,21 @@ class AnalysisRecord:
     artifacts: list[AnalysisArtifact]
 
 
+@dataclass(frozen=True)
+class UrsaQueueRecord:
+    queue_record_euid: str
+    queue_name: str
+    object_euid: str
+    object_type: str
+    tenant_id: uuid.UUID
+    state: str
+    idempotency_key: str
+    metadata: dict[str, Any]
+    related_euids: dict[str, str]
+    created_at: str
+    updated_at: str
+
+
 class AnalysisStore:
     """Stores Ursa beta analysis execution state in TapDB generic instances."""
 
@@ -137,6 +175,16 @@ class AnalysisStore:
             value=idempotency_key,
         )
 
+    def _find_queue_record_by_idempotency_key(
+        self, session, idempotency_key: str
+    ) -> generic_instance | None:
+        return self.backend.find_instance_by_external_id(
+            session,
+            template_code=QUEUE_RECORD_TEMPLATE,
+            key="idempotency_key",
+            value=idempotency_key,
+        )
+
     @staticmethod
     def _payload(instance: generic_instance) -> dict[str, Any]:
         payload = dict(from_json_addl(instance))
@@ -150,6 +198,49 @@ class AnalysisStore:
             relationship_type="analysis_artifact",
             expected_fanout_max=250,
         )
+
+    @staticmethod
+    def _validate_queue_name(queue_name: str) -> str:
+        normalized = str(queue_name or "").strip()
+        if normalized not in BETA_QUEUE_NAMES:
+            raise ValueError(f"Unsupported Ursa beta queue: {queue_name}")
+        return normalized
+
+    @staticmethod
+    def _queue_refs(
+        *,
+        object_euid: str,
+        object_type: str,
+        related_euids: dict[str, str],
+        timestamp: str,
+    ) -> list[dict[str, Any] | None]:
+        refs: list[dict[str, Any] | None] = [
+            explicit_ref(
+                service="ursa",
+                relationship_type=f"queues_{object_type or 'object'}",
+                target_euid=object_euid,
+                field_path="object_euid",
+                timestamp=timestamp,
+                target_kind=object_type or "object",
+            )
+        ]
+        for field_path, target_euid in related_euids.items():
+            service = "ursa"
+            relationship_type = f"related_{field_path}"
+            target_kind = field_path
+            if field_path in QUEUE_RELATED_EUID_GRAPH_REFS:
+                service, relationship_type, target_kind = QUEUE_RELATED_EUID_GRAPH_REFS[field_path]
+            refs.append(
+                explicit_ref(
+                    service=service,
+                    relationship_type=relationship_type,
+                    target_euid=target_euid,
+                    field_path=f"related_euids.{field_path}",
+                    timestamp=timestamp,
+                    target_kind=target_kind,
+                )
+            )
+        return refs
 
     @staticmethod
     def _resolved_context_refs(
@@ -249,6 +340,28 @@ class AnalysisStore:
             else None,
             created_at=str(payload.get("created_at") or utc_now_iso()),
             metadata=dict(payload.get("metadata") or {}),
+        )
+
+    def _queue_record_from_instance(self, instance: generic_instance) -> UrsaQueueRecord:
+        payload = from_json_addl(instance)
+        return UrsaQueueRecord(
+            queue_record_euid=str(instance.euid),
+            queue_name=str(payload.get("queue_name") or ""),
+            object_euid=str(payload.get("object_euid") or ""),
+            object_type=str(payload.get("object_type") or ""),
+            tenant_id=self._parse_tenant_uuid(payload.get("tenant_id")),
+            state=str(payload.get("state") or instance.bstatus or ""),
+            idempotency_key=str(payload.get("idempotency_key") or ""),
+            metadata=dict(payload.get("metadata") or {}),
+            related_euids={
+                str(key): str(value)
+                for key, value in dict(payload.get("related_euids") or {}).items()
+                if str(value or "").strip()
+            },
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+            updated_at=str(
+                payload.get("updated_at") or payload.get("created_at") or utc_now_iso()
+            ),
         )
 
     def _context_payload(self, session, analysis: generic_instance) -> dict[str, Any]:
@@ -365,6 +478,150 @@ class AnalysisStore:
                 records.append(record)
             return records
 
+    def list_queue_records(
+        self,
+        *,
+        queue_name: str,
+        tenant_id: uuid.UUID | None = None,
+        state: str | None = None,
+        limit: int = 200,
+    ) -> list[UrsaQueueRecord]:
+        normalized_queue = self._validate_queue_name(queue_name)
+        normalized_state = str(state or "").strip()
+        with self.backend.session_scope(commit=False) as session:
+            rows = self.backend.list_instances_by_template(
+                session,
+                template_code=QUEUE_RECORD_TEMPLATE,
+                limit=limit,
+            )
+            records: list[UrsaQueueRecord] = []
+            for row in rows:
+                record = self._queue_record_from_instance(row)
+                if record.queue_name != normalized_queue:
+                    continue
+                if tenant_id is not None and record.tenant_id != tenant_id:
+                    continue
+                if normalized_state and record.state != normalized_state:
+                    continue
+                records.append(record)
+            return records
+
+    def get_queue_record(self, queue_record_euid: str) -> UrsaQueueRecord | None:
+        with self.backend.session_scope(commit=False) as session:
+            record = self.backend.find_instance_by_euid(
+                session,
+                template_code=QUEUE_RECORD_TEMPLATE,
+                value=queue_record_euid,
+            )
+            if record is None:
+                return None
+            return self._queue_record_from_instance(record)
+
+    def create_queue_record(
+        self,
+        *,
+        queue_name: str,
+        object_euid: str,
+        object_type: str,
+        tenant_id: uuid.UUID,
+        state: str,
+        metadata: dict[str, Any] | None,
+        related_euids: dict[str, str] | None,
+        idempotency_key: str,
+    ) -> UrsaQueueRecord:
+        normalized_queue = self._validate_queue_name(queue_name)
+        clean_object_euid = str(object_euid or "").strip()
+        clean_object_type = str(object_type or "").strip()
+        clean_state = str(state or "").strip() or "queued"
+        clean_idempotency_key = str(idempotency_key or "").strip()
+        if not clean_object_euid:
+            raise ValueError("object_euid is required")
+        if not clean_object_type:
+            raise ValueError("object_type is required")
+        if not clean_idempotency_key:
+            raise ValueError("idempotency_key is required")
+        with self.backend.session_scope(commit=True) as session:
+            existing = self._find_queue_record_by_idempotency_key(
+                session,
+                clean_idempotency_key,
+            )
+            if existing is not None:
+                return self._queue_record_from_instance(existing)
+            now = utc_now_iso()
+            compact_related = {
+                str(key): str(value).strip()
+                for key, value in dict(related_euids or {}).items()
+                if str(value or "").strip()
+            }
+            record = self.backend.create_instance(
+                session,
+                QUEUE_RECORD_TEMPLATE,
+                f"{normalized_queue}:{clean_object_euid}",
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "queue_name": normalized_queue,
+                        "object_euid": clean_object_euid,
+                        "object_type": clean_object_type,
+                        "tenant_id": str(tenant_id),
+                        "state": clean_state,
+                        "metadata": dict(metadata or {}),
+                        "related_euids": compact_related,
+                        "idempotency_key": clean_idempotency_key,
+                        "created_at": now,
+                        "updated_at": now,
+                    },
+                    refs=self._queue_refs(
+                        object_euid=clean_object_euid,
+                        object_type=clean_object_type,
+                        related_euids=compact_related,
+                        timestamp=now,
+                    ),
+                    timestamp=now,
+                    graph=expected_fanout_graph(
+                        node_kind="ursa_beta_queue_record",
+                        relationship_type="queue_record_subject",
+                        expected_fanout_max=16,
+                    ),
+                ),
+                bstatus=clean_state,
+                tenant_id=tenant_id,
+            )
+            return self._queue_record_from_instance(record)
+
+    def transition_queue_record(
+        self,
+        queue_record_euid: str,
+        *,
+        state: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> UrsaQueueRecord:
+        clean_state = str(state or "").strip()
+        if not clean_state:
+            raise ValueError("state is required")
+        with self.backend.session_scope(commit=True) as session:
+            record = self.backend.find_instance_by_euid(
+                session,
+                template_code=QUEUE_RECORD_TEMPLATE,
+                value=queue_record_euid,
+                for_update=True,
+            )
+            if record is None:
+                raise KeyError(f"queue record not found: {queue_record_euid}")
+            payload = self._payload(record)
+            payload["state"] = clean_state
+            payload["updated_at"] = utc_now_iso()
+            if metadata:
+                merged = dict(payload.get("metadata") or {})
+                merged.update(metadata)
+                payload["metadata"] = merged
+            history = list(payload.get("history") or [])
+            history.append({"timestamp": payload["updated_at"], "state": clean_state})
+            payload["history"] = history
+            record.bstatus = clean_state
+            replace_instance_properties(record, payload)
+            session.flush()
+            return self._queue_record_from_instance(record)
+
     def ingest_analysis(
         self,
         *,
@@ -441,6 +698,11 @@ class AnalysisStore:
                     context_payload,
                     refs=self._resolved_context_refs(resolution, timestamp=now),
                     timestamp=now,
+                    graph=expected_fanout_graph(
+                        node_kind="ursa_resolved_context",
+                        relationship_type="resolved_context",
+                        expected_fanout_max=10,
+                    ),
                 ),
                 bstatus="active",
                 tenant_id=resolution.tenant_id,
