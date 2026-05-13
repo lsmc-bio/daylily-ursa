@@ -12,6 +12,7 @@ from daylib_ursa.tapdb_graph import utc_now_iso
 
 
 _MARKER_RE = re.compile(r"^__(?P<name>DAYLILY_[A-Z_]+)__=(?P<value>.*)$", re.MULTILINE)
+_SNAKEMAKE_COMPLETE_RE = re.compile(r"\b(?P<done>\d+) of (?P<total>\d+) steps \(100%\) done\b")
 
 
 def _safe_session_name(job_euid: str) -> str:
@@ -37,8 +38,19 @@ def _parse_launch_markers(stdout: str) -> dict[str, str]:
     }
 
 
+def _snakemake_log_reports_success(text: str) -> bool:
+    if not text:
+        return False
+    for match in _SNAKEMAKE_COMPLETE_RE.finditer(text):
+        if match.group("done") == match.group("total"):
+            return True
+    if re.search(r"\b(error|failed|traceback)\b", text, re.IGNORECASE):
+        return False
+    return False
+
+
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec 2.1.12."""
+    """Launch manager for Ursa analysis jobs through daylily-ec 2.2.8."""
 
     def __init__(
         self,
@@ -297,6 +309,28 @@ class AnalysisJobManager:
         launch["status"] = status_payload
         exit_code = status_payload.get("exit_code")
         completed_at = str(status_payload.get("completed_at") or "").strip() or None
+        completion_source = "workflow_status"
+        if exit_code is None:
+            logs = self.client.workflow_logs(
+                session_name=session_name,
+                region=job.region,
+                cluster_name=job.cluster_name,
+                lines=500,
+            )
+            log_text = "\n".join(
+                item for item in (logs.stdout or "", logs.stderr or "") if item
+            )
+            if logs.returncode == 0 and _snakemake_log_reports_success(log_text):
+                exit_code = 0
+                completed_at = completed_at or utc_now_iso()
+                status_payload = {
+                    **status_payload,
+                    "exit_code": 0,
+                    "completed_at": completed_at,
+                    "completion_source": "snakemake_log",
+                }
+                launch["status"] = status_payload
+                completion_source = "snakemake_log"
         if exit_code is None:
             state = "RUNNING"
             return_code = job.return_code
@@ -320,7 +354,7 @@ class AnalysisJobManager:
             event_type="refresh",
             status=state,
             summary=f"Workflow status refreshed: {state}",
-            details=status_payload,
+            details={**status_payload, "completion_source": completion_source},
             created_by=actor_user_id,
         )
         return record

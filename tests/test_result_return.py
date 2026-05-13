@@ -171,7 +171,7 @@ def test_return_analysis_result_calls_atlas_and_marks_returned():
                 "X-Request-ID": "req-ursa-endpoint-1",
             },
             json={
-                "result_payload": {"calls": []},
+                "result_payload": {"calls": [], "analysis_job_euid": " AJ-1 "},
                 "result_status": "COMPLETED",
             },
         )
@@ -183,8 +183,43 @@ def test_return_analysis_result_calls_atlas_and_marks_returned():
     assert body["tenant_id"] == str(TENANT_ID)
     assert atlas.calls[0]["atlas_test_fulfillment_item_euid"] == "TPC-1"
     assert atlas.calls[0]["atlas_tenant_id"] == str(TENANT_ID)
+    assert atlas.calls[0]["launch_job_euid"] == "AJ-1"
     assert atlas.calls[0]["request_id"] == "req-ursa-endpoint-1"
     assert store.mark_returned_calls[0]["idempotency_key"] == "return-1"
+
+
+def test_return_analysis_result_uses_stored_analysis_job_euid_when_request_omits_it():
+    store = DummyStore()
+    store.record = replace(
+        store.record,
+        review_state=ReviewState.APPROVED.value,
+        state=AnalysisState.REVIEWED.value,
+        result_payload={"analysis_job_euid": " AJ-STORED "},
+    )
+    atlas = DummyAtlasClient()
+    app = _create_test_app(
+        store,
+        bloom_client=DummyBloomClient(),
+        atlas_client=atlas,
+        auth_provider=DummyAuthProvider(),
+        settings=_settings(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/analyses/AN-1/return",
+            headers={
+                "Authorization": "Bearer atlas-token",
+                "Idempotency-Key": "return-1",
+            },
+            json={
+                "result_payload": {"calls": []},
+                "result_status": "COMPLETED",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert atlas.calls[0]["launch_job_euid"] == "AJ-STORED"
 
 
 def test_return_analysis_result_requires_manual_approval():
@@ -307,6 +342,7 @@ def test_atlas_result_client_uses_bearer_auth_and_request_id():
         result_payload={},
         artifacts=[],
         idempotency_key="idem-2",
+        launch_job_euid=" AJ-1 ",
         request_id="req-ursa-return-1",
     )
 
@@ -314,6 +350,7 @@ def test_atlas_result_client_uses_bearer_auth_and_request_id():
     assert captured["headers"]["Authorization"] == "Bearer atlas-token"
     assert captured["headers"]["Idempotency-Key"] == "idem-2"
     assert captured["headers"]["X-Request-ID"] == "req-ursa-return-1"
+    assert captured["json"]["launch_job_euid"] == "AJ-1"
 
 
 def test_create_app_rejects_no_auth_write_mode():

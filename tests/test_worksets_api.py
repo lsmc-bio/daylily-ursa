@@ -475,33 +475,37 @@ class MemoryResourceStore:
             tenant_id=record.tenant_id,
             owner_user_id=record.owner_user_id,
             display_name=updates.get("display_name", record.display_name),
-            metadata=record.metadata
-            if updates.get("metadata") is None
-            else updates.get("metadata"),
+            metadata=(
+                record.metadata if updates.get("metadata") is None else updates.get("metadata")
+            ),
             created_at=record.created_at,
             updated_at="2026-03-25T00:20:30Z",
             state=record.state,
-            bucket_type=record.bucket_type
-            if updates.get("bucket_type") is None
-            else updates.get("bucket_type"),
+            bucket_type=(
+                record.bucket_type
+                if updates.get("bucket_type") is None
+                else updates.get("bucket_type")
+            ),
             description=updates.get("description", record.description),
             prefix_restriction=updates.get("prefix_restriction", record.prefix_restriction),
-            read_only=record.read_only
-            if updates.get("read_only") is None
-            else updates.get("read_only"),
+            read_only=(
+                record.read_only if updates.get("read_only") is None else updates.get("read_only")
+            ),
             region=updates.get("region", record.region),
-            is_validated=record.is_validated
-            if updates.get("is_validated") is None
-            else updates.get("is_validated"),
-            can_read=record.can_read
-            if updates.get("can_read") is None
-            else updates.get("can_read"),
-            can_write=record.can_write
-            if updates.get("can_write") is None
-            else updates.get("can_write"),
-            can_list=record.can_list
-            if updates.get("can_list") is None
-            else updates.get("can_list"),
+            is_validated=(
+                record.is_validated
+                if updates.get("is_validated") is None
+                else updates.get("is_validated")
+            ),
+            can_read=(
+                record.can_read if updates.get("can_read") is None else updates.get("can_read")
+            ),
+            can_write=(
+                record.can_write if updates.get("can_write") is None else updates.get("can_write")
+            ),
+            can_list=(
+                record.can_list if updates.get("can_list") is None else updates.get("can_list")
+            ),
             remediation_steps=updates.get("remediation_steps", record.remediation_steps),
         )
         self.buckets[bucket_id] = updated
@@ -972,6 +976,10 @@ def test_manifest_editor_options_api_persists_custom_values_and_scopes_tenants()
     assert "noampwgs" in initial.json()["library_preps"]
     assert "NOVASEQX" in initial.json()["seq_platforms"]
     assert "CG_R1_FQ" in initial.json()["columns"]
+    assert "ONT_FASTQ_PREFIX" in initial.json()["columns"]
+    assert "ONT_FASTQ_PREFIX" in initial.json()["source_columns"]
+    assert "ONT_FASTQ_PREFIX" in initial.json()["browse_columns"]
+    assert "ONT_FLOWCELL_ID" in initial.json()["columns"]
     assert created.status_code == 200, created.text
     assert created.json()["value"] == "nasal swab"
     assert created.json()["normalized_value"] == "nasal swab"
@@ -1038,6 +1046,58 @@ def test_manifest_editor_full_daylily_ec_row_keeps_all_columns_and_cg_inputs() -
     assert analysis_samples_manifest["rows"][0]["CG_R2_FQ"] == row["CG_R2_FQ"]
     option_values = {record.value for record in resources.manifest_options.values()}
     assert {"nasal swab", "hybrid-capture"} <= option_values
+
+
+def test_manifest_editor_keeps_ont_prefix_only_rows() -> None:
+    resources = MemoryResourceStore()
+    app = _create_test_app(resource_store=resources, dewey_client=DummyDeweyClient())
+    row = {column: "" for column in ANALYSIS_SAMPLES_COLUMNS}
+    row.update(
+        {
+            "RUN_ID": "R-ONT",
+            "SAMPLE_ID": "HG003",
+            "EXPERIMENTID": "EXP-ONT",
+            "SAMPLE_TYPE": "blood",
+            "LIB_PREP": "noampwgs",
+            "SEQ_VENDOR": "ONT",
+            "SEQ_PLATFORM": "PROMETHION",
+            "LANE": "1",
+            "SEQBC_ID": "barcode01",
+            "ONT_FASTQ_PREFIX": ("s3://bucket/ont/HG003/20260401_ONT_run.01/fastq_pass/barcode01/"),
+            "ONT_FLOWCELL_ID": "FLO-PRO114M",
+            "STAGE_DIRECTIVE": "stage_data",
+            "STAGE_TARGET": "/data/staged_sample_data",
+            "SUBSAMPLE_PCT": "na",
+            "IS_POS_CTRL": "true",
+            "IS_NEG_CTRL": "false",
+            "N_X": "1",
+            "N_Y": "1",
+            "EXTERNAL_SAMPLE_ID": "HG003",
+        }
+    )
+
+    with TestClient(app) as client:
+        workset = client.post(
+            "/api/v1/worksets",
+            headers=_auth_headers(),
+            json={"name": "ONT batch", "artifact_set_euids": []},
+        )
+        manifest = client.post(
+            "/api/v1/manifests",
+            headers=_auth_headers(),
+            json={
+                "workset_euid": workset.json()["workset_euid"],
+                "name": "ont manifest",
+                "metadata": {"editor_analysis_inputs": [row]},
+            },
+        )
+
+    assert "ONT_FASTQ_PREFIX" in ANALYSIS_SAMPLES_SOURCE_COLUMNS
+    assert manifest.status_code == 201, manifest.text
+    analysis_samples_manifest = manifest.json()["metadata"]["analysis_samples_manifest"]
+    assert analysis_samples_manifest["row_count"] == 1
+    assert analysis_samples_manifest["rows"][0]["ONT_FASTQ_PREFIX"] == row["ONT_FASTQ_PREFIX"]
+    assert analysis_samples_manifest["rows"][0]["ONT_FLOWCELL_ID"] == row["ONT_FLOWCELL_ID"]
 
 
 def test_analysis_command_catalog_and_preview_routes_use_user_api() -> None:

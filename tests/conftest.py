@@ -14,7 +14,7 @@ os.environ.setdefault(
 
 
 @pytest.fixture(autouse=True)
-def _installed_dayec_211_for_unit_tests(monkeypatch):
+def _installed_required_dayec_for_unit_tests(monkeypatch):
     """Model the declared day-ec dependency in tests that construct the app."""
 
     from daylib_ursa.ephemeral_cluster import runner

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version as package_version
 import logging
 import uuid
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import String, cast, or_
+from sqlalchemy.orm.attributes import flag_modified
 
 from daylily_tapdb import generic_instance, generic_instance_lineage, utc_now_iso
 
@@ -39,21 +41,19 @@ URSA_TEMPLATE_DEFINITIONS: list[TemplateSpec] = [
     TemplateSpec("RGX/artifact/analysis-output/1.0/"),
     TemplateSpec("RGX/analysis/review-event/1.0/"),
     TemplateSpec("RGX/analysis/atlas-return/1.0/"),
+    TemplateSpec("RGX/queue/beta-record/1.0/"),
     TemplateSpec("RGX/reference/sequenced-assignment-context/1.0/"),
     TemplateSpec("RGX/workset/gui-ready/1.0/"),
     TemplateSpec("RGX/manifest/dewey-bound/1.0/"),
     TemplateSpec("RGX/manifest/editor-option/1.0/"),
     TemplateSpec("RGX/artifact/dewey-import/1.0/"),
     TemplateSpec("RGX/auth/user-token/1.0/"),
-    TemplateSpec("RGX/auth/user-token-revision/1.0/"),
     TemplateSpec("RGX/auth/user-token-usage/1.0/"),
     TemplateSpec("RGX/auth/client-registration/1.0/"),
     TemplateSpec("RGX/storage/linked-bucket/1.0/"),
     TemplateSpec("RGX/cluster/ephemeral-job/1.0/"),
-    TemplateSpec("RGX/cluster/ephemeral-job-revision/1.0/"),
     TemplateSpec("RGX/cluster/ephemeral-job-event/1.0/"),
     TemplateSpec("RGX/analysis/launch-job/1.0/"),
-    TemplateSpec("RGX/analysis/launch-job-revision/1.0/"),
     TemplateSpec("RGX/analysis/launch-job-event/1.0/"),
     TemplateSpec("RGX/anomaly/local-record/1.0/"),
 ]
@@ -382,7 +382,7 @@ class TapDBBackend:
         instance,
         updates: dict[str, Any],
     ) -> None:
-        raw = dict(instance.json_addl or {})
+        raw = deepcopy(instance.json_addl or {})
         props = raw.get("properties")
         if not isinstance(props, dict):
             props = {}
@@ -391,8 +391,9 @@ class TapDBBackend:
         for key, value in normalized.items():
             props[key] = value
         if "tenant_id" in normalized:
-            instance.tenant_id = _coerce_tenant_uuid(normalized.get("tenant_id"))
+                instance.tenant_id = _coerce_tenant_uuid(normalized.get("tenant_id"))
         instance.json_addl = raw
+        flag_modified(instance, "json_addl")
         session.flush()
 
 

@@ -82,7 +82,6 @@ class MemoryBackend:
         self._uid += 1
         prefix = {
             "RGX/auth/user-token/1.0/": "UT",
-            "RGX/auth/user-token-revision/1.0/": "UR",
             "RGX/auth/user-token-usage/1.0/": "UG",
         }.get(template_code, "GI")
         now = datetime.now(timezone.utc)
@@ -134,7 +133,9 @@ class MemoryBackend:
         for instance in self.instances:
             if instance.template_code != template_code:
                 continue
-            if str(instance.json_addl.get(key) or "") == value:
+            properties = instance.json_addl.get("properties")
+            property_value = properties.get(key) if isinstance(properties, dict) else None
+            if str(instance.json_addl.get(key) or property_value or "") == value:
                 return instance
         return None
 
@@ -154,6 +155,15 @@ class MemoryBackend:
         _ = session
         rows = [instance for instance in self.instances if instance.template_code == template_code]
         return list(reversed(rows))[:limit]
+
+    def update_instance_json(self, session, instance, updates):
+        _ = session
+        properties = instance.json_addl.get("properties")
+        if isinstance(properties, dict):
+            properties.update(dict(updates))
+        else:
+            instance.json_addl.update(dict(updates))
+        instance.modified_dt = datetime.now(timezone.utc)
 
 
 class DummyAuthProvider:
@@ -587,7 +597,7 @@ class DummyClusterInfo:
                 "state": "running",
                 "instance_id": "i-0123456789abcdef0",
             },
-            "daylily_ec_pinned_version": "2.1.12",
+            "daylily_ec_pinned_version": "2.2.8",
             "aws_console_url": (
                 f"https://{self.region}.console.aws.amazon.com/ec2/home?region={self.region}"
                 "#InstanceDetails:instanceId=i-0123456789abcdef0"
@@ -603,8 +613,8 @@ class DummyClusterInfo:
                     "ttl_seconds": 86400,
                     "cached": True,
                     "data": {
-                        "daylily_ec_pinned_version": "2.1.12",
-                        "remote_daylily_ec_version": "2.1.12",
+                        "daylily_ec_pinned_version": "2.2.8",
+                        "remote_daylily_ec_version": "2.2.8",
                         "remote_git_hash": "abc123",
                         "day_clone_available": True,
                         "day_clone_help": "Usage: day-clone [OPTIONS]\n  --help",
@@ -697,8 +707,8 @@ class DummyClusterService:
             "ttl_seconds": 86400,
             "cached": not refresh,
             "data": {
-                "daylily_ec_pinned_version": "2.1.12",
-                "remote_daylily_ec_version": "2.1.12",
+                "daylily_ec_pinned_version": "2.2.8",
+                "remote_daylily_ec_version": "2.2.8",
                 "remote_git_hash": "abc123",
                 "day_clone_available": True,
                 "day_clone_help": "Usage: day-clone [OPTIONS]",
@@ -1153,7 +1163,7 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_aws_check.json()["return_code"] == 0
     assert "PASS iam.policy" in cluster_aws_check.json()["gap_analysis"]
     assert cluster_aws_check.json()["report"]["summary"] == {"PASS": 1, "WARN": 0, "FAIL": 0}
-    assert cluster_detail.json()["daylily_ec_pinned_version"] == "2.1.12"
+    assert cluster_detail.json()["daylily_ec_pinned_version"] == "2.2.8"
     assert cluster_static_probe.status_code == 200
     assert cluster_static_probe.json()["data"]["day_clone_available"] is True
     assert cluster_scheduler_probe.status_code == 200

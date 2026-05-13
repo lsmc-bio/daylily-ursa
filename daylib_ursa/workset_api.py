@@ -54,6 +54,7 @@ from daylib_ursa.analysis_store import (
     AnalysisState,
     AnalysisStore,
     ReviewState,
+    UrsaQueueRecord,
 )
 from daylib_ursa.anomalies import open_anomaly_repository
 from daylib_ursa.atlas_result_client import (
@@ -223,6 +224,39 @@ class AnalysisReturnRequest(BaseModel):
 
     result_payload: dict[str, Any] = Field(default_factory=dict)
     result_status: str = "COMPLETED"
+
+
+class BetaQueueRecordCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    object_euid: str
+    object_type: str
+    state: str = "queued"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    related_euids: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_required_fields(self) -> "BetaQueueRecordCreateRequest":
+        if not str(self.object_euid or "").strip():
+            raise ValueError("object_euid is required")
+        if not str(self.object_type or "").strip():
+            raise ValueError("object_type is required")
+        if not str(self.state or "").strip():
+            raise ValueError("state is required")
+        return self
+
+
+class BetaQueueRecordTransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_state(self) -> "BetaQueueRecordTransitionRequest":
+        if not str(self.state or "").strip():
+            raise ValueError("state is required")
+        return self
 
 
 class ManifestCreateRequest(BaseModel):
@@ -596,6 +630,20 @@ class AnalysisResponse(BaseModel):
     updated_at: str
     atlas_return: dict[str, Any]
     artifacts: list[AnalysisArtifactResponse]
+
+
+class BetaQueueRecordResponse(BaseModel):
+    queue_record_euid: str
+    queue_name: str
+    object_euid: str
+    object_type: str
+    tenant_id: uuid.UUID
+    state: str
+    idempotency_key: str
+    metadata: dict[str, Any]
+    related_euids: dict[str, str]
+    created_at: str
+    updated_at: str
 
 
 class ManifestResponse(BaseModel):
@@ -990,6 +1038,36 @@ def _analysis_response(record: AnalysisRecord) -> AnalysisResponse:
         atlas_return=record.atlas_return,
         artifacts=[_artifact_response(artifact) for artifact in record.artifacts],
     )
+
+
+def _queue_record_response(record: UrsaQueueRecord) -> BetaQueueRecordResponse:
+    return BetaQueueRecordResponse(
+        queue_record_euid=record.queue_record_euid,
+        queue_name=record.queue_name,
+        object_euid=record.object_euid,
+        object_type=record.object_type,
+        tenant_id=record.tenant_id,
+        state=record.state,
+        idempotency_key=record.idempotency_key,
+        metadata=record.metadata,
+        related_euids=record.related_euids,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _analysis_launch_job_euid(
+    record: AnalysisRecord, result_payload: dict[str, Any]
+) -> str | None:
+    for source in (
+        result_payload,
+        record.result_payload,
+        record.metadata,
+    ):
+        value = str((source or {}).get("analysis_job_euid") or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _manifest_response(record: ManifestRecord) -> ManifestResponse:
@@ -3292,6 +3370,7 @@ def create_app(
                 result_payload=payload.result_payload,
                 artifacts=atlas_artifacts,
                 idempotency_key=str(idempotency_key),
+                launch_job_euid=_analysis_launch_job_euid(record, payload.result_payload),
                 request_id=str(getattr(request.state, "request_id", "") or ""),
             )
             record_observed_dependency("atlas")
@@ -3308,6 +3387,84 @@ def create_app(
             idempotency_key=str(idempotency_key),
         )
         return _analysis_response(updated)
+
+    @app.get(
+        "/api/v1/beta/queues/{queue_name}/items",
+        response_model=list[BetaQueueRecordResponse],
+    )
+    async def list_beta_queue_records(
+        queue_name: str,
+        actor: RequireAuth,
+        state: str | None = Query(default=None),
+        limit: int = Query(default=200, ge=1, le=1000),
+    ) -> list[BetaQueueRecordResponse]:
+        try:
+            records = app.state.store.list_queue_records(
+                queue_name=queue_name,
+                tenant_id=None if actor.is_admin else actor.tenant_id,
+                state=state,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return [_queue_record_response(record) for record in records]
+
+    @app.post(
+        "/api/v1/beta/queues/{queue_name}/items",
+        response_model=BetaQueueRecordResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_beta_queue_record(
+        queue_name: str,
+        request: BetaQueueRecordCreateRequest,
+        actor: RequireAuth,
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> BetaQueueRecordResponse:
+        if not str(idempotency_key or "").strip():
+            raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
+        try:
+            record = app.state.store.create_queue_record(
+                queue_name=queue_name,
+                object_euid=request.object_euid,
+                object_type=request.object_type,
+                tenant_id=actor.tenant_id,
+                state=request.state,
+                metadata=request.metadata,
+                related_euids=request.related_euids,
+                idempotency_key=str(idempotency_key),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _queue_record_response(record)
+
+    @app.post(
+        "/api/v1/beta/queues/{queue_name}/items/{queue_record_euid}/transition",
+        response_model=BetaQueueRecordResponse,
+    )
+    async def transition_beta_queue_record(
+        queue_name: str,
+        queue_record_euid: str,
+        request: BetaQueueRecordTransitionRequest,
+        actor: RequireAuth,
+    ) -> BetaQueueRecordResponse:
+        existing = app.state.store.get_queue_record(queue_record_euid)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Queue record not found")
+        if existing.queue_name != queue_name:
+            raise HTTPException(status_code=404, detail="Queue record not found")
+        if not actor.is_admin and existing.tenant_id != actor.tenant_id:
+            raise HTTPException(status_code=403, detail="Queue record is outside the caller tenant")
+        try:
+            updated = app.state.store.transition_queue_record(
+                queue_record_euid,
+                state=request.state,
+                metadata=request.metadata,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _queue_record_response(updated)
 
     @app.get("/api/v1/worksets", response_model=list[WorksetResponse])
     async def list_worksets(

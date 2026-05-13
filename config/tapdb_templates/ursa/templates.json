@@ -54,6 +54,19 @@
       "json_addl": {}
     },
     {
+      "name": "Ursa Beta Queue Record",
+      "polymorphic_discriminator": "action_template",
+      "category": "RGX",
+      "type": "queue",
+      "subtype": "beta-record",
+      "version": "1.0",
+      "instance_prefix": "RGX",
+      "instance_polymorphic_identity": "action_instance",
+      "bstatus": "active",
+      "is_singleton": false,
+      "json_addl": {}
+    },
+    {
       "name": "Ursa Sequenced Assignment Context",
       "polymorphic_discriminator": "generic_template",
       "category": "RGX",
@@ -132,19 +145,6 @@
       "json_addl": {}
     },
     {
-      "name": "Ursa User Token Revision",
-      "polymorphic_discriminator": "generic_template",
-      "category": "RGX",
-      "type": "auth",
-      "subtype": "user-token-revision",
-      "version": "1.0",
-      "instance_prefix": "RGX",
-      "instance_polymorphic_identity": "generic_instance",
-      "bstatus": "active",
-      "is_singleton": false,
-      "json_addl": {}
-    },
-    {
       "name": "Ursa User Token Usage",
       "polymorphic_discriminator": "generic_template",
       "category": "RGX",
@@ -197,19 +197,6 @@
       "json_addl": {}
     },
     {
-      "name": "Ursa Ephemeral Cluster Job Revision",
-      "polymorphic_discriminator": "action_template",
-      "category": "RGX",
-      "type": "cluster",
-      "subtype": "ephemeral-job-revision",
-      "version": "1.0",
-      "instance_prefix": "RGX",
-      "instance_polymorphic_identity": "action_instance",
-      "bstatus": "active",
-      "is_singleton": false,
-      "json_addl": {}
-    },
-    {
       "name": "Ursa Ephemeral Cluster Job Event",
       "polymorphic_discriminator": "action_template",
       "category": "RGX",
@@ -236,19 +223,6 @@
       "json_addl": {}
     },
     {
-      "name": "Ursa Analysis Launch Job Revision",
-      "polymorphic_discriminator": "action_template",
-      "category": "RGX",
-      "type": "analysis",
-      "subtype": "launch-job-revision",
-      "version": "1.0",
-      "instance_prefix": "RGX",
-      "instance_polymorphic_identity": "action_instance",
-      "bstatus": "active",
-      "is_singleton": false,
-      "json_addl": {}
-    },
-    {
       "name": "Ursa Analysis Launch Job Event",
       "polymorphic_discriminator": "action_template",
       "category": "RGX",
@@ -270,19 +244,6 @@
       "version": "1.0",
       "instance_prefix": "RGX",
       "instance_polymorphic_identity": "workflow_instance",
-      "bstatus": "active",
-      "is_singleton": false,
-      "json_addl": {}
-    },
-    {
-      "name": "Ursa Staging Job Revision",
-      "polymorphic_discriminator": "action_template",
-      "category": "RGX",
-      "type": "staging",
-      "subtype": "job-revision",
-      "version": "1.0",
-      "instance_prefix": "RGX",
-      "instance_polymorphic_identity": "action_instance",
       "bstatus": "active",
       "is_singleton": false,
       "json_addl": {}

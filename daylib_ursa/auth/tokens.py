@@ -12,7 +12,6 @@ from daylib_ursa.auth.dependencies import AuthError, CurrentUser
 from daylib_ursa.tapdb_graph import TapDBBackend, from_json_addl, utc_now_iso
 
 USER_TOKEN_TEMPLATE = "RGX/auth/user-token/1.0/"
-USER_TOKEN_REVISION_TEMPLATE = "RGX/auth/user-token-revision/1.0/"
 USER_TOKEN_USAGE_TEMPLATE = "RGX/auth/user-token-usage/1.0/"
 
 USER_TOKEN_PREFIX = "urs_"
@@ -114,46 +113,24 @@ class UserTokenService:
     def display_prefix(token: str) -> str:
         return f"{token[:12]}..."
 
-    @staticmethod
-    def _revision_sort_key(instance: Any) -> int:
-        payload = from_json_addl(instance)
-        return int(payload.get("revision_no") or 0)
-
-    def _latest_revision(self, session, token_instance) -> Any | None:
-        revisions = self.backend.list_children(
-            session,
-            parent=token_instance,
-            relationship_type="revision",
-        )
-        if not revisions:
-            return None
-        revisions.sort(key=self._revision_sort_key, reverse=True)
-        return revisions[0]
-
-    def _token_record(self, session, token_instance) -> UserTokenRecord:
+    def _token_record(self, token_instance) -> UserTokenRecord:
         token_payload = from_json_addl(token_instance)
-        revision = self._latest_revision(session, token_instance)
-        if revision is None:
-            raise AuthError(f"token missing revision: {token_instance.euid}")
-        revision_payload = from_json_addl(revision)
         return UserTokenRecord(
             token_euid=str(token_instance.euid),
             owner_user_id=str(token_payload.get("owner_user_id") or ""),
             token_name=str(token_instance.name or token_payload.get("token_name") or ""),
             token_prefix=str(token_payload.get("token_prefix") or ""),
             scope=str(token_payload.get("scope") or "internal_ro"),
-            status=str(revision_payload.get("status") or TOKEN_STATUS_ACTIVE),
-            expires_at=str(revision_payload.get("expires_at") or ""),
+            status=str(token_payload.get("status") or ""),
+            expires_at=str(token_payload.get("expires_at") or ""),
             created_at=str(token_payload.get("created_at") or utc_now_iso()),
             updated_at=str(
-                revision_payload.get("created_at")
-                or token_payload.get("updated_at")
-                or utc_now_iso()
+                token_payload.get("updated_at") or token_payload.get("created_at") or utc_now_iso()
             ),
             created_by=str(token_payload.get("created_by") or "").strip() or None,
-            last_used_at=str(revision_payload.get("last_used_at") or "").strip() or None,
-            revoked_at=str(revision_payload.get("revoked_at") or "").strip() or None,
-            note=str(revision_payload.get("note") or "").strip() or None,
+            last_used_at=str(token_payload.get("last_used_at") or "").strip() or None,
+            revoked_at=str(token_payload.get("revoked_at") or "").strip() or None,
+            note=str(token_payload.get("note") or "").strip() or None,
             client_registration_euid=str(
                 token_payload.get("client_registration_euid") or ""
             ).strip()
@@ -211,7 +188,13 @@ class UserTokenService:
                     "user_snapshot": _current_user_snapshot(owner_user),
                     "token_name": token_name.strip(),
                     "token_prefix": token_prefix,
+                    "token_hash": token_hash,
                     "scope": str(scope or "internal_ro").strip().lower() or "internal_ro",
+                    "status": TOKEN_STATUS_ACTIVE,
+                    "expires_at": expires_at,
+                    "last_used_at": None,
+                    "revoked_at": None,
+                    "note": note,
                     "created_by": actor.sub,
                     "created_at": created_at,
                     "updated_at": created_at,
@@ -220,32 +203,7 @@ class UserTokenService:
                 bstatus=TOKEN_STATUS_ACTIVE,
                 tenant_id=owner_user.tenant_id,
             )
-            revision = self.backend.create_instance(
-                session,
-                USER_TOKEN_REVISION_TEMPLATE,
-                f"revision:{token.euid}:1",
-                json_addl={
-                    "token_euid": str(token.euid),
-                    "token_hash": token_hash,
-                    "revision_no": 1,
-                    "status": TOKEN_STATUS_ACTIVE,
-                    "expires_at": expires_at,
-                    "last_used_at": None,
-                    "revoked_at": None,
-                    "note": note,
-                    "created_by": actor.sub,
-                    "created_at": created_at,
-                },
-                bstatus=TOKEN_STATUS_ACTIVE,
-                tenant_id=owner_user.tenant_id,
-            )
-            self.backend.create_lineage(
-                session,
-                parent=token,
-                child=revision,
-                relationship_type="revision",
-            )
-            return self._token_record(session, token), plaintext
+            return self._token_record(token), plaintext
 
     def list_tokens(
         self, *, actor: CurrentUser, owner_user_id: str | None = None
@@ -270,7 +228,7 @@ class UserTokenService:
                     value=target_owner,
                     limit=500,
                 )
-            return [self._token_record(session, token) for token in tokens]
+            return [self._token_record(token) for token in tokens]
 
     def revoke_token(
         self, *, actor: CurrentUser, token_euid: str, note: str | None = None
@@ -288,40 +246,22 @@ class UserTokenService:
             owner_user_id = str(token_payload.get("owner_user_id") or "")
             if owner_user_id != actor.sub and not actor.is_admin:
                 raise AuthError("Cannot revoke another user's token")
-            latest = self._latest_revision(session, token)
-            if latest is None:
-                raise AuthError(f"token missing revision: {token_euid}")
-            latest_payload = from_json_addl(latest)
-            if str(latest_payload.get("status") or "") == TOKEN_STATUS_REVOKED:
-                return self._token_record(session, token)
-            revision_no = int(latest_payload.get("revision_no") or 0) + 1
+            if str(token_payload.get("status") or "") == TOKEN_STATUS_REVOKED:
+                return self._token_record(token)
             created_at = _iso_now()
-            revision = self.backend.create_instance(
+            self.backend.update_instance_json(
                 session,
-                USER_TOKEN_REVISION_TEMPLATE,
-                f"revision:{token.euid}:{revision_no}",
-                json_addl={
-                    "token_euid": str(token.euid),
-                    "token_hash": str(latest_payload.get("token_hash") or ""),
-                    "revision_no": revision_no,
+                token,
+                {
                     "status": TOKEN_STATUS_REVOKED,
-                    "expires_at": str(latest_payload.get("expires_at") or ""),
-                    "last_used_at": str(latest_payload.get("last_used_at") or "").strip() or None,
                     "revoked_at": created_at,
                     "note": note or "revoked",
-                    "created_by": actor.sub,
-                    "created_at": created_at,
+                    "updated_at": created_at,
+                    "updated_by": actor.sub,
                 },
-                bstatus=TOKEN_STATUS_REVOKED,
-                tenant_id=token.tenant_id,
             )
-            self.backend.create_lineage(
-                session,
-                parent=token,
-                child=revision,
-                relationship_type="revision",
-            )
-            return self._token_record(session, token)
+            token.bstatus = TOKEN_STATUS_REVOKED
+            return self._token_record(token)
 
     def validate_token(self, plaintext_token: str) -> TokenValidationResult:
         token_value = str(plaintext_token or "").strip()
@@ -329,23 +269,15 @@ class UserTokenService:
             raise AuthError("Invalid Ursa token prefix")
         token_hash = self.hash_token(token_value)
         with self.backend.session_scope(commit=False) as session:
-            revision = self.backend.find_instance_by_external_id(
+            token = self.backend.find_instance_by_external_id(
                 session,
-                template_code=USER_TOKEN_REVISION_TEMPLATE,
+                template_code=USER_TOKEN_TEMPLATE,
                 key="token_hash",
                 value=token_hash,
             )
-            if revision is None:
+            if token is None:
                 raise AuthError("Token not found")
-            parents = self.backend.list_parents(
-                session,
-                child=revision,
-                relationship_type="revision",
-            )
-            if not parents:
-                raise AuthError("Token parent not found")
-            token = parents[0]
-            record = self._token_record(session, token)
+            record = self._token_record(token)
             snapshot = from_json_addl(token).get("user_snapshot")
         if not hmac.compare_digest(self.hash_token(token_value), token_hash):
             raise AuthError("Token hash mismatch")
@@ -382,36 +314,16 @@ class UserTokenService:
             )
             if token is None:
                 return
-            latest = self._latest_revision(session, token)
-            if latest is not None:
-                latest_payload = from_json_addl(latest)
-                revision_no = int(latest_payload.get("revision_no") or 0) + 1
-                created_at = _iso_now()
-                revision = self.backend.create_instance(
-                    session,
-                    USER_TOKEN_REVISION_TEMPLATE,
-                    f"revision:{token.euid}:{revision_no}",
-                    json_addl={
-                        "token_euid": str(token.euid),
-                        "token_hash": str(latest_payload.get("token_hash") or ""),
-                        "revision_no": revision_no,
-                        "status": str(latest_payload.get("status") or TOKEN_STATUS_ACTIVE),
-                        "expires_at": str(latest_payload.get("expires_at") or ""),
-                        "last_used_at": created_at,
-                        "revoked_at": str(latest_payload.get("revoked_at") or "").strip() or None,
-                        "note": "usage_logged",
-                        "created_by": actor_user_id,
-                        "created_at": created_at,
-                    },
-                    bstatus=str(latest_payload.get("status") or TOKEN_STATUS_ACTIVE),
-                    tenant_id=token.tenant_id,
-                )
-                self.backend.create_lineage(
-                    session,
-                    parent=token,
-                    child=revision,
-                    relationship_type="revision",
-                )
+            used_at = _iso_now()
+            self.backend.update_instance_json(
+                session,
+                token,
+                {
+                    "last_used_at": used_at,
+                    "updated_at": used_at,
+                    "updated_by": actor_user_id,
+                },
+            )
             usage = self.backend.create_instance(
                 session,
                 USER_TOKEN_USAGE_TEMPLATE,
@@ -446,7 +358,7 @@ class UserTokenService:
             )
             if token is None:
                 raise KeyError(f"token not found: {token_euid}")
-            record = self._token_record(session, token)
+            record = self._token_record(token)
             if record.owner_user_id != actor.sub and not actor.is_admin:
                 raise AuthError("Cannot inspect another user's token usage")
             usages = self.backend.list_children(

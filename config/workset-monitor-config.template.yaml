@@ -80,7 +80,7 @@ cluster:
   contact_email: your-email@example.com
 
   # Git tag/branch for the daylily-omics-analysis repo
-  repo_tag: 0.7.641
+  repo_tag: 0.7.752
 
   # Preferred AWS availability zone for cluster creation
   preferred_availability_zone: us-west-2a
@@ -154,7 +154,7 @@ pipeline:
 # These can be overridden per-workset in daylily_work.yaml
 
 # Clone arguments for day-clone command
-day-clone: "--repo Daylily-Informatics/daylily-omics-analysis --branch 0.7.641"
+day-clone: "--repository daylily-omics-analysis --git-tag 0.7.752 --destination daylily-omics-analysis"
 
 # Run arguments appended to run_prefix
 dy-r: "--name my-analysis --samples config/samples.tsv --outdir results/my-analysis --profile slurm --jobs 192 --rerun-incomplete"
