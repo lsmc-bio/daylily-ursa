@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import configparser
+import contextlib
 from importlib import import_module
 from importlib import metadata as importlib_metadata
 import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, cast
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "2.3.2"
+REQUIRED_DAYLILY_EC_VERSION = "2.3.3"
 DAYLILY_EC_INSTALL_SPEC = (
     f"{DAYLILY_EC_DISTRIBUTION} @ "
     f"git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
@@ -80,6 +83,73 @@ def _command_env(
     return env
 
 
+def _aws_profile_section_name(profile: str) -> str:
+    resolved = str(profile or "").strip()
+    if not resolved:
+        raise ValueError("AWS profile is required to build an AWS CLI profile section")
+    if resolved == "default":
+        return "default"
+    return f"profile {resolved}"
+
+
+def _s3_settings_without_acceleration(raw_value: str) -> str:
+    existing = [
+        line.strip()
+        for line in str(raw_value or "").splitlines()
+        if line.strip()
+    ]
+    retained = [
+        line
+        for line in existing
+        if not line.lower().startswith("use_accelerate_endpoint")
+    ]
+    retained.append("use_accelerate_endpoint = false")
+    return "\n" + "\n".join(f"    {line}" for line in retained)
+
+
+def _write_aws_config_with_s3_acceleration_disabled(
+    *,
+    source: Path,
+    dest: Path,
+    profile: str,
+) -> Path:
+    parser = configparser.RawConfigParser()
+    parser.optionxform = str
+    if source.exists():
+        read_paths = parser.read(source)
+        if not read_paths:
+            raise RuntimeError(f"Failed to read AWS config file: {source}")
+    section = _aws_profile_section_name(profile)
+    if not parser.has_section(section):
+        parser.add_section(section)
+    existing_s3 = parser.get(section, "s3", fallback="")
+    parser.set(section, "s3", _s3_settings_without_acceleration(existing_s3))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", encoding="utf-8") as handle:
+        parser.write(handle)
+    return dest
+
+
+@contextlib.contextmanager
+def _command_env_context(env: Mapping[str, str]) -> Iterator[Dict[str, str]]:
+    child_env = dict(env)
+    profile = str(child_env.get("AWS_PROFILE") or "").strip()
+    if not profile:
+        yield child_env
+        return
+    source = Path(
+        str(child_env.get("AWS_CONFIG_FILE") or Path.home() / ".aws" / "config")
+    ).expanduser()
+    with tempfile.TemporaryDirectory(prefix="ursa-aws-config-") as tmpdir:
+        config_path = _write_aws_config_with_s3_acceleration_disabled(
+            source=source,
+            dest=Path(tmpdir) / "config",
+            profile=profile,
+        )
+        child_env["AWS_CONFIG_FILE"] = str(config_path)
+        yield child_env
+
+
 def _summarize_process_output(
     result: subprocess.CompletedProcess[str], *, max_chars: int = 4000
 ) -> str:
@@ -94,7 +164,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 2.3.2 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 2.3.3 contract."""
 
     def __init__(
         self,
@@ -125,19 +195,21 @@ class DaylilyEcClient:
         timeout: Optional[int] = None,
         extra_env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(
-            self.command(args, json_mode=json_mode),
-            text=True,
-            capture_output=True,
-            cwd=str(cwd) if cwd else None,
-            env=_command_env(
-                aws_profile=aws_profile if aws_profile is not None else self.aws_profile,
-                contact_email=contact_email,
-                extra_env=extra_env,
-            ),
-            timeout=timeout,
-            check=False,
+        env = _command_env(
+            aws_profile=aws_profile if aws_profile is not None else self.aws_profile,
+            contact_email=contact_email,
+            extra_env=extra_env,
         )
+        with _command_env_context(env) as child_env:
+            result = subprocess.run(
+                self.command(args, json_mode=json_mode),
+                text=True,
+                capture_output=True,
+                cwd=str(cwd) if cwd else None,
+                env=child_env,
+                timeout=timeout,
+                check=False,
+            )
         if check and result.returncode != 0:
             raise RuntimeError(_summarize_process_output(result))
         return result
@@ -301,7 +373,7 @@ def write_dayec_cluster_config(
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write a non-interactive cluster request through the day-ec 2.3.2 library."""
+    """Write a non-interactive cluster request through the day-ec 2.3.3 library."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.config")

@@ -119,6 +119,68 @@ def test_stage_samples_builds_daylily_ec_224_argv(
     ]
 
 
+def test_daylily_ec_subprocess_disables_inherited_s3_acceleration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
+    source_config = tmp_path / "aws-config"
+    source_config.write_text(
+        "\n".join(
+            [
+                "[profile lsmc]",
+                "region = us-west-2",
+                "sso_session = lsmc",
+                "s3 =",
+                "    addressing_style = virtual",
+                "    use_accelerate_endpoint = true",
+                "[sso-session lsmc]",
+                "sso_region = us-west-2",
+                "sso_start_url = https://example.awsapps.com/start",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(source_config))
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        env = kwargs["env"]
+        captured["command"] = command
+        captured["env"] = env
+        captured["aws_config_text"] = runner.Path(env["AWS_CONFIG_FILE"]).read_text(
+            encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    client = runner.DaylilyEcClient(aws_profile="lsmc")
+    result = client.stage_samples(
+        analysis_samples=tmp_path / "analysis_samples.tsv",
+        reference_bucket="s3://bucket/ref",
+        config_dir=tmp_path,
+        region="us-west-2",
+    )
+
+    assert result.returncode == 0
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["AWS_PROFILE"] == "lsmc"
+    assert env["AWS_CONFIG_FILE"] != str(source_config)
+    aws_config_text = str(captured["aws_config_text"])
+    assert "[profile lsmc]" in aws_config_text
+    assert "[sso-session lsmc]" in aws_config_text
+    assert "addressing_style = virtual" in aws_config_text
+    assert "use_accelerate_endpoint = false" in aws_config_text
+    assert "use_accelerate_endpoint = true" not in aws_config_text
+
+
 def test_aws_validate_all_builds_daylily_ec_224_argv(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
