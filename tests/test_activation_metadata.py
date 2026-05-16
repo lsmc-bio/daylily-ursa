@@ -67,7 +67,7 @@ def test_pyproject_contains_the_single_python_install_set() -> None:
         "boto3-stubs[s3,sns,cloudwatch]>=1.28.0",
         "daylily-auth-cognito==2.1.5",
         "daylily-ephemeral-cluster==2.3.2",
-        "daylily-tapdb==6.0.12",
+        "daylily-tapdb==6.0.13",
         "fastapi>=0.104.0",
         "httpx>=0.25.0",
         "itsdangerous>=2.2.0",
@@ -116,13 +116,13 @@ def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
     )
     assert payload["components"]["daylily-omics-analysis"]["current"] == "0.7.752"
     assert payload["components"]["daylily-auth-cognito"]["current"] == "2.1.5"
-    assert payload["components"]["daylily-tapdb"]["current"] == "6.0.12"
+    assert payload["components"]["daylily-tapdb"]["current"] == "6.0.13"
     assert payload["components"]["cli-core-yo"]["current"] == "2.1.1"
     assert payload["components"]["zebra_day"]["current"] == "6.0.10"
     assert payload["tested_combinations"][0]["ephemeral_cluster"] == "2.3.2"
     assert payload["tested_combinations"][0]["omics_analysis"] == "0.7.752"
     assert payload["tested_combinations"][0]["cognito"] == "2.1.5"
-    assert payload["tested_combinations"][0]["tapdb"] == "6.0.12"
+    assert payload["tested_combinations"][0]["tapdb"] == "6.0.13"
     assert payload["tested_combinations"][0]["cli_core_yo"] == "2.1.1"
     assert payload["tested_combinations"][0]["zebra_day"] == "6.0.10"
     assert "daylily-ephemeral-cluster==2.3.2" in payload["tested_combinations"][0]["notes"]

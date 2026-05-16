@@ -26,7 +26,7 @@ Ursa does not own:
 The current package and runtime contracts are intentionally pinned:
 
 - `daylily-ephemeral-cluster==2.3.2`
-- `daylily-tapdb==6.0.12`
+- `daylily-tapdb==6.0.13`
 - `daylily-auth-cognito==2.1.5`
 - `cli-core-yo==2.1.1`
 - `zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.10`
