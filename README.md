@@ -25,7 +25,7 @@ Ursa does not own:
 
 The current package and runtime contracts are intentionally pinned:
 
-- `daylily-ephemeral-cluster @ git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@2.2.8`
+- `daylily-ephemeral-cluster==2.3.2`
 - `daylily-tapdb==6.0.11`
 - `daylily-auth-cognito==2.1.5`
 - `cli-core-yo==2.1.1`
@@ -116,7 +116,7 @@ Core API surface:
 - `/api/v1/buckets` manages linked S3 buckets and object browsing/upload helper routes.
 - `/api/v1/user-tokens` and `/api/v1/admin/user-tokens` manage Ursa user tokens.
 
-Manifest creation rejects caller-supplied generated manifest metadata. Ursa derives `analysis_samples_manifest` from `editor_analysis_inputs` or S3 input references, using the installed lsmc-bio `daylily-ephemeral-cluster` `2.2.8` template.
+Manifest creation rejects caller-supplied generated manifest metadata. Ursa derives `analysis_samples_manifest` from `editor_analysis_inputs` or S3 input references, using the installed lsmc-bio `daylily-ephemeral-cluster` `2.3.2` template.
 
 Staging jobs run against an existing manifest and capture the remote FSx stage directory plus stdout/stderr. Analysis jobs may either stage from a `reference_bucket` or reuse a completed `staging_job_euid` whose tenant, workset, manifest, state, and `stage_dir` match the request.
 

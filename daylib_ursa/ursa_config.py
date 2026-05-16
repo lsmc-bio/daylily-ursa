@@ -171,8 +171,12 @@ VALID_FIELDS = {
     "ursa_internal_output_bucket": (str, "Ursa-managed internal S3 bucket"),
     "tapdb_client_id": (str, "TapDB client identifier"),
     "tapdb_database_name": (str, "TapDB namespace / database name"),
+    "tapdb_schema_name": (str, "Explicit PostgreSQL schema used by TapDB"),
+    "tapdb_physical_database": (str, "Physical PostgreSQL database for shared local TapDB"),
     "tapdb_env": (str, "TapDB environment selector"),
     "tapdb_config_path": (str, "Explicit TapDB config path"),
+    "tapdb_local_db_port": (str, "Local TapDB PostgreSQL port"),
+    "tapdb_local_ui_port": (str, "Local TapDB admin UI port"),
     "tapdb_domain_registry_path": (
         str,
         "Explicit TapDB domain registry path",
@@ -281,8 +285,12 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "ursa_internal_output_bucket",
         "tapdb_client_id",
         "tapdb_database_name",
+        "tapdb_schema_name",
+        "tapdb_physical_database",
         "tapdb_env",
         "tapdb_config_path",
+        "tapdb_local_db_port",
+        "tapdb_local_ui_port",
         "tapdb_domain_registry_path",
         "tapdb_prefix_ownership_registry_path",
         "cognito_region",
@@ -352,11 +360,23 @@ class UrsaConfig:
     tapdb_database_name: Optional[str] = None
     """TapDB namespace / database name read from YAML config."""
 
+    tapdb_schema_name: Optional[str] = None
+    """Explicit PostgreSQL schema used by TapDB."""
+
+    tapdb_physical_database: Optional[str] = None
+    """Physical PostgreSQL database for shared local TapDB."""
+
     tapdb_env: Optional[str] = None
     """TapDB environment selector read from YAML config."""
 
     tapdb_config_path: Optional[str] = None
     """Explicit TapDB config path read from YAML config."""
+
+    tapdb_local_db_port: Optional[str] = None
+    """Local TapDB PostgreSQL port read from YAML config."""
+
+    tapdb_local_ui_port: Optional[str] = None
+    """Local TapDB admin UI port read from YAML config."""
 
     tapdb_domain_registry_path: Optional[str] = None
     """Explicit TapDB domain registry path read from YAML config."""
@@ -522,8 +542,12 @@ class UrsaConfig:
         ursa_internal_output_bucket = data.get("ursa_internal_output_bucket")
         tapdb_client_id = data.get("tapdb_client_id")
         tapdb_database_name = data.get("tapdb_database_name")
+        tapdb_schema_name = data.get("tapdb_schema_name")
+        tapdb_physical_database = data.get("tapdb_physical_database")
         tapdb_env = data.get("tapdb_env")
         tapdb_config_path = data.get("tapdb_config_path")
+        tapdb_local_db_port = data.get("tapdb_local_db_port")
+        tapdb_local_ui_port = data.get("tapdb_local_ui_port")
         tapdb_domain_registry_path = data.get("tapdb_domain_registry_path")
         tapdb_prefix_ownership_registry_path = data.get("tapdb_prefix_ownership_registry_path")
         cognito_user_pool_id = data.get("cognito_user_pool_id")
@@ -561,8 +585,12 @@ class UrsaConfig:
             ursa_internal_output_bucket=ursa_internal_output_bucket,
             tapdb_client_id=tapdb_client_id,
             tapdb_database_name=tapdb_database_name,
+            tapdb_schema_name=tapdb_schema_name,
+            tapdb_physical_database=tapdb_physical_database,
             tapdb_env=tapdb_env,
             tapdb_config_path=tapdb_config_path,
+            tapdb_local_db_port=tapdb_local_db_port,
+            tapdb_local_ui_port=tapdb_local_ui_port,
             tapdb_domain_registry_path=tapdb_domain_registry_path,
             tapdb_prefix_ownership_registry_path=tapdb_prefix_ownership_registry_path,
             cognito_user_pool_id=cognito_user_pool_id,

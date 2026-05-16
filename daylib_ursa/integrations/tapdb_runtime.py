@@ -18,8 +18,9 @@ from daylily_tapdb import InstanceFactory, TAPDBConnection, TemplateManager
 
 DEFAULT_AWS_PROFILE = "lsmc"
 DEFAULT_AWS_REGION = "us-west-2"
-DEFAULT_TAPDB_CLIENT_ID = "local"
+DEFAULT_TAPDB_CLIENT_ID = "ursa"
 DEFAULT_TAPDB_DATABASE_NAME = "ursa"
+DEFAULT_TAPDB_SCHEMA_NAME = "tapdb_ursa_dev"
 DEFAULT_TAPDB_DOMAIN_CODE = "Z"
 DEFAULT_TAPDB_OWNER_REPO = "ursa"
 DEFAULT_TAPDB_LOCAL_DB_PORT = "5588"
@@ -160,7 +161,7 @@ def _get_tapdb_db_config_for_env(
     return cfg
 
 
-def _build_sqlalchemy_url(cfg: Mapping[str, str]) -> str:
+def _build_sqlalchemy_url(cfg: Mapping[str, str], *, schema_name: str = "") -> str:
     user = quote((cfg.get("user") or "").strip(), safe="")
     password = quote((cfg.get("password") or "").strip(), safe="")
     host = (cfg.get("host") or "localhost").strip()
@@ -171,10 +172,12 @@ def _build_sqlalchemy_url(cfg: Mapping[str, str]) -> str:
     if not database:
         raise TapDBRuntimeError("TapDB DB config is missing database name.")
     auth = f"{user}:{password}@" if password else f"{user}@"
+    if schema_name:
+        return f"postgresql+psycopg2://{auth}{host}:{port}/{database}?options={quote(f'-csearch_path={schema_name}', safe='')}"
     return f"postgresql+psycopg2://{auth}{host}:{port}/{database}"
 
 
-def _resolved_default_identity() -> tuple[str, str, str, str, str, str]:
+def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str, str]:
     try:
         from daylib_ursa.config import get_settings
 
@@ -187,6 +190,14 @@ def _resolved_default_identity() -> tuple[str, str, str, str, str, str]:
             or getattr(settings, "tapdb_database_name", "")
             or ""
         ).strip()
+        schema_name = str(
+            os.environ.get("TAPDB_SCHEMA_NAME")
+            or getattr(settings, "tapdb_schema_name", "")
+            or ""
+        ).strip()
+        physical_database = str(getattr(settings, "tapdb_physical_database", "") or "").strip()
+        local_db_port = str(getattr(settings, "tapdb_local_db_port", "") or "").strip()
+        local_ui_port = str(getattr(settings, "tapdb_local_ui_port", "") or "").strip()
         tapdb_env = (
             str(os.environ.get("TAPDB_ENV") or getattr(settings, "tapdb_env", "") or "")
             .strip()
@@ -202,16 +213,24 @@ def _resolved_default_identity() -> tuple[str, str, str, str, str, str]:
     except Exception:
         client_id = ""
         namespace = ""
+        schema_name = ""
+        physical_database = ""
         tapdb_env = ""
         config_path = ""
+        local_db_port = ""
+        local_ui_port = ""
         domain_registry_path = ""
         prefix_registry_path = ""
 
     return (
         client_id or DEFAULT_TAPDB_CLIENT_ID,
         namespace or DEFAULT_TAPDB_DATABASE_NAME,
+        schema_name or DEFAULT_TAPDB_SCHEMA_NAME,
+        physical_database or "",
         tapdb_env or "",
         config_path or "",
+        local_db_port or DEFAULT_TAPDB_LOCAL_DB_PORT,
+        local_ui_port or DEFAULT_TAPDB_LOCAL_UI_PORT,
         domain_registry_path or "",
         prefix_registry_path or "",
     )
@@ -230,8 +249,12 @@ def _resolve_runtime_env(
     (
         default_client_id,
         default_namespace,
+        default_schema_name,
+        default_physical_database,
         default_tapdb_env,
         default_config_path,
+        default_local_db_port,
+        default_local_ui_port,
         default_domain_registry_path,
         default_prefix_registry_path,
     ) = _resolved_default_identity()
@@ -263,8 +286,12 @@ def _resolve_runtime_env(
         "aws_region": (region or DEFAULT_AWS_REGION).strip() or DEFAULT_AWS_REGION,
         "client_id": resolved_client_id,
         "database_name": resolved_namespace,
+        "schema_name": default_schema_name,
+        "physical_database": default_physical_database,
         "tapdb_env": resolved_env,
         "config_path": resolved_cfg_path or "",
+        "local_db_port": default_local_db_port,
+        "local_ui_port": default_local_ui_port,
         "domain_code": DEFAULT_TAPDB_DOMAIN_CODE,
         "owner_repo_name": DEFAULT_TAPDB_OWNER_REPO,
         "domain_registry_path": default_domain_registry_path,
@@ -297,6 +324,16 @@ def _require_config_path(runtime_env: Mapping[str, str]) -> str:
             "and pass the absolute path explicitly to TapDB with --config."
         )
     return config_path
+
+
+def _require_schema_name(runtime_env: Mapping[str, str]) -> str:
+    schema_name = str(runtime_env.get("schema_name") or "").strip()
+    if not schema_name:
+        raise TapDBRuntimeError(
+            "TapDB schema_name is required. Set tapdb_schema_name in Ursa config and "
+            "environments.<env>.schema_name in the TapDB config."
+        )
+    return schema_name
 
 
 def _require_absolute_registry_path(value: str, *, option_name: str) -> str:
@@ -349,7 +386,11 @@ def ensure_local_tapdb_namespace_config(
     child_env["AWS_DEFAULT_REGION"] = runtime_env["aws_region"]
     child_env["MERIDIAN_DOMAIN_CODE"] = runtime_env["domain_code"]
     child_env["TAPDB_OWNER_REPO"] = runtime_env["owner_repo_name"]
+    child_env["TAPDB_SCHEMA_NAME"] = _require_schema_name(runtime_env)
     child_env.setdefault("PYTHONSAFEPATH", "1")
+    local_db_port = str(runtime_env.get("local_db_port") or DEFAULT_TAPDB_LOCAL_DB_PORT)
+    local_ui_port = str(runtime_env.get("local_ui_port") or DEFAULT_TAPDB_LOCAL_UI_PORT)
+    physical_database = str(runtime_env.get("physical_database") or runtime_env["database_name"])
 
     init_result = subprocess.run(
         [
@@ -364,6 +405,8 @@ def ensure_local_tapdb_namespace_config(
             runtime_env["client_id"],
             "--database-name",
             runtime_env["database_name"],
+            "--schema-name",
+            _require_schema_name(runtime_env),
             "--owner-repo-name",
             runtime_env["owner_repo_name"],
             "--domain-code",
@@ -375,9 +418,9 @@ def ensure_local_tapdb_namespace_config(
             "--env",
             runtime_env["tapdb_env"],
             "--db-port",
-            f"{runtime_env['tapdb_env']}={DEFAULT_TAPDB_LOCAL_DB_PORT}",
+            f"{runtime_env['tapdb_env']}={local_db_port}",
             "--ui-port",
-            f"{runtime_env['tapdb_env']}={DEFAULT_TAPDB_LOCAL_UI_PORT}",
+            f"{runtime_env['tapdb_env']}={local_ui_port}",
         ],
         env=child_env,
         capture_output=True,
@@ -417,11 +460,13 @@ def ensure_local_tapdb_namespace_config(
             "--host",
             "localhost",
             "--port",
-            DEFAULT_TAPDB_LOCAL_DB_PORT,
+            local_db_port,
             "--ui-port",
-            DEFAULT_TAPDB_LOCAL_UI_PORT,
+            local_ui_port,
             "--database",
-            runtime_env["database_name"],
+            physical_database,
+            "--schema-name",
+            _require_schema_name(runtime_env),
         ],
         env=child_env,
         capture_output=True,
@@ -462,7 +507,7 @@ def export_database_url_for_target(
         client_id=runtime_env["client_id"],
         database_name=runtime_env["database_name"],
     )
-    return _build_sqlalchemy_url(cfg)
+    return _build_sqlalchemy_url(cfg, schema_name=_require_schema_name(runtime_env))
 
 
 def get_tapdb_bundle(
@@ -506,6 +551,7 @@ def get_tapdb_bundle(
         iam_auth=str(cfg.get("iam_auth", "true")).strip().lower() not in {"0", "false", "no"},
         domain_code=runtime_env["domain_code"],
         owner_repo_name=runtime_env["owner_repo_name"],
+        schema_name=_require_schema_name(runtime_env),
     )
     template_manager = TemplateManager(Path(resolved_config_path) if resolved_config_path else None)
     instance_factory = InstanceFactory(

@@ -219,7 +219,10 @@ def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) ->
         tapdb_env="dev",
     )
 
-    assert db_url == "postgresql+psycopg2://ursa_user:secret@db.example.test:5432/daylily_ursa"
+    assert db_url == (
+        "postgresql+psycopg2://ursa_user:secret@db.example.test:5432/daylily_ursa"
+        "?options=-csearch_path%3Dtapdb_ursa_dev"
+    )
     assert "DATABASE_URL" not in tapdb_runtime.os.environ
 
 
@@ -278,8 +281,12 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "aws_region": "us-west-2",
             "client_id": "local",
             "database_name": "ursa",
+            "schema_name": "tapdb_ursa_dev",
+            "physical_database": "tapdb_shared_dev",
             "tapdb_env": "dev",
             "config_path": str(config_path),
+            "local_db_port": "5588",
+            "local_ui_port": "8918",
             "domain_code": "Z",
             "owner_repo_name": "ursa",
             "domain_registry_path": str(tmp_path / "domain.json"),
@@ -311,6 +318,8 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "local",
             "--database-name",
             "ursa",
+            "--schema-name",
+            "tapdb_ursa_dev",
             "--owner-repo-name",
             "ursa",
             "--domain-code",
@@ -357,7 +366,9 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "--ui-port",
             "8918",
             "--database",
-            "ursa",
+            "tapdb_shared_dev",
+            "--schema-name",
+            "tapdb_ursa_dev",
         ],
     ]
     assert captured["env"]["MERIDIAN_DOMAIN_CODE"] == "Z"
@@ -373,8 +384,12 @@ def test_ensure_local_tapdb_namespace_config_requires_explicit_config_path(monke
             "aws_region": "us-west-2",
             "client_id": "local",
             "database_name": "ursa",
+            "schema_name": "tapdb_ursa_dev",
+            "physical_database": "",
             "tapdb_env": "dev",
             "config_path": "",
+            "local_db_port": "5588",
+            "local_ui_port": "8918",
             "domain_code": "Z",
             "owner_repo_name": "ursa",
             "domain_registry_path": "/tmp/domain.json",
@@ -395,8 +410,12 @@ def test_ensure_local_tapdb_namespace_config_requires_explicit_registry_paths(
         "aws_region": "us-west-2",
         "client_id": "local",
         "database_name": "ursa",
+        "schema_name": "tapdb_ursa_dev",
+        "physical_database": "",
         "tapdb_env": "dev",
         "config_path": "/tmp/ursa-tapdb.yaml",
+        "local_db_port": "5588",
+        "local_ui_port": "8918",
         "domain_code": "Z",
         "owner_repo_name": "ursa",
         "domain_registry_path": "/tmp/domain.json",
@@ -443,6 +462,10 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
                 tapdb_database_name="yaml-db",
                 tapdb_env="dev",
                 tapdb_config_path="/tmp/from-yaml.yaml",
+                tapdb_schema_name="tapdb_yaml_dev",
+                tapdb_physical_database="tapdb_shared_dev",
+                tapdb_local_db_port=5533,
+                tapdb_local_ui_port=8918,
                 tapdb_domain_registry_path="/tmp/domain_code_registry.json",
                 tapdb_prefix_ownership_registry_path="/tmp/prefix_ownership_registry.json",
             )
@@ -452,8 +475,12 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
         assert tapdb_runtime._resolved_default_identity() == (
             "env-client",
             "env-db",
+            "tapdb_yaml_dev",
+            "tapdb_shared_dev",
             "prod",
             "/tmp/from-yaml.yaml",
+            "5533",
+            "8918",
             "/tmp/domain_code_registry.json",
             "/tmp/prefix_ownership_registry.json",
         )
@@ -570,6 +597,7 @@ def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch)
             "tapdb_env": "dev",
             "client_id": "local",
             "database_name": "ursa",
+            "schema_name": "tapdb_ursa_dev",
             "aws_region": "us-west-2",
             "domain_code": "Z",
             "owner_repo_name": "ursa",
@@ -611,6 +639,7 @@ def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch)
     bundle = tapdb_runtime.get_tapdb_bundle()
 
     assert captured["connection_kwargs"]["domain_code"] == "Z"
+    assert captured["connection_kwargs"]["schema_name"] == "tapdb_ursa_dev"
     assert captured["template_config_path"] == "/tmp/ursa.yaml"
     assert captured["instance_factory_domain_code"] == "Z"
     assert bundle.connection is not None

@@ -33,6 +33,8 @@ DEFAULT_TAPDB_DOMAIN_REGISTRY_PATH = Path.home() / ".config" / "tapdb" / "domain
 DEFAULT_TAPDB_PREFIX_REGISTRY_PATH = (
     Path.home() / ".config" / "tapdb" / "prefix_ownership_registry.json"
 )
+DEFAULT_TAPDB_LOCAL_DB_PORT = "5588"
+DEFAULT_TAPDB_LOCAL_UI_PORT = "8918"
 DEFAULT_COGNITO_ALLOWED_EMAIL_DOMAINS = (
     "lsmc.com",
     "lsmc.bio",
@@ -62,8 +64,12 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "ursa_internal_output_bucket": cfg.ursa_internal_output_bucket,
         "tapdb_client_id": cfg.tapdb_client_id,
         "tapdb_database_name": cfg.tapdb_database_name,
+        "tapdb_schema_name": getattr(cfg, "tapdb_schema_name", ""),
+        "tapdb_physical_database": getattr(cfg, "tapdb_physical_database", ""),
         "tapdb_env": cfg.tapdb_env,
         "tapdb_config_path": getattr(cfg, "tapdb_config_path", ""),
+        "tapdb_local_db_port": getattr(cfg, "tapdb_local_db_port", DEFAULT_TAPDB_LOCAL_DB_PORT),
+        "tapdb_local_ui_port": getattr(cfg, "tapdb_local_ui_port", DEFAULT_TAPDB_LOCAL_UI_PORT),
         "tapdb_domain_registry_path": getattr(
             cfg,
             "tapdb_domain_registry_path",
@@ -213,10 +219,14 @@ regions:
 # Explicit env contract for TapDB/Meridian subprocesses:
 # MERIDIAN_DOMAIN_CODE=Z
 # TAPDB_OWNER_REPO=ursa
-tapdb_client_id: local
+tapdb_client_id: ursa
 tapdb_database_name: ursa
+tapdb_schema_name: tapdb_ursa_dev
+tapdb_physical_database: ""
 tapdb_config_path: ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml
 tapdb_env: dev
+tapdb_local_db_port: {DEFAULT_TAPDB_LOCAL_DB_PORT}
+tapdb_local_ui_port: {DEFAULT_TAPDB_LOCAL_UI_PORT}
 tapdb_domain_registry_path: ~/.config/tapdb/domain_code_registry.json
 tapdb_prefix_ownership_registry_path: ~/.config/tapdb/prefix_ownership_registry.json
 
@@ -293,12 +303,20 @@ class Settings(BaseSettings):
         description="TapDB database target to resolve (local or aurora)",
     )
     tapdb_client_id: str = Field(
-        default="local",
+        default="ursa",
         description="TapDB client identifier",
     )
     tapdb_database_name: str = Field(
         default="ursa",
         description="TapDB namespace / database name",
+    )
+    tapdb_schema_name: str = Field(
+        default="tapdb_ursa_dev",
+        description="Explicit PostgreSQL schema name used by TapDB",
+    )
+    tapdb_physical_database: str = Field(
+        default="",
+        description="Physical PostgreSQL database name for local shared TapDB runtime",
     )
     tapdb_config_path: str = Field(
         default="",
@@ -307,6 +325,14 @@ class Settings(BaseSettings):
     tapdb_env: str = Field(
         default="dev",
         description="TapDB environment selector",
+    )
+    tapdb_local_db_port: str = Field(
+        default=DEFAULT_TAPDB_LOCAL_DB_PORT,
+        description="Local TapDB PostgreSQL port",
+    )
+    tapdb_local_ui_port: str = Field(
+        default=DEFAULT_TAPDB_LOCAL_UI_PORT,
+        description="Local TapDB admin UI port",
     )
     tapdb_domain_registry_path: str = Field(
         default=str(DEFAULT_TAPDB_DOMAIN_REGISTRY_PATH),
@@ -737,6 +763,16 @@ class Settings(BaseSettings):
                 raise ValueError("dewey_api_token is required when dewey_enabled=true")
         if not str(self.ursa_internal_output_bucket or "").strip():
             raise ValueError("ursa_internal_output_bucket is required")
+        if self.database_backend == "tapdb" and not str(self.tapdb_schema_name or "").strip():
+            raise ValueError("tapdb_schema_name is required when database_backend=tapdb")
+        for field_name in ("tapdb_local_db_port", "tapdb_local_ui_port"):
+            value = str(getattr(self, field_name) or "").strip()
+            try:
+                port = int(value)
+            except ValueError as exc:
+                raise ValueError(f"{field_name} must be an integer port") from exc
+            if port < 1 or port > 65535:
+                raise ValueError(f"{field_name} must be between 1 and 65535")
         deployment = _resolve_deployment_chrome(
             name=self.deployment_name,
             color=self.deployment_color,
