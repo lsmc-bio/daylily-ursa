@@ -406,7 +406,7 @@ def ensure_local_tapdb_namespace_config(
             "--database-name",
             runtime_env["database_name"],
             "--schema-name",
-            _require_schema_name(runtime_env),
+            f"{runtime_env['tapdb_env']}={_require_schema_name(runtime_env)}",
             "--owner-repo-name",
             runtime_env["owner_repo_name"],
             "--domain-code",

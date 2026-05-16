@@ -319,7 +319,7 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "--database-name",
             "ursa",
             "--schema-name",
-            "tapdb_ursa_dev",
+            "dev=tapdb_ursa_dev",
             "--owner-repo-name",
             "ursa",
             "--domain-code",
