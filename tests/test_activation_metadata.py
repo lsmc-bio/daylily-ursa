@@ -67,7 +67,7 @@ def test_pyproject_contains_the_single_python_install_set() -> None:
         "boto3-stubs[s3,sns,cloudwatch]>=1.28.0",
         "daylily-auth-cognito==2.1.5",
         "daylily-ephemeral-cluster==2.3.2",
-        "daylily-tapdb==6.0.11",
+        "daylily-tapdb==6.0.12",
         "fastapi>=0.104.0",
         "httpx>=0.25.0",
         "itsdangerous>=2.2.0",
