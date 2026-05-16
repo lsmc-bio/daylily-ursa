@@ -28,7 +28,7 @@
     },
     "zebra_day": {
       "repo": "Daylily-Informatics/zebra_day",
-      "current": "6.0.10"
+      "current": "6.0.11"
     },
     "daylily-omics-references": {
       "repo": "Daylily-Informatics/daylily-omics-references",
@@ -44,9 +44,9 @@
       "cognito": "2.1.5",
       "tapdb": "6.0.13",
       "cli_core_yo": "2.1.1",
-      "zebra_day": "6.0.10",
+      "zebra_day": "6.0.11",
       "omics_references": "0.3.1",
-      "notes": "Pinned daylily-ephemeral-cluster==2.3.2, daylily-auth-cognito to 2.1.5, daylily-tapdb to 6.0.13, cli-core-yo to 2.1.1, zebra_day to GitHub tag 6.0.10, and lsmc-bio daylily-omics-analysis to GitHub release 0.7.752"
+      "notes": "Pinned daylily-ephemeral-cluster==2.3.2, daylily-auth-cognito to 2.1.5, daylily-tapdb to 6.0.13, cli-core-yo to 2.1.1, zebra_day to GitHub tag 6.0.11, and lsmc-bio daylily-omics-analysis to GitHub release 0.7.752"
     },
     {
       "date": "2026-03-03",
