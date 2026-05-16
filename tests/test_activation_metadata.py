@@ -70,7 +70,7 @@ def test_pyproject_contains_the_single_python_install_set() -> None:
             "daylily-ephemeral-cluster @ "
             "git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@2.2.8"
         ),
-        "daylily-tapdb @ git+https://github.com/Daylily-Informatics/daylily-tapdb.git@6.0.10",
+        "daylily-tapdb==6.0.11",
         "fastapi>=0.104.0",
         "httpx>=0.25.0",
         "itsdangerous>=2.2.0",
@@ -98,7 +98,7 @@ def test_pyproject_contains_the_single_python_install_set() -> None:
         "typer>=0.9.0",
         "uvicorn[standard]>=0.24.0",
         "cli-core-yo==2.1.1",
-        "zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.6",
+        "zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.7",
         "boto3>=1.26.0",
     ):
         assert expected in dependencies
@@ -119,15 +119,15 @@ def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
     )
     assert payload["components"]["daylily-omics-analysis"]["current"] == "0.7.752"
     assert payload["components"]["daylily-auth-cognito"]["current"] == "2.1.5"
-    assert payload["components"]["daylily-tapdb"]["current"] == "6.0.10"
+    assert payload["components"]["daylily-tapdb"]["current"] == "6.0.11"
     assert payload["components"]["cli-core-yo"]["current"] == "2.1.1"
-    assert payload["components"]["zebra_day"]["current"] == "6.0.6"
+    assert payload["components"]["zebra_day"]["current"] == "6.0.7"
     assert payload["tested_combinations"][0]["ephemeral_cluster"] == "2.2.8"
     assert payload["tested_combinations"][0]["omics_analysis"] == "0.7.752"
     assert payload["tested_combinations"][0]["cognito"] == "2.1.5"
-    assert payload["tested_combinations"][0]["tapdb"] == "6.0.10"
+    assert payload["tested_combinations"][0]["tapdb"] == "6.0.11"
     assert payload["tested_combinations"][0]["cli_core_yo"] == "2.1.1"
-    assert payload["tested_combinations"][0]["zebra_day"] == "6.0.6"
+    assert payload["tested_combinations"][0]["zebra_day"] == "6.0.7"
     assert "daylily-ephemeral-cluster to GitHub tag 2.2.8" in (
         payload["tested_combinations"][0]["notes"]
     )
