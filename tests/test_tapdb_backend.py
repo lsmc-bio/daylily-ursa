@@ -614,6 +614,44 @@ def test_backend_scopes_template_lookups_to_bundle_domain_code() -> None:
     assert {kwargs["domain_code"] for _, kwargs in template_calls} == {"Z"}
 
 
+def test_backend_passes_settings_profile_and_region_to_tapdb_bundle(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeSettings:
+        tapdb_client_id = "ursa"
+        tapdb_database_name = "ursa-unidbtst"
+        tapdb_config_path = "/tmp/ursa-tapdb.yaml"
+        regions = [SimpleNamespace(name="us-west-2")]
+
+        def get_effective_aws_profile(self) -> str:
+            return "lsmc"
+
+    def fake_get_tapdb_bundle(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            connection=SimpleNamespace(domain_code="Z"),
+            template_manager=SimpleNamespace(),
+            instance_factory=SimpleNamespace(),
+        )
+
+    monkeypatch.setattr(
+        backend_module, "get_tapdb_bundle", fake_get_tapdb_bundle
+    )
+    monkeypatch.setattr(
+        "daylib_ursa.config.get_settings", lambda: _FakeSettings()
+    )
+
+    backend = TapDBBackend()
+
+    assert backend.bundle is not None
+    assert captured["client_id"] == "ursa"
+    assert captured["namespace"] == "ursa-unidbtst"
+    assert captured["app_username"] == "ursa"
+    assert captured["config_path"] == "/tmp/ursa-tapdb.yaml"
+    assert captured["profile"] == "lsmc"
+    assert captured["region"] == "us-west-2"
+
+
 def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
