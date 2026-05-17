@@ -83,7 +83,7 @@ dewey_verify_ssl: true
 
 # Non-production deployment chrome
 deployment:
-  name: ""
+  name: "<deployment>"
   color: ""
   is_production: false
 

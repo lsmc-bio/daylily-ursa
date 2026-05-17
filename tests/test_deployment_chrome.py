@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
@@ -26,7 +27,6 @@ from daylib_ursa.config import (
 )
 from daylib_ursa.gui_app import mount_gui
 from daylib_ursa.ursa_config import (
-    DEFAULT_DEPLOYMENT_BANNER_COLOR,
     _resolve_deployment_chrome,
     _stable_deployment_color_hex,
     _stable_region_color_hex,
@@ -34,7 +34,7 @@ from daylib_ursa.ursa_config import (
 
 
 def test_get_settings_reads_cognito_from_env_over_yaml(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     monkeypatch.setenv("URSA_DEPLOYMENT_CODE", "local")
     config_dir = tmp_path / ".config" / "ursa-local"
     config_dir.mkdir(parents=True)
@@ -119,6 +119,7 @@ def test_get_settings_reads_shared_external_broker_env(monkeypatch):
         "https://dev.login.lsmc.com:8916/logout",
     )
     monkeypatch.setenv("URSA_INTERNAL_OUTPUT_BUCKET", "ursa-internal")
+    monkeypatch.setenv("DEPLOYMENT_NAME", "stage-g")
     clear_settings_cache()
 
     settings = get_settings()
@@ -134,7 +135,8 @@ def test_default_config_template_emits_secret_and_domain_defaults() -> None:
     assert "session_secret_key:" in template
     assert "generated-on-init" not in template
     assert "whitelist_domains: lsmc.com,lsmc.bio,lsmc.life,daylilyinformatics.com" in template
-    assert "tapdb_config_path: ~/.config/tapdb/local/ursa-local/tapdb-config.yaml" in template
+    assert "tapdb_config_path: ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml" in template
+    assert 'name: "<deployment>"' in template
     assert "ui_show_environment_chrome: true" in template
 
 
@@ -145,8 +147,7 @@ def _app_with_gui(settings, *, config_path: Path | None = None):
         app, build_web_session_config(settings, app.state.server_instance_id)
     )
     app.state.settings = settings
-    if config_path is not None:
-        app.state.ursa_config = SimpleNamespace(config_path=config_path)
+    app.state.ursa_config = SimpleNamespace(config_path=config_path or Path("/tmp/ursa-test-config.yaml"))
     app.state.identity_client = SimpleNamespace(resolve_access_token=lambda _token: None)
     app.state.auth_provider = SimpleNamespace(
         resolve_access_token=lambda _token, **_kwargs: CurrentUser(
@@ -401,26 +402,21 @@ def test_admin_config_page_shows_active_config_path_and_redacts_secrets(monkeypa
     assert "cognito-secret" not in response.text
 
 
-def test_deployment_settings_fall_back_to_deployment_code(monkeypatch):
+def test_deployment_settings_require_explicit_name(monkeypatch):
     monkeypatch.setenv("URSA_DEPLOYMENT_CODE", "stage-g")
     clear_settings_cache()
 
-    settings = get_settings_for_testing(
-        ursa_internal_output_bucket="ursa-internal",
-        deployment_name="",
-        deployment_color="",
-        deployment_is_production=True,
-        cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
-        cognito_app_client_id="client-123",
-        cognito_callback_url="https://localhost:8913/auth/callback",
-        cognito_logout_url="https://localhost:8913/login",
-    )
-
-    assert settings.deployment == {
-        "name": "stage-g",
-        "color": _stable_deployment_color_hex("stage-g"),
-        "is_production": False,
-    }
+    with pytest.raises(RuntimeError, match="Ursa deployment.name is required"):
+        get_settings_for_testing(
+            ursa_internal_output_bucket="ursa-internal",
+            deployment_name="",
+            deployment_color="",
+            deployment_is_production=True,
+            cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
+            cognito_app_client_id="client-123",
+            cognito_callback_url="https://localhost:8913/auth/callback",
+            cognito_logout_url="https://localhost:8913/login",
+        )
 
 
 def test_prod_deployment_name_uses_stable_color_and_marks_production() -> None:
@@ -440,17 +436,15 @@ def test_prod_deployment_name_uses_stable_color_and_marks_production() -> None:
     }
 
 
-def test_light_aqua_is_used_without_any_deployment_name() -> None:
-    assert _resolve_deployment_chrome(name="", color="", default_name="") == {
-        "name": "",
-        "color": DEFAULT_DEPLOYMENT_BANNER_COLOR,
-        "is_production": False,
-    }
+def test_deployment_chrome_requires_name() -> None:
+    with pytest.raises(RuntimeError, match="Ursa deployment.name is required"):
+        _resolve_deployment_chrome(name="", color="")
 
 
 def test_auth_login_redirects_to_cognito(monkeypatch):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -471,6 +465,7 @@ def test_auth_login_redirects_to_cognito(monkeypatch):
 def test_auth_callback_persists_session_and_redirects(monkeypatch):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -509,6 +504,7 @@ def test_auth_callback_persists_session_and_redirects(monkeypatch):
 def test_auth_callback_rejects_disallowed_email_domain(monkeypatch):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -544,6 +540,7 @@ def test_auth_callback_rejects_disallowed_email_domain(monkeypatch):
 def test_auth_callback_without_prior_login_redirects_to_auth_error():
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -560,6 +557,7 @@ def test_auth_callback_without_prior_login_redirects_to_auth_error():
 def test_auth_callback_with_wrong_state_redirects_to_auth_error():
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -578,6 +576,7 @@ def test_auth_callback_with_wrong_state_redirects_to_auth_error():
 def test_stale_session_redirects_to_login_with_session_expired_reason():
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -600,6 +599,7 @@ def test_stale_session_redirects_to_login_with_session_expired_reason():
 def test_two_browser_sessions_keep_distinct_users(monkeypatch):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -639,6 +639,7 @@ def test_two_browser_sessions_keep_distinct_users(monkeypatch):
 def test_logout_from_one_session_does_not_clear_the_other(monkeypatch):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -684,6 +685,7 @@ def test_auth_login_redirects_to_local_auth_error_when_cognito_is_misconfigured(
 ):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -707,6 +709,7 @@ def test_auth_logout_redirects_to_local_auth_error_when_cognito_is_misconfigured
 ):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -723,14 +726,18 @@ def test_auth_logout_redirects_to_local_auth_error_when_cognito_is_misconfigured
 
 
 def test_external_broker_login_sets_admin_session(monkeypatch, tmp_path):
+    ca_bundle = tmp_path / "broker-ca.pem"
+    ca_bundle.write_text("test ca", encoding="utf-8")
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         auth_mode="external_broker",
         external_broker_service_id="ursa",
         external_broker_login_url="https://dev.login.lsmc.com:8916/login",
         external_broker_handoff_exchange_url="https://dev.login.lsmc.com:8916/api/handoff/exchange",
         external_broker_callback_url="https://localhost:8913/auth/lsmc/callback",
         external_broker_logout_url="https://dev.login.lsmc.com:8916/logout",
+        external_broker_ca_bundle=str(ca_bundle),
     )
 
     class _Response:
@@ -789,6 +796,7 @@ def test_external_broker_login_sets_admin_session(monkeypatch, tmp_path):
 def test_auth_error_renders_human_readable_logout_message():
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -809,6 +817,7 @@ def test_auth_error_renders_human_readable_logout_message():
 def test_auth_callback_passes_paired_access_token_for_id_token_verification(monkeypatch):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="test",
         cognito_user_pool_id="pool-123",
         cognito_region="us-west-2",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
@@ -824,6 +833,7 @@ def test_auth_callback_passes_paired_access_token_for_id_token_verification(monk
         app, build_web_session_config(settings, app.state.server_instance_id)
     )
     app.state.settings = settings
+    app.state.ursa_config = SimpleNamespace(config_path=Path("/tmp/ursa-test-config.yaml"))
     app.state.identity_client = SimpleNamespace(resolve_access_token=lambda _token: None)
     app.state.auth_provider = CognitoAuthProvider(
         user_pool_id="pool-123",
@@ -883,6 +893,7 @@ def test_favicon_route_redirects_to_svg():
         _app_with_gui(
             get_settings_for_testing(
                 ursa_internal_output_bucket="ursa-internal",
+                deployment_name="test",
                 cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
                 cognito_app_client_id="client-123",
                 cognito_callback_url="https://localhost:8913/auth/callback",

@@ -24,7 +24,6 @@ from typing import Dict, List, Optional, Tuple
 import yaml  # type: ignore[import-untyped]
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_DEPLOYMENT_BANNER_COLOR = "#AFEEEE"
 PRODUCTION_DEPLOYMENT_NAMES = {"prod", "production"}
 
 
@@ -154,15 +153,12 @@ def _resolve_deployment_chrome(
     *,
     name: str | None,
     color: str | None,
-    default_name: str | None = None,
 ) -> dict[str, object]:
-    resolved_name = str(name or "").strip() or str(default_name or "").strip()
+    resolved_name = str(name or "").strip()
+    if not resolved_name:
+        raise RuntimeError("Ursa deployment.name is required")
     _ = color
-    resolved_color = (
-        _stable_deployment_color_hex(resolved_name)
-        if resolved_name
-        else DEFAULT_DEPLOYMENT_BANNER_COLOR
-    )
+    resolved_color = _stable_deployment_color_hex(resolved_name)
     return {
         "name": resolved_name,
         "color": resolved_color,
@@ -206,6 +202,7 @@ VALID_FIELDS = {
     "external_broker_handoff_exchange_url": (str, "External login broker handoff exchange URL"),
     "external_broker_callback_url": (str, "External login broker callback URL"),
     "external_broker_logout_url": (str, "External login broker logout URL"),
+    "external_broker_ca_bundle": (str, "External login broker CA bundle path"),
     "session_secret_key": (str, "Session secret key for web sessions"),
     "api_host": (str, "API bind host"),
     "api_port": (int, "API bind port"),
@@ -447,6 +444,9 @@ class UrsaConfig:
     external_broker_logout_url: Optional[str] = None
     """External login broker logout URL read from YAML config."""
 
+    external_broker_ca_bundle: Optional[str] = None
+    """External login broker CA bundle path read from YAML config."""
+
     session_secret_key: Optional[str] = None
     """Session secret key for web sessions read from YAML config."""
 
@@ -614,6 +614,7 @@ class UrsaConfig:
         external_broker_handoff_exchange_url = data.get("external_broker_handoff_exchange_url")
         external_broker_callback_url = data.get("external_broker_callback_url")
         external_broker_logout_url = data.get("external_broker_logout_url")
+        external_broker_ca_bundle = data.get("external_broker_ca_bundle")
         session_secret_key = data.get("session_secret_key")
         api_host = data.get("api_host")
         api_port = data.get("api_port")
@@ -634,7 +635,6 @@ class UrsaConfig:
         deployment_chrome = _resolve_deployment_chrome(
             name=str(deployment.get("name") or ""),
             color=str(deployment.get("color") or ""),
-            default_name=_resolve_deployment_code(),
         )
 
         config = cls(
@@ -666,6 +666,7 @@ class UrsaConfig:
             external_broker_handoff_exchange_url=external_broker_handoff_exchange_url,
             external_broker_callback_url=external_broker_callback_url,
             external_broker_logout_url=external_broker_logout_url,
+            external_broker_ca_bundle=external_broker_ca_bundle,
             session_secret_key=session_secret_key,
             api_host=api_host,
             api_port=api_port,
