@@ -49,7 +49,10 @@ regions:
 # TAPDB_OWNER_REPO=ursa
 tapdb_client_id: ursa
 tapdb_database_name: ursa
+tapdb_schema_name: tapdb_ursa_dev
 tapdb_config_path: ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml
+tapdb_domain_code: Z
+tapdb_owner_repo_name: ursa
 tapdb_domain_registry_path: ~/.config/tapdb/domain_code_registry.json
 tapdb_prefix_ownership_registry_path: ~/.config/tapdb/prefix_ownership_registry.json
 

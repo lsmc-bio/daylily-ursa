@@ -470,3 +470,40 @@ class TestStrictConfigValidation:
         config_file.write_text(yaml.dump({"regions": ["us-west-2", "eu-central-1"]}))
         valid, errors, warnings = validate_config_file(config_file)
         assert valid, f"Expected valid config, got errors={errors}"
+
+    def test_validate_config_file_rejects_unknown_fields(self, tmp_path):
+        import yaml
+
+        from daylib_ursa.ursa_config import validate_config_file
+
+        config_file = tmp_path / "ursa-config.yaml"
+        config_file.write_text(yaml.dump({"regions": ["us-west-2"], "unknown_field": "x"}))
+
+        valid, errors, warnings = validate_config_file(config_file)
+
+        assert not valid
+        assert warnings == []
+        assert any("Unknown field 'unknown_field' is not supported" in e for e in errors)
+
+    def test_validate_config_file_accepts_explicit_tapdb_and_mount_fields(self, tmp_path):
+        import yaml
+
+        from daylib_ursa.ursa_config import validate_config_file
+
+        config_file = tmp_path / "ursa-config.yaml"
+        config_file.write_text(
+            yaml.dump(
+                {
+                    "regions": ["us-west-2"],
+                    "tapdb_domain_code": "Z",
+                    "tapdb_owner_repo_name": "ursa",
+                    "ursa_tapdb_mount_enabled": True,
+                    "ursa_tapdb_mount_path": "/admin/tapdb",
+                }
+            )
+        )
+
+        valid, errors, warnings = validate_config_file(config_file)
+
+        assert valid, f"Expected valid config, got errors={errors}"
+        assert warnings == []
