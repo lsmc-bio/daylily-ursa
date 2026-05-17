@@ -125,11 +125,28 @@ class TapDBBackend:
         )
         if not resolved_app_username:
             raise RuntimeError("Ursa TapDB app_username is required")
+        resolved_profile = ""
+        resolved_region = ""
+        if settings is not None:
+            effective_profile = getattr(settings, "get_effective_aws_profile", None)
+            resolved_profile = str(
+                effective_profile()
+                if callable(effective_profile)
+                else getattr(settings, "aws_profile", "")
+            ).strip()
+            configured_regions = getattr(settings, "regions", []) or []
+            if configured_regions:
+                first_region = configured_regions[0]
+                resolved_region = str(
+                    getattr(first_region, "name", first_region) or ""
+                ).strip()
         self.bundle = bundle or get_tapdb_bundle(
             client_id=resolved_client_id,
             namespace=resolved_namespace,
             app_username=resolved_app_username,
             config_path=str(getattr(settings, "tapdb_config_path", "") or ""),
+            profile=resolved_profile,
+            region=resolved_region,
         )
         self._conn = self.bundle.connection
         self._tm = self.bundle.template_manager
