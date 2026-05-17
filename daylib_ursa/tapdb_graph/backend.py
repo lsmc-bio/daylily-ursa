@@ -140,6 +140,13 @@ class TapDBBackend:
                 resolved_region = str(
                     getattr(first_region, "name", first_region) or ""
                 ).strip()
+            if not resolved_region:
+                allowed_regions = getattr(settings, "get_allowed_regions", None)
+                configured_allowed_regions = (
+                    allowed_regions() if callable(allowed_regions) else []
+                )
+                if configured_allowed_regions:
+                    resolved_region = str(configured_allowed_regions[0] or "").strip()
         self.bundle = bundle or get_tapdb_bundle(
             client_id=resolved_client_id,
             namespace=resolved_namespace,
