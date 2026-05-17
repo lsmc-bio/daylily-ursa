@@ -21,7 +21,7 @@ from daylib_ursa.domain_access import (
     APPROVED_WEB_DOMAIN_SUFFIXES,
     is_allowed_origin,
 )
-from daylib_ursa.ursa_config import _resolve_deployment_chrome, _resolve_deployment_code
+from daylib_ursa.ursa_config import _resolve_deployment_chrome
 
 DEFAULT_API_HOST = "0.0.0.0"
 DEFAULT_API_PORT = 8913
@@ -98,6 +98,7 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         ),
         "external_broker_callback_url": getattr(cfg, "external_broker_callback_url", ""),
         "external_broker_logout_url": getattr(cfg, "external_broker_logout_url", ""),
+        "external_broker_ca_bundle": getattr(cfg, "external_broker_ca_bundle", ""),
         "api_host": cfg.api_host,
         "api_port": cfg.api_port,
         "bloom_base_url": cfg.bloom_base_url,
@@ -234,8 +235,8 @@ regions:
 # =============================================================================
 # Ursa reads its TapDB namespace/runtime from this YAML file.
 # Bootstrap the matching namespace with:
-#   tapdb --config ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml db-config init --client-id ursa --database-name ursa --schema-name tapdb_ursa_dev --owner-repo-name ursa --domain-code Z --domain-registry-path ~/.config/tapdb/domain_code_registry.json --prefix-ownership-registry-path ~/.config/tapdb/prefix_ownership_registry.json --engine-type local --host localhost --port 5588 --ui-port 8918 --user postgres --database ursa
-#   tapdb --config ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml bootstrap local
+#   tapdb --config ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml db-config init --client-id ursa --database-name ursa --schema-name tapdb_ursa_<deployment> --owner-repo-name ursa --domain-code Z --domain-registry-path ~/.config/tapdb/domain_code_registry.json --prefix-ownership-registry-path ~/.config/tapdb/prefix_ownership_registry.json --engine-type local --host localhost --port 5588 --ui-port 8918 --user postgres --database tapdb_<deployment>
+#   tapdb --config ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml bootstrap local
 #
 # Explicit process contract for TapDB/Meridian subprocesses:
 # MERIDIAN_DOMAIN_CODE=Z
@@ -244,7 +245,7 @@ tapdb_client_id: ursa
 tapdb_database_name: ursa
 tapdb_schema_name: tapdb_ursa_dev
 tapdb_physical_database: ""
-tapdb_config_path: ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml
+tapdb_config_path: ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml
 tapdb_local_db_port: {DEFAULT_TAPDB_LOCAL_DB_PORT}
 tapdb_local_ui_port: {DEFAULT_TAPDB_LOCAL_UI_PORT}
 tapdb_domain_registry_path: ~/.config/tapdb/domain_code_registry.json
@@ -283,7 +284,7 @@ dewey_verify_ssl: true
 
 # Non-production deployment chrome
 deployment:
-  name: ""
+  name: "<deployment>"
   color: ""
   is_production: false
 
@@ -480,6 +481,10 @@ class Settings(BaseSettings):
     external_broker_logout_url: str = Field(
         default="",
         description="External login broker logout URL",
+    )
+    external_broker_ca_bundle: str = Field(
+        default="",
+        description="CA bundle for broker HTTPS",
     )
     enable_auth: bool = Field(
         default=True,
@@ -851,6 +856,9 @@ class Settings(BaseSettings):
                     "external_broker auth requires explicit settings: "
                     + ", ".join(sorted(missing))
                 )
+            ca_bundle = str(self.external_broker_ca_bundle or "").strip()
+            if ca_bundle and not Path(ca_bundle).is_file():
+                raise ValueError("external_broker_ca_bundle does not exist")
         if self.dewey_enabled:
             if not str(self.dewey_base_url or "").strip():
                 raise ValueError("dewey_base_url is required when dewey_enabled=true")
@@ -871,7 +879,6 @@ class Settings(BaseSettings):
         deployment = _resolve_deployment_chrome(
             name=self.deployment_name,
             color=self.deployment_color,
-            default_name=_resolve_deployment_code(),
         )
         self.deployment_name = str(deployment["name"])
         self.deployment_color = str(deployment["color"])
@@ -910,6 +917,9 @@ class Settings(BaseSettings):
                     ),
                     "external_broker_logout_url": _read_first_env(
                         "LSMC_AUTH_BROKER_LOGOUT_URL"
+                    ),
+                    "external_broker_ca_bundle": _read_first_env(
+                        "LSMC_AUTH_BROKER_CA_BUNDLE"
                     ),
                 }.items()
                 if value

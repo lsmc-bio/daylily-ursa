@@ -287,6 +287,7 @@ def mount_gui(app: FastAPI) -> None:
             ).strip(),
             "callback_url": str(getattr(settings, "external_broker_callback_url", "") or "").strip(),
             "logout_url": str(getattr(settings, "external_broker_logout_url", "") or "").strip(),
+            "ca_bundle": str(getattr(settings, "external_broker_ca_bundle", "") or "").strip(),
         }
         missing = [key for key, value in values.items() if not value]
         if missing:
@@ -373,7 +374,8 @@ def mount_gui(app: FastAPI) -> None:
 
     async def _exchange_external_broker_handoff(code: str) -> dict[str, Any]:
         broker = _external_broker_settings()
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        verify: bool | str = broker["ca_bundle"] if broker["ca_bundle"] else True
+        async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
             response = await client.post(broker["handoff_exchange_url"], json={"code": code})
         if response.status_code >= 400:
             raise CognitoWebAuthError(
