@@ -23,11 +23,6 @@ from cli_core_yo.spec import (
 )
 
 from daylib_ursa.cli._registry_v2 import URSA_RUNTIME_TAG
-from daylib_ursa.integrations.tapdb_runtime import (
-    DEFAULT_AWS_PROFILE,
-    DEFAULT_AWS_REGION,
-    DEFAULT_TAPDB_DATABASE_NAME,
-)
 from daylib_ursa.config import build_default_config_template
 from daylib_ursa.ursa_config import _resolve_deployment_code
 
@@ -56,50 +51,28 @@ def _ursa_info_hook() -> list[tuple[str, str]]:
     except Exception:
         settings = None
 
-    rows.append(
-        (
-            "AWS Profile",
-            os.environ.get("AWS_PROFILE")
-            or getattr(settings, "aws_profile", None)
-            or DEFAULT_AWS_PROFILE,
-        )
-    )
-    rows.append(
-        (
-            "AWS Region",
-            os.environ.get("AWS_REGION")
-            or getattr(settings, "cognito_region", None)
-            or DEFAULT_AWS_REGION,
-        )
-    )
-    rows.append(
-        (
-            "TapDB Target",
-            getattr(settings, "database_target", None) or "local",
-        )
-    )
-    rows.append(
-        (
-            "TapDB Client",
-            getattr(settings, "tapdb_client_id", None) or "local",
-        )
-    )
-    rows.append(
-        (
-            "TapDB Namespace",
-            getattr(settings, "tapdb_database_name", None) or DEFAULT_TAPDB_DATABASE_NAME,
-        )
-    )
-    if settings is not None:
-        rows.append(("Bloom URL", settings.bloom_base_url))
-        rows.append(("Atlas URL", settings.atlas_base_url))
+    if settings is None:
+        raise RuntimeError("Ursa CLI info requires explicit loaded settings")
+    for label, value in (
+        ("AWS Profile", os.environ.get("AWS_PROFILE") or getattr(settings, "aws_profile", None)),
+        ("AWS Region", os.environ.get("AWS_REGION") or getattr(settings, "cognito_region", None)),
+        ("TapDB Target", getattr(settings, "database_target", None)),
+        ("TapDB Client", getattr(settings, "tapdb_client_id", None)),
+        ("TapDB Namespace", getattr(settings, "tapdb_database_name", None)),
+    ):
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise RuntimeError(f"Ursa CLI info requires explicit {label}")
+        rows.append((label, cleaned))
+    rows.append(("Bloom URL", settings.bloom_base_url))
+    rows.append(("Atlas URL", settings.atlas_base_url))
 
     try:
         from cli_core_yo.runtime import get_context
 
         state_dir = get_context().xdg_paths.state
-    except Exception:
-        state_dir = Path.home() / ".config" / "ursa"
+    except Exception as exc:
+        raise RuntimeError("Ursa CLI info requires cli-core runtime context") from exc
 
     pid_file = state_dir / "server.pid"
     if pid_file.exists():

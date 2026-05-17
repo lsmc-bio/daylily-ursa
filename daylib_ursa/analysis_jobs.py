@@ -50,7 +50,7 @@ def _snakemake_log_reports_success(text: str) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec 2.3.3."""
+    """Launch manager for Ursa analysis jobs through daylily-ec 2.3.2."""
 
     def __init__(
         self,
@@ -317,9 +317,7 @@ class AnalysisJobManager:
                 cluster_name=job.cluster_name,
                 lines=500,
             )
-            log_text = "\n".join(
-                item for item in (logs.stdout or "", logs.stderr or "") if item
-            )
+            log_text = "\n".join(item for item in (logs.stdout or "", logs.stderr or "") if item)
             if logs.returncode == 0 and _snakemake_log_reports_success(log_text):
                 exit_code = 0
                 completed_at = completed_at or utc_now_iso()

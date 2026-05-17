@@ -494,6 +494,8 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
                 tapdb_local_ui_port=8918,
                 tapdb_domain_registry_path="/tmp/domain_code_registry.json",
                 tapdb_prefix_ownership_registry_path="/tmp/prefix_ownership_registry.json",
+                tapdb_domain_code="Z",
+                tapdb_owner_repo_name="ursa",
             )
         ),
     )
@@ -508,6 +510,8 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
             "8918",
             "/tmp/domain_code_registry.json",
             "/tmp/prefix_ownership_registry.json",
+            "Z",
+            "ursa",
         )
     finally:
         sys.modules.pop("daylib_ursa.config", None)
@@ -524,9 +528,7 @@ def test_repo_ships_tapdb_config_template() -> None:
     assert payload["target"]["schema_name"] == "tapdb_ursa_dev"
     assert payload["meta"]["owner_repo_name"] == "ursa"
     assert payload["target"]["domain_code"] == "Z"
-    assert (
-        payload["meta"]["domain_registry_path"] == "/absolute/path/to/domain_code_registry.json"
-    )
+    assert payload["meta"]["domain_registry_path"] == "/absolute/path/to/domain_code_registry.json"
     assert (
         payload["meta"]["prefix_ownership_registry_path"]
         == "/absolute/path/to/prefix_ownership_registry.json"

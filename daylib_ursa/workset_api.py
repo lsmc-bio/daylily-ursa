@@ -1056,9 +1056,7 @@ def _queue_record_response(record: UrsaQueueRecord) -> BetaQueueRecordResponse:
     )
 
 
-def _analysis_launch_job_euid(
-    record: AnalysisRecord, result_payload: dict[str, Any]
-) -> str | None:
+def _analysis_launch_job_euid(record: AnalysisRecord, result_payload: dict[str, Any]) -> str | None:
     for source in (
         result_payload,
         record.result_payload,
@@ -1708,7 +1706,9 @@ def resolve_daylily_cluster_config_path(settings: Settings) -> Path:
 def _load_cluster_partition_names(cluster_config_path: Path) -> list[str]:
     import yaml
 
-    payload = yaml.safe_load(cluster_config_path.read_text(encoding="utf-8")) or {}
+    payload = yaml.safe_load(cluster_config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Cluster config must be a YAML mapping: {cluster_config_path}")
     queues = payload.get("Scheduling", {}).get("SlurmQueues", [])
     partitions: list[str] = []
     seen: set[str] = set()
@@ -2784,8 +2784,17 @@ def create_app(
                 path = (cluster_create_workspace_root() / path).resolve()
             return path
         values = dict(cluster_config_values)
-        values.setdefault("cluster_name", cluster_name)
-        values.setdefault("s3_bucket_name", s3_bucket_name)
+        explicit_fields = {
+            "cluster_name": cluster_name,
+            "ssh_key_name": ssh_key_name,
+            "s3_bucket_name": s3_bucket_name,
+        }
+        for key, expected in explicit_fields.items():
+            candidate = str(values.pop(key, "") or "").strip()
+            if candidate and candidate != expected:
+                raise ValueError(
+                    f"cluster config values field {key} conflicts with explicit request field"
+                )
         return write_dayec_cluster_config(
             dest=scratch_dir / "cluster.yaml",
             cluster_name=cluster_name,

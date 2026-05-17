@@ -1,4 +1,4 @@
-"""Cluster service backed by the daylily-ephemeral-cluster 2.3.3 contract."""
+"""Cluster service backed by the daylily-ephemeral-cluster 2.3.2 contract."""
 
 from __future__ import annotations
 
