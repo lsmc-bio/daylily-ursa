@@ -181,6 +181,8 @@ VALID_FIELDS = {
     "tapdb_schema_name": (str, "Explicit PostgreSQL schema used by TapDB"),
     "tapdb_physical_database": (str, "Physical PostgreSQL database for shared local TapDB"),
     "tapdb_config_path": (str, "Explicit TapDB config path"),
+    "tapdb_domain_code": (str, "Explicit TapDB Meridian domain code for Ursa templates"),
+    "tapdb_owner_repo_name": (str, "Explicit TapDB owner repo name for Ursa templates"),
     "tapdb_local_db_port": (str, "Local TapDB PostgreSQL port"),
     "tapdb_local_ui_port": (str, "Local TapDB admin UI port"),
     "tapdb_domain_registry_path": (
@@ -207,6 +209,8 @@ VALID_FIELDS = {
     "session_secret_key": (str, "Session secret key for web sessions"),
     "api_host": (str, "API bind host"),
     "api_port": (int, "API bind port"),
+    "ursa_tapdb_mount_enabled": (bool, "Mount TapDB admin UI/API inside Ursa"),
+    "ursa_tapdb_mount_path": (str, "Ursa path prefix for embedded TapDB admin UI/API"),
     "bloom_base_url": (str, "Bloom base URL"),
     "bloom_verify_ssl": (bool, "Verify Bloom TLS certificates"),
     "atlas_base_url": (str, "Atlas base URL"),
@@ -258,7 +262,7 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
     for key in data.keys():
         if key in known_fields:
             continue
-        warnings.append(f"Unknown field '{key}' (will be ignored)")
+        errors.append(f"Unknown field '{key}' is not supported")
 
     # Validate regions field — accepted formats:
     # 1. Simple list of strings: ["us-west-2", "eu-central-1"]
@@ -332,7 +336,13 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
                     f"'{field_name}' must be an integer, got {type(data[field_name]).__name__}"
                 )
 
-    for field_name in ["bloom_verify_ssl", "atlas_verify_ssl", "dewey_enabled", "dewey_verify_ssl"]:
+    for field_name in [
+        "bloom_verify_ssl",
+        "atlas_verify_ssl",
+        "dewey_enabled",
+        "dewey_verify_ssl",
+        "ursa_tapdb_mount_enabled",
+    ]:
         if field_name in data and data[field_name] is not None:
             if not isinstance(data[field_name], bool):
                 errors.append(
@@ -379,6 +389,12 @@ class UrsaConfig:
 
     tapdb_config_path: Optional[str] = None
     """Explicit TapDB config path read from YAML config."""
+
+    tapdb_domain_code: Optional[str] = None
+    """Explicit TapDB Meridian domain code read from YAML config."""
+
+    tapdb_owner_repo_name: Optional[str] = None
+    """Explicit TapDB owner repo name read from YAML config."""
 
     tapdb_local_db_port: Optional[str] = None
     """Local TapDB PostgreSQL port read from YAML config."""
@@ -439,6 +455,12 @@ class UrsaConfig:
 
     api_port: Optional[int] = None
     """API bind port read from YAML config."""
+
+    ursa_tapdb_mount_enabled: Optional[bool] = None
+    """Whether to mount the embedded TapDB admin UI/API."""
+
+    ursa_tapdb_mount_path: Optional[str] = None
+    """Ursa path prefix used for the embedded TapDB admin UI/API."""
 
     bloom_base_url: Optional[str] = None
     """Bloom base URL read from YAML config."""
@@ -573,6 +595,8 @@ class UrsaConfig:
         tapdb_schema_name = data.get("tapdb_schema_name")
         tapdb_physical_database = data.get("tapdb_physical_database")
         tapdb_config_path = data.get("tapdb_config_path")
+        tapdb_domain_code = data.get("tapdb_domain_code")
+        tapdb_owner_repo_name = data.get("tapdb_owner_repo_name")
         tapdb_local_db_port = data.get("tapdb_local_db_port")
         tapdb_local_ui_port = data.get("tapdb_local_ui_port")
         tapdb_domain_registry_path = data.get("tapdb_domain_registry_path")
@@ -593,6 +617,8 @@ class UrsaConfig:
         session_secret_key = data.get("session_secret_key")
         api_host = data.get("api_host")
         api_port = data.get("api_port")
+        ursa_tapdb_mount_enabled = data.get("ursa_tapdb_mount_enabled")
+        ursa_tapdb_mount_path = data.get("ursa_tapdb_mount_path")
         bloom_base_url = data.get("bloom_base_url")
         bloom_verify_ssl = data.get("bloom_verify_ssl")
         atlas_base_url = data.get("atlas_base_url")
@@ -621,6 +647,8 @@ class UrsaConfig:
             tapdb_schema_name=tapdb_schema_name,
             tapdb_physical_database=tapdb_physical_database,
             tapdb_config_path=tapdb_config_path,
+            tapdb_domain_code=tapdb_domain_code,
+            tapdb_owner_repo_name=tapdb_owner_repo_name,
             tapdb_local_db_port=tapdb_local_db_port,
             tapdb_local_ui_port=tapdb_local_ui_port,
             tapdb_domain_registry_path=tapdb_domain_registry_path,
@@ -641,6 +669,8 @@ class UrsaConfig:
             session_secret_key=session_secret_key,
             api_host=api_host,
             api_port=api_port,
+            ursa_tapdb_mount_enabled=ursa_tapdb_mount_enabled,
+            ursa_tapdb_mount_path=ursa_tapdb_mount_path,
             bloom_base_url=bloom_base_url,
             bloom_verify_ssl=bloom_verify_ssl,
             atlas_base_url=atlas_base_url,

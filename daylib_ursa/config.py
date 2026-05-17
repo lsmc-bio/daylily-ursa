@@ -67,6 +67,8 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "tapdb_schema_name": getattr(cfg, "tapdb_schema_name", ""),
         "tapdb_physical_database": getattr(cfg, "tapdb_physical_database", ""),
         "tapdb_config_path": getattr(cfg, "tapdb_config_path", ""),
+        "tapdb_domain_code": getattr(cfg, "tapdb_domain_code", ""),
+        "tapdb_owner_repo_name": getattr(cfg, "tapdb_owner_repo_name", ""),
         "tapdb_local_db_port": getattr(cfg, "tapdb_local_db_port", DEFAULT_TAPDB_LOCAL_DB_PORT),
         "tapdb_local_ui_port": getattr(cfg, "tapdb_local_ui_port", DEFAULT_TAPDB_LOCAL_UI_PORT),
         "tapdb_domain_registry_path": getattr(
@@ -111,6 +113,8 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "deployment_color": cfg.deployment_color,
         "deployment_is_production": cfg.deployment_is_production,
         "ui_show_environment_chrome": cfg.ui_show_environment_chrome,
+        "ursa_tapdb_mount_enabled": cfg.ursa_tapdb_mount_enabled,
+        "ursa_tapdb_mount_path": cfg.ursa_tapdb_mount_path,
     }
     filtered: dict[str, object] = {}
     for key, value in seeded.items():
@@ -343,6 +347,14 @@ class Settings(BaseSettings):
     tapdb_config_path: str = Field(
         default="",
         description="Explicit TapDB config path",
+    )
+    tapdb_domain_code: str = Field(
+        default="",
+        description="Explicit TapDB Meridian domain code for Ursa-owned templates",
+    )
+    tapdb_owner_repo_name: str = Field(
+        default="",
+        description="Explicit TapDB owner repo name for Ursa-owned templates",
     )
     tapdb_local_db_port: str = Field(
         default=DEFAULT_TAPDB_LOCAL_DB_PORT,
