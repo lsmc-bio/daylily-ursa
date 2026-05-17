@@ -318,7 +318,10 @@ def build_web_session_config(settings: Any, server_instance_id: str) -> CognitoW
         if not service_id:
             raise AuthError("External broker service ID is required")
         return CognitoWebSessionConfig(
-            domain=urlparse(login_url).netloc,
+            domain=_required_url_hostname(
+                login_url,
+                field_name="External broker login URL",
+            ),
             client_id=service_id,
             redirect_uri=callback_url,
             logout_uri=public_base_url,
@@ -383,6 +386,13 @@ def session_principal_from_current_user(current_user: CurrentUser) -> SessionPri
             "site": current_user.site or "",
         },
     )
+
+
+def _required_url_hostname(value: str, *, field_name: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    if not parsed.scheme or not parsed.netloc or not parsed.hostname:
+        raise AuthError(f"{field_name} must be an absolute URL with host")
+    return parsed.hostname
 
 
 def _request_web_session_config(request: Request) -> CognitoWebSessionConfig:

@@ -102,16 +102,22 @@ deployment:
 def test_get_settings_reads_shared_external_broker_env(monkeypatch):
     monkeypatch.setenv("LSMC_AUTH_MODE", "external_broker")
     monkeypatch.setenv("LSMC_AUTH_BROKER_SERVICE_ID", "ursa")
-    monkeypatch.setenv("LSMC_AUTH_BROKER_LOGIN_URL", "https://dev.login.lsmc.com/login")
+    monkeypatch.setenv(
+        "LSMC_AUTH_BROKER_LOGIN_URL",
+        "https://dev.login.lsmc.com:8916/login",
+    )
     monkeypatch.setenv(
         "LSMC_AUTH_BROKER_HANDOFF_EXCHANGE_URL",
-        "https://dev.login.lsmc.com/api/handoff/exchange",
+        "https://dev.login.lsmc.com:8916/api/handoff/exchange",
     )
     monkeypatch.setenv(
         "LSMC_AUTH_BROKER_CALLBACK_URL",
         "https://localhost:8913/auth/lsmc/callback",
     )
-    monkeypatch.setenv("LSMC_AUTH_BROKER_LOGOUT_URL", "https://dev.login.lsmc.com/logout")
+    monkeypatch.setenv(
+        "LSMC_AUTH_BROKER_LOGOUT_URL",
+        "https://dev.login.lsmc.com:8916/logout",
+    )
     monkeypatch.setenv("URSA_INTERNAL_OUTPUT_BUCKET", "ursa-internal")
     clear_settings_cache()
 
@@ -716,15 +722,15 @@ def test_auth_logout_redirects_to_local_auth_error_when_cognito_is_misconfigured
     assert response.headers["location"] == "/auth/error?reason=cognito_logout_misconfigured"
 
 
-def test_external_broker_login_sets_admin_session(monkeypatch):
+def test_external_broker_login_sets_admin_session(monkeypatch, tmp_path):
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="ursa-internal",
         auth_mode="external_broker",
         external_broker_service_id="ursa",
-        external_broker_login_url="https://dev.login.lsmc.com/login",
-        external_broker_handoff_exchange_url="https://dev.login.lsmc.com/api/handoff/exchange",
+        external_broker_login_url="https://dev.login.lsmc.com:8916/login",
+        external_broker_handoff_exchange_url="https://dev.login.lsmc.com:8916/api/handoff/exchange",
         external_broker_callback_url="https://localhost:8913/auth/lsmc/callback",
-        external_broker_logout_url="https://dev.login.lsmc.com/logout",
+        external_broker_logout_url="https://dev.login.lsmc.com:8916/logout",
     )
 
     class _Response:
@@ -755,12 +761,12 @@ def test_external_broker_login_sets_admin_session(monkeypatch):
             return _Response()
 
     monkeypatch.setattr("daylib_ursa.gui_app.httpx.AsyncClient", _AsyncClient)
-    client = _test_client(_app_with_gui(settings))
+    client = _test_client(_app_with_gui(settings, config_path=tmp_path / "ursa-config.yaml"))
     login_response = client.get("/auth/login?next=/usage", follow_redirects=False)
     assert login_response.status_code == 303
     parsed = urlparse(login_response.headers["location"])
     params = parse_qs(parsed.query)
-    assert parsed.netloc == "dev.login.lsmc.com"
+    assert parsed.netloc == "dev.login.lsmc.com:8916"
     assert params["service"] == ["ursa"]
     assert params["callback_url"] == ["https://localhost:8913/auth/lsmc/callback"]
 
@@ -777,7 +783,7 @@ def test_external_broker_login_sets_admin_session(monkeypatch):
 
     logout = client.get("/auth/logout", follow_redirects=False)
     assert logout.status_code == 303
-    assert logout.headers["location"] == "https://dev.login.lsmc.com/logout"
+    assert logout.headers["location"] == "https://dev.login.lsmc.com:8916/logout"
 
 
 def test_auth_error_renders_human_readable_logout_message():
