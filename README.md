@@ -29,7 +29,6 @@ The current package and runtime contracts are intentionally pinned:
 - `daylily-tapdb>=7.0.4,<8.0.0`
 - `daylily-auth-cognito==2.1.5`
 - `cli-core-yo==2.1.1`
-- `zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.17`
 - Python dependencies live only in `pyproject.toml`
 - `environment.yaml` is limited to Python, pip, setuptools, and system/runtime packages
 

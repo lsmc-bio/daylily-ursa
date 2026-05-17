@@ -95,10 +95,11 @@ def test_pyproject_contains_the_single_python_install_set() -> None:
         "typer>=0.9.0",
         "uvicorn[standard]>=0.24.0",
         "cli-core-yo==2.1.1",
-        "zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.17",
         "boto3>=1.26.0",
     ):
         assert expected in dependencies
+
+    assert not any("zebra_day" in dependency for dependency in dependencies)
 
 
 def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
@@ -118,16 +119,16 @@ def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
     assert payload["components"]["daylily-auth-cognito"]["current"] == "2.1.5"
     assert payload["components"]["daylily-tapdb"]["current"] == "7.0.4"
     assert payload["components"]["cli-core-yo"]["current"] == "2.1.1"
-    assert payload["components"]["zebra_day"]["current"] == "6.0.17"
+    assert "zebra_day" not in payload["components"]
     assert payload["tested_combinations"][0]["ephemeral_cluster"] == "2.3.2"
     assert payload["tested_combinations"][0]["omics_analysis"] == "0.7.752"
     assert payload["tested_combinations"][0]["cognito"] == "2.1.5"
     assert payload["tested_combinations"][0]["tapdb"] == "7.0.4"
     assert payload["tested_combinations"][0]["cli_core_yo"] == "2.1.1"
-    assert payload["tested_combinations"][0]["zebra_day"] == "6.0.17"
+    assert "zebra_day" not in payload["tested_combinations"][0]
     assert "daylily-ephemeral-cluster==2.3.2" in payload["tested_combinations"][0]["notes"]
     assert "daylily-tapdb to 7.0.4" in payload["tested_combinations"][0]["notes"]
-    assert "zebra_day to GitHub tag 6.0.17" in payload["tested_combinations"][0]["notes"]
+    assert "zebra_day" not in payload["tested_combinations"][0]["notes"]
 
 
 def test_workset_monitor_configs_use_daylily_ec_samples_stage() -> None:
