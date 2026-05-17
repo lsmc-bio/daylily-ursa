@@ -36,7 +36,6 @@ def mount_tapdb_dag_api(app: FastAPI, settings: Settings) -> bool:
     app.include_router(
         create_tapdb_dag_router(
             config_path=config_path,
-            env_name=settings.tapdb_env,
             service_name="ursa",
         ),
         dependencies=[Depends(get_observability_user)],

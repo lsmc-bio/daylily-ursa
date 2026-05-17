@@ -74,8 +74,8 @@ def _ursa_info_hook() -> list[tuple[str, str]]:
     )
     rows.append(
         (
-            "TapDB Env",
-            getattr(settings, "tapdb_env", None) or "dev",
+            "TapDB Target",
+            getattr(settings, "database_target", None) or "local",
         )
     )
     rows.append(

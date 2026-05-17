@@ -27,7 +27,6 @@ def _fingerprint(value: str) -> str:
 def _environment_name(settings: Settings) -> str:
     return (
         str(settings.deployment_name or "").strip()
-        or str(settings.tapdb_env or "").strip()
         or str(settings.database_target or "").strip()
         or "unknown"
     )

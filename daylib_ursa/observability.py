@@ -74,11 +74,11 @@ def _tool_version() -> str:
         return ""
 
 
-def _default_schema_drift_payload(environment: str = "") -> dict[str, Any]:
+def _default_schema_drift_payload(target: str = "") -> dict[str, Any]:
     return {
         "status": "not_run",
         "checked_at": None,
-        "environment": environment,
+        "target": target,
         "tool_version": _tool_version(),
         "summary": "Schema drift check has not been run.",
         "report": {},
@@ -217,7 +217,7 @@ class UrsaObservabilityStore:
         self._observed_dependencies: set[str] = set()
         self._obs_services_fragments: list[dict[str, Any]] = []
         self._schema_drift = _default_schema_drift_payload(
-            str(self.settings.tapdb_env or self.settings.daylily_env or "")
+            str(self.settings.database_target or self.settings.daylily_env or "")
         )
         self._refresh_schema_drift_status()
         self._obs_services_snapshot = self._build_obs_services_snapshot()
@@ -328,12 +328,12 @@ class UrsaObservabilityStore:
         }
 
     def _refresh_schema_drift_status(self) -> None:
-        environment = str(self.settings.tapdb_env or self.settings.daylily_env or "").strip()
+        target_label = str(self.settings.database_target or self.settings.daylily_env or "").strip()
         cache_key = (
             str(self.settings.database_target or "").strip(),
             str(self.settings.tapdb_client_id or "").strip(),
             str(self.settings.tapdb_database_name or "").strip(),
-            environment,
+            target_label,
             str(self.settings.aws_profile or "").strip(),
         )
         cached = _SCHEMA_DRIFT_CACHE.get(cache_key)
@@ -349,17 +349,16 @@ class UrsaObservabilityStore:
                 or self.settings.daylily_primary_region
                 or "us-west-2",
                 namespace=self.settings.tapdb_database_name,
-                tapdb_env=environment or None,
             )
         except TapDBRuntimeError as exc:
             result = {
-                **_default_schema_drift_payload(environment),
+                **_default_schema_drift_payload(target_label),
                 "status": "check_failed",
                 "summary": f"Unable to execute tapdb drift-check: {exc}",
             }
         except Exception as exc:
             result = {
-                **_default_schema_drift_payload(environment),
+                **_default_schema_drift_payload(target_label),
                 "status": "check_failed",
                 "summary": f"Unable to execute tapdb drift-check: {exc}",
             }

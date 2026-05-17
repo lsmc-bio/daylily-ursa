@@ -41,16 +41,15 @@ regions:
 # dependencies live in pyproject.toml; TapDB bootstrap remains delegated to the
 # tapdb CLI when database lifecycle work is required.
 # Bootstrap the matching namespace with:
-#   tapdb --config ~/.config/tapdb/local/ursa/tapdb-config.yaml --env dev config init --owner-repo-name ursa --domain-code Z --domain-registry-path ~/.config/tapdb/domain_code_registry.json --prefix-ownership-registry-path ~/.config/tapdb/prefix_ownership_registry.json --db-port dev=5541 --ui-port dev=8916
-#   tapdb --config ~/.config/tapdb/local/ursa/tapdb-config.yaml --env dev bootstrap local
+#   tapdb --config ~/.config/tapdb/local/ursa/tapdb-config.yaml db-config init --client-id ursa --database-name ursa --schema-name tapdb_ursa --owner-repo-name ursa --domain-code Z --domain-registry-path ~/.config/tapdb/domain_code_registry.json --prefix-ownership-registry-path ~/.config/tapdb/prefix_ownership_registry.json --engine-type local --host localhost --port 5541 --ui-port 8916 --user postgres --database ursa
+#   tapdb --config ~/.config/tapdb/local/ursa/tapdb-config.yaml bootstrap local
 #
-# Explicit env contract for TapDB/Meridian subprocesses:
+# Explicit process contract for TapDB/Meridian subprocesses:
 # MERIDIAN_DOMAIN_CODE=Z
 # TAPDB_OWNER_REPO=ursa
-tapdb_client_id: local
+tapdb_client_id: ursa
 tapdb_database_name: ursa
 tapdb_config_path: ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml
-tapdb_env: dev
 tapdb_domain_registry_path: ~/.config/tapdb/domain_code_registry.json
 tapdb_prefix_ownership_registry_path: ~/.config/tapdb/prefix_ownership_registry.json
 

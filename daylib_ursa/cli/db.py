@@ -28,7 +28,6 @@ from daylib_ursa.integrations.tapdb_runtime import (
     ensure_tapdb_version,
     export_database_url_for_target,
     run_tapdb_cli,
-    tapdb_env_for_target,
 )
 
 console = Console()
@@ -75,6 +74,17 @@ def _validate_target(target: str) -> str:
     if normalized not in {"local", "aurora"}:
         raise TapDBRuntimeError("Unsupported database target. Use local or aurora.")
     return normalized
+
+
+def _confirm_target_label(*, namespace: str) -> str:
+    settings = get_settings()
+    schema_name = str(getattr(settings, "tapdb_schema_name", "") or "").strip()
+    physical_database = str(
+        getattr(settings, "tapdb_physical_database", "") or namespace
+    ).strip()
+    if not schema_name:
+        raise TapDBRuntimeError("tapdb_schema_name is required for destructive confirmation.")
+    return f"{DEFAULT_TAPDB_CLIENT_ID}/{namespace}/{schema_name}@{physical_database}"
 
 
 def _apply_ursa_overlay(*, start_step: int, total_steps: int) -> None:
@@ -240,7 +250,7 @@ def reset(
             namespace=namespace,
         )
         run_tapdb_cli(
-            args=["db", "delete", tapdb_env_for_target(target), "--force"],
+            args=["db", "delete", "--confirm-target", _confirm_target_label(namespace=namespace)],
             target=target,
             client_id=DEFAULT_TAPDB_CLIENT_ID,
             profile=profile,
@@ -289,7 +299,7 @@ def nuke(
             namespace=namespace,
         )
         run_tapdb_cli(
-            args=["db", "delete", tapdb_env_for_target(target), "--force"],
+            args=["db", "delete", "--confirm-target", _confirm_target_label(namespace=namespace)],
             target=target,
             client_id=DEFAULT_TAPDB_CLIENT_ID,
             profile=profile,

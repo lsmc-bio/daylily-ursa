@@ -23,6 +23,34 @@ def test_claims_to_current_user_maps_canonical_cognito_groups() -> None:
     assert user.email == "ursa@example.com"
     assert user.tenant_id == uuid.UUID("00000000-0000-0000-0000-000000000001")
     assert user.roles == ["ADMIN"]
+
+
+def test_global_admin_claims_can_omit_tenant_id() -> None:
+    user = auth_dependencies._claims_to_current_user(
+        {
+            "sub": "admin-123",
+            "email": "johnm@lsmc.com",
+            "cognito:groups": ["lsmc:global-admin"],
+        }
+    )
+
+    assert user.tenant_id == uuid.UUID(int=0)
+    assert user.roles == ["ADMIN"]
+    assert user.is_admin is True
+
+
+def test_claims_to_current_user_maps_lsmc_global_admin_group() -> None:
+    user = auth_dependencies._claims_to_current_user(
+        {
+            "sub": "user-123",
+            "email": "johnm@lsmc.com",
+            "custom:tenant_id": "00000000-0000-0000-0000-000000000001",
+            "cognito:groups": ["lsmc:global-admin", "lsmc:ursa:admin"],
+        }
+    )
+
+    assert user.email == "johnm@lsmc.com"
+    assert user.roles == ["ADMIN"]
     assert user.is_admin is True
 
 
@@ -32,7 +60,7 @@ def test_claims_to_current_user_requires_tenant_claim() -> None:
             {
                 "sub": "user-123",
                 "email": "ursa@example.com",
-                "cognito:groups": ["platform-admin"],
+                "cognito:groups": ["ursa-readwrite"],
             }
         )
 

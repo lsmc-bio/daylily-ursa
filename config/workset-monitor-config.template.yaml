@@ -15,8 +15,8 @@
 #   daylily-workset-monitor config/my-monitor-config.yaml --enable-tapdb
 #
 # For TapDB state tracking in this archived monitor path, prefer an explicit
-# TapDB config file and target environment:
-#   tapdb --config ~/.config/tapdb/local/ursa/tapdb-config.yaml --env dev info
+# TapDB config file and explicit target:
+#   tapdb --config ~/.config/tapdb/local/ursa/tapdb-config.yaml info
 #
 #   daylily-workset-monitor config/my-monitor-config.yaml \
 #     --enable-tapdb \

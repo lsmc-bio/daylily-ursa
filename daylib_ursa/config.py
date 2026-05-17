@@ -66,7 +66,6 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "tapdb_database_name": cfg.tapdb_database_name,
         "tapdb_schema_name": getattr(cfg, "tapdb_schema_name", ""),
         "tapdb_physical_database": getattr(cfg, "tapdb_physical_database", ""),
-        "tapdb_env": cfg.tapdb_env,
         "tapdb_config_path": getattr(cfg, "tapdb_config_path", ""),
         "tapdb_local_db_port": getattr(cfg, "tapdb_local_db_port", DEFAULT_TAPDB_LOCAL_DB_PORT),
         "tapdb_local_ui_port": getattr(cfg, "tapdb_local_ui_port", DEFAULT_TAPDB_LOCAL_UI_PORT),
@@ -87,6 +86,16 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "cognito_region": cfg.cognito_region,
         "cognito_callback_url": cfg.cognito_callback_url,
         "cognito_logout_url": cfg.cognito_logout_url,
+        "auth_mode": getattr(cfg, "auth_mode", ""),
+        "external_broker_service_id": getattr(cfg, "external_broker_service_id", ""),
+        "external_broker_login_url": getattr(cfg, "external_broker_login_url", ""),
+        "external_broker_handoff_exchange_url": getattr(
+            cfg,
+            "external_broker_handoff_exchange_url",
+            "",
+        ),
+        "external_broker_callback_url": getattr(cfg, "external_broker_callback_url", ""),
+        "external_broker_logout_url": getattr(cfg, "external_broker_logout_url", ""),
         "api_host": cfg.api_host,
         "api_port": cfg.api_port,
         "bloom_base_url": cfg.bloom_base_url,
@@ -129,6 +138,14 @@ def _validate_optional_https_url(value: str, *, field_name: str) -> str:
     if not normalized.startswith("https://"):
         raise ValueError(f"{field_name} must use an absolute https:// URL")
     return normalized.rstrip("/")
+
+
+def _read_first_env(*names: str) -> str:
+    for name in names:
+        value = str(os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _require_bare_cognito_domain(value: str | None, *, field_name: str) -> str:
@@ -213,10 +230,10 @@ regions:
 # =============================================================================
 # Ursa reads its TapDB namespace/runtime from this YAML file.
 # Bootstrap the matching namespace with:
-#   tapdb --config ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml config init --client-id local --database-name ursa --owner-repo-name ursa --domain-code dev=Z --domain-registry-path ~/.config/tapdb/domain_code_registry.json --prefix-ownership-registry-path ~/.config/tapdb/prefix_ownership_registry.json --env dev --db-port dev=5588 --ui-port dev=8918
-#   tapdb --config ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml --env dev bootstrap local
+#   tapdb --config ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml db-config init --client-id ursa --database-name ursa --schema-name tapdb_ursa_dev --owner-repo-name ursa --domain-code Z --domain-registry-path ~/.config/tapdb/domain_code_registry.json --prefix-ownership-registry-path ~/.config/tapdb/prefix_ownership_registry.json --engine-type local --host localhost --port 5588 --ui-port 8918 --user postgres --database ursa
+#   tapdb --config ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml bootstrap local
 #
-# Explicit env contract for TapDB/Meridian subprocesses:
+# Explicit process contract for TapDB/Meridian subprocesses:
 # MERIDIAN_DOMAIN_CODE=Z
 # TAPDB_OWNER_REPO=ursa
 tapdb_client_id: ursa
@@ -224,7 +241,6 @@ tapdb_database_name: ursa
 tapdb_schema_name: tapdb_ursa_dev
 tapdb_physical_database: ""
 tapdb_config_path: ~/.config/tapdb/local/ursa-{_resolve_deployment_code()}/tapdb-config.yaml
-tapdb_env: dev
 tapdb_local_db_port: {DEFAULT_TAPDB_LOCAL_DB_PORT}
 tapdb_local_ui_port: {DEFAULT_TAPDB_LOCAL_UI_PORT}
 tapdb_domain_registry_path: ~/.config/tapdb/domain_code_registry.json
@@ -248,12 +264,18 @@ dewey_api_token: ""
 dewey_verify_ssl: true
 
 # Cognito configuration is read from this YAML file.
+# auth_mode: cognito
 # cognito_user_pool_id: us-west-2_xxxxxxxx
 # cognito_app_client_id: xxxxxxxxxxxxxxxxxxxxxxxxxx
 # cognito_region: us-west-2  # AWS region where Cognito User Pool is deployed
 # cognito_domain: your-domain-prefix.auth.us-west-2.amazoncognito.com
 # cognito_callback_url: https://localhost:8913/auth/callback
 # cognito_logout_url: https://localhost:8913/login
+# external_broker_service_id: ursa
+# external_broker_login_url: https://dev.login.lsmc.com/login
+# external_broker_handoff_exchange_url: https://dev.login.lsmc.com/api/handoff/exchange
+# external_broker_callback_url: https://localhost:8913/auth/lsmc/callback
+# external_broker_logout_url: https://dev.login.lsmc.com/logout
 
 # Non-production deployment chrome
 deployment:
@@ -321,10 +343,6 @@ class Settings(BaseSettings):
     tapdb_config_path: str = Field(
         default="",
         description="Explicit TapDB config path",
-    )
-    tapdb_env: str = Field(
-        default="dev",
-        description="TapDB environment selector",
     )
     tapdb_local_db_port: str = Field(
         default=DEFAULT_TAPDB_LOCAL_DB_PORT,
@@ -414,6 +432,9 @@ class Settings(BaseSettings):
     )
     cognito_group_role_map: dict[str, str] = Field(
         default_factory=lambda: {
+            "lsmc:global-admin": "ADMIN",
+            "lsmc:internal-user": "INTERNAL_USER",
+            "lsmc:ursa:admin": "ADMIN",
             "platform-admin": "ADMIN",
             "ursa-admin": "ADMIN",
             "ursa-internal": "INTERNAL_USER",
@@ -423,6 +444,30 @@ class Settings(BaseSettings):
             "ursa-readonly": "READ_ONLY",
         },
         description="Mapping from Cognito group names to Ursa auth roles",
+    )
+    auth_mode: str = Field(
+        default="cognito",
+        description="Browser auth mode: cognito or external_broker",
+    )
+    external_broker_service_id: str = Field(
+        default="ursa",
+        description="External login broker service identifier",
+    )
+    external_broker_login_url: str = Field(
+        default="",
+        description="External login broker start URL",
+    )
+    external_broker_handoff_exchange_url: str = Field(
+        default="",
+        description="External login broker handoff exchange URL",
+    )
+    external_broker_callback_url: str = Field(
+        default="",
+        description="External login broker callback URL",
+    )
+    external_broker_logout_url: str = Field(
+        default="",
+        description="External login broker logout URL",
     )
     enable_auth: bool = Field(
         default=True,
@@ -712,6 +757,24 @@ class Settings(BaseSettings):
             return None
         return _validate_optional_https_url(v, field_name=str(info.field_name))
 
+    @field_validator(
+        "external_broker_login_url",
+        "external_broker_handoff_exchange_url",
+        "external_broker_callback_url",
+        "external_broker_logout_url",
+    )
+    @classmethod
+    def validate_optional_external_broker_urls(cls, v: str, info) -> str:
+        return _validate_optional_https_url(v, field_name=str(info.field_name))
+
+    @field_validator("auth_mode")
+    @classmethod
+    def validate_auth_mode(cls, v: str) -> str:
+        normalized = str(v or "").strip().lower()
+        if normalized not in {"cognito", "external_broker"}:
+            raise ValueError("auth_mode must be one of: cognito, external_broker")
+        return normalized
+
     @field_validator("cognito_domain")
     @classmethod
     def validate_cognito_domain(cls, v: Optional[str]) -> Optional[str]:
@@ -729,6 +792,9 @@ class Settings(BaseSettings):
 
         if value is None:
             return {
+                "lsmc:global-admin": "ADMIN",
+                "lsmc:internal-user": "INTERNAL_USER",
+                "lsmc:ursa:admin": "ADMIN",
                 "platform-admin": "ADMIN",
                 "ursa-admin": "ADMIN",
                 "ursa-internal": "INTERNAL_USER",
@@ -756,6 +822,23 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_dewey_integration(self) -> "Settings":
+        if self.auth_mode == "external_broker":
+            missing = [
+                field_name
+                for field_name in (
+                    "external_broker_service_id",
+                    "external_broker_login_url",
+                    "external_broker_handoff_exchange_url",
+                    "external_broker_callback_url",
+                    "external_broker_logout_url",
+                )
+                if not str(getattr(self, field_name) or "").strip()
+            ]
+            if missing:
+                raise ValueError(
+                    "external_broker auth requires explicit settings: "
+                    + ", ".join(sorted(missing))
+                )
         if self.dewey_enabled:
             if not str(self.dewey_base_url or "").strip():
                 raise ValueError("dewey_base_url is required when dewey_enabled=true")
@@ -795,9 +878,35 @@ class Settings(BaseSettings):
         def service_config_settings() -> dict[str, object]:
             return _yaml_seed_from_ursa_config()
 
+        def shared_auth_env_settings() -> dict[str, object]:
+            return {
+                key: value
+                for key, value in {
+                    "auth_mode": _read_first_env("LSMC_AUTH_MODE"),
+                    "external_broker_service_id": _read_first_env(
+                        "LSMC_AUTH_BROKER_SERVICE_ID",
+                        "LSMC_AUTH_SERVICE_ID",
+                    ),
+                    "external_broker_login_url": _read_first_env(
+                        "LSMC_AUTH_BROKER_LOGIN_URL"
+                    ),
+                    "external_broker_handoff_exchange_url": _read_first_env(
+                        "LSMC_AUTH_BROKER_HANDOFF_EXCHANGE_URL"
+                    ),
+                    "external_broker_callback_url": _read_first_env(
+                        "LSMC_AUTH_BROKER_CALLBACK_URL"
+                    ),
+                    "external_broker_logout_url": _read_first_env(
+                        "LSMC_AUTH_BROKER_LOGOUT_URL"
+                    ),
+                }.items()
+                if value
+            }
+
         return (
             init_settings,
             env_settings,
+            shared_auth_env_settings,
             service_config_settings,
             dotenv_settings,
             file_secret_settings,

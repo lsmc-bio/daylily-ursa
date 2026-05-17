@@ -62,7 +62,7 @@ def test_yaml_seed_from_ursa_config_includes_allowed_regions(monkeypatch) -> Non
         ursa_internal_output_bucket="ursa-internal",
         tapdb_client_id="local",
         tapdb_database_name="ursa",
-        tapdb_env="dev",
+        tapdb_schema_name="tapdb_ursa_dev",
         tapdb_config_path="/tmp/ursa-tapdb.yaml",
         cognito_user_pool_id=None,
         cognito_app_client_id=None,

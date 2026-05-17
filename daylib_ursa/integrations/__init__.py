@@ -10,7 +10,7 @@ from daylib_ursa.integrations.tapdb_runtime import (
     export_database_url_for_target,
     get_tapdb_bundle,
     run_tapdb_cli,
-    tapdb_env_for_target,
+    validate_database_target,
 )
 
 __all__ = [
@@ -26,5 +26,5 @@ __all__ = [
     "export_database_url_for_target",
     "get_tapdb_bundle",
     "run_tapdb_cli",
-    "tapdb_env_for_target",
+    "validate_database_target",
 ]

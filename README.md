@@ -93,7 +93,7 @@ ursa server status
 Important runtime fields:
 
 - `ursa_internal_output_bucket` is required at app startup.
-- `tapdb_client_id`, `tapdb_database_name`, `tapdb_config_path`, and `tapdb_env` select the TapDB namespace and runtime.
+- `tapdb_client_id`, `tapdb_database_name`, `tapdb_schema_name`, and `tapdb_config_path` select the TapDB namespace and runtime.
 - Cognito Hosted UI values must be present in YAML for authenticated GUI startup: `cognito_user_pool_id`, `cognito_app_client_id`, `cognito_region`, `cognito_domain`, `cognito_callback_url`, and `cognito_logout_url`.
 - `bloom_base_url`, `atlas_base_url`, and Dewey settings control peer-service integrations.
 - `ursa_tapdb_mount_enabled` and `ursa_tapdb_mount_path` control the embedded TapDB admin mount.

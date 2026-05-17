@@ -173,7 +173,6 @@ VALID_FIELDS = {
     "tapdb_database_name": (str, "TapDB namespace / database name"),
     "tapdb_schema_name": (str, "Explicit PostgreSQL schema used by TapDB"),
     "tapdb_physical_database": (str, "Physical PostgreSQL database for shared local TapDB"),
-    "tapdb_env": (str, "TapDB environment selector"),
     "tapdb_config_path": (str, "Explicit TapDB config path"),
     "tapdb_local_db_port": (str, "Local TapDB PostgreSQL port"),
     "tapdb_local_ui_port": (str, "Local TapDB admin UI port"),
@@ -192,6 +191,12 @@ VALID_FIELDS = {
     "cognito_domain": (str, "Cognito Hosted UI domain"),
     "cognito_callback_url": (str, "Cognito Hosted UI callback URL"),
     "cognito_logout_url": (str, "Cognito Hosted UI logout redirect URL"),
+    "auth_mode": (str, "Browser auth mode: cognito or external_broker"),
+    "external_broker_service_id": (str, "External login broker service identifier"),
+    "external_broker_login_url": (str, "External login broker start URL"),
+    "external_broker_handoff_exchange_url": (str, "External login broker handoff exchange URL"),
+    "external_broker_callback_url": (str, "External login broker callback URL"),
+    "external_broker_logout_url": (str, "External login broker logout URL"),
     "session_secret_key": (str, "Session secret key for web sessions"),
     "api_host": (str, "API bind host"),
     "api_port": (int, "API bind port"),
@@ -287,7 +292,6 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "tapdb_database_name",
         "tapdb_schema_name",
         "tapdb_physical_database",
-        "tapdb_env",
         "tapdb_config_path",
         "tapdb_local_db_port",
         "tapdb_local_ui_port",
@@ -366,9 +370,6 @@ class UrsaConfig:
     tapdb_physical_database: Optional[str] = None
     """Physical PostgreSQL database for shared local TapDB."""
 
-    tapdb_env: Optional[str] = None
-    """TapDB environment selector read from YAML config."""
-
     tapdb_config_path: Optional[str] = None
     """Explicit TapDB config path read from YAML config."""
 
@@ -404,6 +405,24 @@ class UrsaConfig:
 
     cognito_logout_url: Optional[str] = None
     """Cognito Hosted UI logout redirect URL, read from YAML config."""
+
+    auth_mode: Optional[str] = None
+    """Browser auth mode read from YAML config."""
+
+    external_broker_service_id: Optional[str] = None
+    """External login broker service identifier read from YAML config."""
+
+    external_broker_login_url: Optional[str] = None
+    """External login broker start URL read from YAML config."""
+
+    external_broker_handoff_exchange_url: Optional[str] = None
+    """External login broker handoff exchange URL read from YAML config."""
+
+    external_broker_callback_url: Optional[str] = None
+    """External login broker callback URL read from YAML config."""
+
+    external_broker_logout_url: Optional[str] = None
+    """External login broker logout URL read from YAML config."""
 
     session_secret_key: Optional[str] = None
     """Session secret key for web sessions read from YAML config."""
@@ -544,7 +563,6 @@ class UrsaConfig:
         tapdb_database_name = data.get("tapdb_database_name")
         tapdb_schema_name = data.get("tapdb_schema_name")
         tapdb_physical_database = data.get("tapdb_physical_database")
-        tapdb_env = data.get("tapdb_env")
         tapdb_config_path = data.get("tapdb_config_path")
         tapdb_local_db_port = data.get("tapdb_local_db_port")
         tapdb_local_ui_port = data.get("tapdb_local_ui_port")
@@ -557,6 +575,12 @@ class UrsaConfig:
         cognito_region = data.get("cognito_region")
         cognito_callback_url = data.get("cognito_callback_url")
         cognito_logout_url = data.get("cognito_logout_url")
+        auth_mode = data.get("auth_mode")
+        external_broker_service_id = data.get("external_broker_service_id")
+        external_broker_login_url = data.get("external_broker_login_url")
+        external_broker_handoff_exchange_url = data.get("external_broker_handoff_exchange_url")
+        external_broker_callback_url = data.get("external_broker_callback_url")
+        external_broker_logout_url = data.get("external_broker_logout_url")
         session_secret_key = data.get("session_secret_key")
         api_host = data.get("api_host")
         api_port = data.get("api_port")
@@ -587,7 +611,6 @@ class UrsaConfig:
             tapdb_database_name=tapdb_database_name,
             tapdb_schema_name=tapdb_schema_name,
             tapdb_physical_database=tapdb_physical_database,
-            tapdb_env=tapdb_env,
             tapdb_config_path=tapdb_config_path,
             tapdb_local_db_port=tapdb_local_db_port,
             tapdb_local_ui_port=tapdb_local_ui_port,
@@ -600,6 +623,12 @@ class UrsaConfig:
             cognito_region=cognito_region,
             cognito_callback_url=cognito_callback_url,
             cognito_logout_url=cognito_logout_url,
+            auth_mode=auth_mode,
+            external_broker_service_id=external_broker_service_id,
+            external_broker_login_url=external_broker_login_url,
+            external_broker_handoff_exchange_url=external_broker_handoff_exchange_url,
+            external_broker_callback_url=external_broker_callback_url,
+            external_broker_logout_url=external_broker_logout_url,
             session_secret_key=session_secret_key,
             api_host=api_host,
             api_port=api_port,

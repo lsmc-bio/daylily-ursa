@@ -210,8 +210,7 @@ def test_mount_uses_explicit_tapdb_context(monkeypatch):
     )
 
     assert captured == {
-        "tapdb_env": "dev",
         "config_path": "/tmp/ursa-tapdb-config.yaml",
-        "client_id": "local",
+        "client_id": "ursa",
         "database_name": "ursa",
     }

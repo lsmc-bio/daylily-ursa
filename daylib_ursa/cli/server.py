@@ -424,7 +424,6 @@ def start(
             region=aws_region,
             client_id=settings.tapdb_client_id,
             namespace=settings.tapdb_database_name,
-            tapdb_env=settings.tapdb_env,
             config_path=settings.tapdb_config_path,
         )
 

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import httpx
 from daylily_auth_cognito import complete_cognito_callback, start_cognito_login
 from daylily_auth_cognito.browser.session import CognitoWebAuthError
 from fastapi import FastAPI, Form, HTTPException, Request, status
@@ -19,6 +22,7 @@ from daylib_ursa.anomalies import open_anomaly_repository
 from daylib_ursa.auth import (
     AuthError,
     CurrentUser,
+    Role,
     USER_TOKEN_TEMPLATE,
     build_web_session_config,
     clear_session_user,
@@ -240,6 +244,10 @@ def mount_gui(app: FastAPI) -> None:
     def _cognito_login_path(next_path: str) -> str:
         return f"/auth/login?next={_next_path(next_path)}"
 
+    def _auth_mode() -> str:
+        settings = getattr(app.state, "settings", None)
+        return str(getattr(settings, "auth_mode", "") or "cognito").strip().lower()
+
     def _cognito_settings() -> dict[str, str]:
         settings = getattr(app.state, "settings", None)
         values = {
@@ -267,6 +275,25 @@ def mount_gui(app: FastAPI) -> None:
                 status_code=503,
                 detail=f"Cognito authentication is not configured: {exc}",
             ) from exc
+        return values
+
+    def _external_broker_settings() -> dict[str, str]:
+        settings = getattr(app.state, "settings", None)
+        values = {
+            "service_id": str(getattr(settings, "external_broker_service_id", "") or "").strip(),
+            "login_url": str(getattr(settings, "external_broker_login_url", "") or "").strip(),
+            "handoff_exchange_url": str(
+                getattr(settings, "external_broker_handoff_exchange_url", "") or ""
+            ).strip(),
+            "callback_url": str(getattr(settings, "external_broker_callback_url", "") or "").strip(),
+            "logout_url": str(getattr(settings, "external_broker_logout_url", "") or "").strip(),
+        }
+        missing = [key for key, value in values.items() if not value]
+        if missing:
+            raise HTTPException(
+                status_code=503,
+                detail=f"External broker authentication is not configured: missing {', '.join(missing)}",
+            )
         return values
 
     def _web_session_config():
@@ -303,6 +330,10 @@ def mount_gui(app: FastAPI) -> None:
                 "Ursa cleared your local session, but the shared Cognito logout contract is "
                 "misconfigured. Update the shared app client redirect URLs for this Ursa deployment."
             ),
+            "external_broker_misconfigured": (
+                "Ursa external broker sign-in is misconfigured. Update the broker login, "
+                "callback, handoff exchange, and logout URLs for this deployment."
+            ),
         }
         clean_reason = str(reason or "").strip()
         return messages.get(clean_reason) or None
@@ -320,6 +351,143 @@ def mount_gui(app: FastAPI) -> None:
             url=f"/auth/error?reason={quote(reason)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    def _start_external_broker_login(request: Request, next_path: str) -> RedirectResponse:
+        broker = _external_broker_settings()
+        state = secrets.token_urlsafe(32)
+        target = _next_path(next_path)
+        request.session["ursa_external_broker_state"] = state
+        request.session["ursa_external_broker_next"] = target
+        query = urlencode(
+            {
+                "service": broker["service_id"],
+                "next": target,
+                "callback_url": broker["callback_url"],
+                "state": state,
+            }
+        )
+        return RedirectResponse(
+            url=f"{broker['login_url'].rstrip('/')}?{query}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    async def _exchange_external_broker_handoff(code: str) -> dict[str, Any]:
+        broker = _external_broker_settings()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(broker["handoff_exchange_url"], json={"code": code})
+        if response.status_code >= 400:
+            raise CognitoWebAuthError(
+                "auth_error",
+                f"External broker handoff exchange failed with status {response.status_code}",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                redirect_to_error=True,
+            )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise CognitoWebAuthError(
+                "auth_error",
+                "External broker handoff response must be an object",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                redirect_to_error=True,
+            )
+        return payload
+
+    def _external_broker_roles(user: dict[str, Any]) -> list[str]:
+        broker = _external_broker_settings()
+        groups = {str(group).strip() for group in user.get("groups") or [] if str(group).strip()}
+        roles: set[str] = set()
+        if "lsmc:global-admin" in groups or f"lsmc:{broker['service_id']}:admin" in groups:
+            roles.add(Role.ADMIN.value)
+        if "lsmc:internal-user" in groups:
+            roles.add(Role.INTERNAL_USER.value)
+        for role in user.get("roles") or []:
+            roles.add(str(role or "").strip().upper())
+        entitlements = user.get("service_entitlements") or []
+        if isinstance(entitlements, dict):
+            entitlement = entitlements.get(broker["service_id"])
+            entitlements = [entitlement] if isinstance(entitlement, dict) else []
+        for entitlement in entitlements:
+            if not isinstance(entitlement, dict):
+                continue
+            if str(entitlement.get("service") or broker["service_id"]).strip() != broker["service_id"]:
+                continue
+            for role in entitlement.get("roles") or []:
+                normalized = str(role or "").strip().lower().replace("-", "_")
+                if normalized in {"admin", "administrator"}:
+                    roles.add(Role.ADMIN.value)
+                elif normalized in {"internal_user", "internal", "operator"}:
+                    roles.add(Role.INTERNAL_USER.value)
+                elif normalized in {"read_write", "readwrite", "write"}:
+                    roles.add(Role.READ_WRITE.value)
+                elif normalized in {"read_only", "readonly", "read", "viewer"}:
+                    roles.add(Role.READ_ONLY.value)
+        roles.discard("")
+        return sorted(roles, key=lambda item: (item != Role.ADMIN.value, item))
+
+    def _external_broker_current_user(user: dict[str, Any]) -> CurrentUser:
+        email = str(user.get("email") or "").strip().lower()
+        subject = str(
+            user.get("canonical_user_id") or user.get("sub") or user.get("user_id") or email
+        ).strip()
+        if not email or not subject:
+            raise CognitoWebAuthError(
+                "auth_error",
+                "External broker handoff missing required user identity",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                redirect_to_error=True,
+            )
+        _require_allowed_cognito_email(email)
+        roles = _external_broker_roles(user)
+        if not roles:
+            raise CognitoWebAuthError(
+                "not_authorized",
+                "External broker user has no Ursa roles",
+                status_code=status.HTTP_403_FORBIDDEN,
+                redirect_to_error=True,
+            )
+        tenant_id = str(user.get("tenant_id") or user.get("custom:tenant_id") or "").strip()
+        if not tenant_id and Role.ADMIN.value in roles:
+            tenant_id = str(uuid.UUID(int=0))
+        return CurrentUser(
+            sub=subject,
+            email=email,
+            name=str(user.get("display_name") or user.get("name") or "").strip() or None,
+            tenant_id=uuid.UUID(tenant_id),
+            roles=roles,
+            auth_source="external_broker",
+        )
+
+    async def _complete_external_broker_login(
+        request: Request,
+        *,
+        code: str | None,
+        state: str | None,
+    ) -> RedirectResponse:
+        if not code:
+            return _auth_error_redirect("missing_code")
+        expected_state = str(request.session.get("ursa_external_broker_state") or "")
+        if not expected_state or state != expected_state:
+            clear_session_user(request)
+            return _auth_error_redirect("invalid_state")
+        try:
+            payload = await _exchange_external_broker_handoff(code)
+            user = payload.get("user")
+            if not isinstance(user, dict):
+                raise CognitoWebAuthError(
+                    "auth_error",
+                    "External broker handoff response omitted user",
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    redirect_to_error=True,
+                )
+            actor = _external_broker_current_user(user)
+        except (CognitoWebAuthError, ValueError) as exc:
+            clear_session_user(request)
+            reason = exc.reason if isinstance(exc, CognitoWebAuthError) else "auth_error"
+            return _auth_error_redirect(reason)
+        persist_session_user(request, actor)
+        request.session.pop("ursa_external_broker_state", None)
+        redirect_to = _next_path(str(request.session.pop("ursa_external_broker_next", "/") or "/"))
+        return RedirectResponse(url=redirect_to, status_code=status.HTTP_303_SEE_OTHER)
 
     def _login_redirect_response(request: Request) -> RedirectResponse:
         next_path = quote(str(request.url.path or "/"), safe="/?=&")
@@ -1009,10 +1177,17 @@ def mount_gui(app: FastAPI) -> None:
     @app.get("/auth/login", include_in_schema=False)
     async def auth_login(request: Request, next: str = "/"):
         try:
+            if _auth_mode() == "external_broker":
+                return _start_external_broker_login(request, _next_path(next))
             return start_cognito_login(request, _web_session_config(), _next_path(next))
         except (HTTPException, ValueError) as exc:
-            LOGGER.error("Ursa Cognito sign-in is misconfigured: %s", exc)
-            return _auth_error_redirect("cognito_sign_in_misconfigured")
+            LOGGER.error("Ursa %s sign-in is misconfigured: %s", _auth_mode(), exc)
+            reason = (
+                "external_broker_misconfigured"
+                if _auth_mode() == "external_broker"
+                else "cognito_sign_in_misconfigured"
+            )
+            return _auth_error_redirect(reason)
 
     @app.get("/auth/callback", include_in_schema=False)
     async def auth_callback(request: Request, code: str = "", state: str = ""):
@@ -1031,6 +1206,14 @@ def mount_gui(app: FastAPI) -> None:
                 url=f"/auth/error?reason={quote(exc.reason)}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
+
+    @app.get("/auth/lsmc/callback", include_in_schema=False)
+    async def external_broker_callback(request: Request, code: str = "", state: str = ""):
+        return await _complete_external_broker_login(
+            request,
+            code=code.strip() or None,
+            state=state.strip() or None,
+        )
 
     @app.post("/login", response_class=HTMLResponse)
     async def login_submit(
@@ -1115,12 +1298,20 @@ def mount_gui(app: FastAPI) -> None:
 
     async def _logout_response(request: Request):
         logout_reason: str | None = None
-        try:
-            logout_url = _build_cognito_logout_url()
-        except (HTTPException, ValueError) as exc:
-            LOGGER.error("Ursa Cognito logout is misconfigured: %s", exc)
-            logout_reason = "cognito_logout_misconfigured"
-            logout_url = ""
+        if _auth_mode() == "external_broker":
+            try:
+                logout_url = _external_broker_settings()["logout_url"]
+            except HTTPException as exc:
+                LOGGER.error("Ursa external broker logout is misconfigured: %s", exc)
+                logout_reason = "external_broker_misconfigured"
+                logout_url = ""
+        else:
+            try:
+                logout_url = _build_cognito_logout_url()
+            except (HTTPException, ValueError) as exc:
+                LOGGER.error("Ursa Cognito logout is misconfigured: %s", exc)
+                logout_reason = "cognito_logout_misconfigured"
+                logout_url = ""
         clear_session_user(request)
         return (
             _auth_error_redirect(logout_reason)

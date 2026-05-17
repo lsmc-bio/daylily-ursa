@@ -191,6 +191,9 @@ def _map_cognito_groups_to_roles(raw_groups: Any) -> list[str]:
         mapping = get_settings().cognito_group_role_map
     except Exception:
         mapping = {
+            "lsmc:global-admin": "ADMIN",
+            "lsmc:internal-user": "INTERNAL_USER",
+            "lsmc:ursa:admin": "ADMIN",
             "platform-admin": "ADMIN",
             "ursa-admin": "ADMIN",
             "ursa-internal": "INTERNAL_USER",
@@ -230,16 +233,19 @@ def _claims_to_current_user(claims: dict[str, Any]) -> CurrentUser:
 
     email = str(claims.get("email") or "").strip()
     tenant_value = claims.get("tenant_id") or claims.get("custom:tenant_id")
+    roles = _map_cognito_groups_to_roles(claims.get("cognito:groups"))
     if not str(tenant_value or "").strip():
-        raise AuthError("Authentication token missing tenant_id")
+        if Role.ADMIN.value in roles:
+            tenant_value = str(uuid.UUID(int=0))
+        else:
+            raise AuthError("Authentication token missing tenant_id")
     name = str(claims.get("name") or claims.get("display_name") or "").strip() or None
-    raw_roles = claims.get("cognito:groups")
     return CurrentUser(
         sub=sub,
         email=email,
         name=name,
         tenant_id=_parse_uuid(tenant_value, label="tenant_id"),
-        roles=_map_cognito_groups_to_roles(raw_roles),
+        roles=roles,
     )
 
 
@@ -292,9 +298,39 @@ def clear_session_user(request: Request) -> None:
             pass
         request.session.pop("ursa_oauth_state", None)
         request.session.pop("ursa_post_auth_redirect", None)
+        request.session.pop("ursa_external_broker_state", None)
+        request.session.pop("ursa_external_broker_next", None)
 
 
 def build_web_session_config(settings: Any, server_instance_id: str) -> CognitoWebSessionConfig:
+    if str(getattr(settings, "auth_mode", "") or "cognito").strip().lower() == "external_broker":
+        callback_url = str(getattr(settings, "external_broker_callback_url", "") or "").strip()
+        if not callback_url:
+            raise AuthError("External broker callback URL is required")
+        callback_parts = urlparse(callback_url)
+        if not callback_parts.scheme or not callback_parts.netloc:
+            raise AuthError("External broker callback URL must be an absolute URL")
+        public_base_url = f"{callback_parts.scheme}://{callback_parts.netloc}"
+        login_url = str(getattr(settings, "external_broker_login_url", "") or "").strip()
+        service_id = str(getattr(settings, "external_broker_service_id", "") or "").strip()
+        if not login_url:
+            raise AuthError("External broker login URL is required")
+        if not service_id:
+            raise AuthError("External broker service ID is required")
+        return CognitoWebSessionConfig(
+            domain=urlparse(login_url).netloc,
+            client_id=service_id,
+            redirect_uri=callback_url,
+            logout_uri=public_base_url,
+            public_base_url=public_base_url or None,
+            session_secret_key=str(getattr(settings, "session_secret_key", "") or "").strip(),
+            session_cookie_name="ursa_session",
+            allow_insecure_http=public_base_url.startswith("http://"),
+            error_redirect_path="/auth/error",
+            server_instance_id=str(server_instance_id or "").strip(),
+            auth_mode="external_broker",
+        )
+
     callback_url = str(getattr(settings, "cognito_callback_url", "") or "").strip()
     logout_url = str(getattr(settings, "cognito_logout_url", "") or "").strip() or callback_url
     if not callback_url:

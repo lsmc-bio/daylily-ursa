@@ -32,8 +32,9 @@ TapDB connectivity and namespace are selected separately from region scanning:
 
 - `tapdb_client_id`
 - `tapdb_database_name`
+- `tapdb_schema_name`
+- `tapdb_physical_database`
 - `tapdb_config_path`
-- `tapdb_env`
 - `tapdb_domain_registry_path`
 - `tapdb_prefix_ownership_registry_path`
 

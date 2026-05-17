@@ -45,7 +45,7 @@ aws_profile: lsmc
 ursa_internal_output_bucket: ursa-internal
 tapdb_client_id: ursa
 tapdb_database_name: daylily-ursa
-tapdb_env: dev
+tapdb_schema_name: tapdb_ursa_dev
 api_host: 127.0.0.1
 api_port: 8913
 bloom_base_url: https://localhost:8912
@@ -97,6 +97,29 @@ deployment:
         "color": _stable_deployment_color_hex("staging"),
         "is_production": False,
     }
+
+
+def test_get_settings_reads_shared_external_broker_env(monkeypatch):
+    monkeypatch.setenv("LSMC_AUTH_MODE", "external_broker")
+    monkeypatch.setenv("LSMC_AUTH_BROKER_SERVICE_ID", "ursa")
+    monkeypatch.setenv("LSMC_AUTH_BROKER_LOGIN_URL", "https://dev.login.lsmc.com/login")
+    monkeypatch.setenv(
+        "LSMC_AUTH_BROKER_HANDOFF_EXCHANGE_URL",
+        "https://dev.login.lsmc.com/api/handoff/exchange",
+    )
+    monkeypatch.setenv(
+        "LSMC_AUTH_BROKER_CALLBACK_URL",
+        "https://localhost:8913/auth/lsmc/callback",
+    )
+    monkeypatch.setenv("LSMC_AUTH_BROKER_LOGOUT_URL", "https://dev.login.lsmc.com/logout")
+    monkeypatch.setenv("URSA_INTERNAL_OUTPUT_BUCKET", "ursa-internal")
+    clear_settings_cache()
+
+    settings = get_settings()
+
+    assert settings.auth_mode == "external_broker"
+    assert settings.external_broker_service_id == "ursa"
+    assert settings.external_broker_callback_url == "https://localhost:8913/auth/lsmc/callback"
 
 
 def test_default_config_template_emits_secret_and_domain_defaults() -> None:
@@ -691,6 +714,70 @@ def test_auth_logout_redirects_to_local_auth_error_when_cognito_is_misconfigured
 
     assert response.status_code == 303
     assert response.headers["location"] == "/auth/error?reason=cognito_logout_misconfigured"
+
+
+def test_external_broker_login_sets_admin_session(monkeypatch):
+    settings = get_settings_for_testing(
+        ursa_internal_output_bucket="ursa-internal",
+        auth_mode="external_broker",
+        external_broker_service_id="ursa",
+        external_broker_login_url="https://dev.login.lsmc.com/login",
+        external_broker_handoff_exchange_url="https://dev.login.lsmc.com/api/handoff/exchange",
+        external_broker_callback_url="https://localhost:8913/auth/lsmc/callback",
+        external_broker_logout_url="https://dev.login.lsmc.com/logout",
+    )
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "user": {
+                    "email": "johnm@lsmc.com",
+                    "canonical_user_id": "johnm-canonical",
+                    "display_name": "John M",
+                    "groups": ["lsmc:global-admin"],
+                    "service_entitlements": [{"service": "ursa", "roles": ["admin"]}],
+                }
+            }
+
+    class _AsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return _Response()
+
+    monkeypatch.setattr("daylib_ursa.gui_app.httpx.AsyncClient", _AsyncClient)
+    client = _test_client(_app_with_gui(settings))
+    login_response = client.get("/auth/login?next=/usage", follow_redirects=False)
+    assert login_response.status_code == 303
+    parsed = urlparse(login_response.headers["location"])
+    params = parse_qs(parsed.query)
+    assert parsed.netloc == "dev.login.lsmc.com"
+    assert params["service"] == ["ursa"]
+    assert params["callback_url"] == ["https://localhost:8913/auth/lsmc/callback"]
+
+    callback = client.get(
+        f"/auth/lsmc/callback?code=handoff-code&state={params['state'][0]}",
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/usage"
+    usage = client.get("/usage")
+    assert usage.status_code == 200
+    assert _decode_session_cookie(client)["email"] == "johnm@lsmc.com"
+
+    logout = client.get("/auth/logout", follow_redirects=False)
+    assert logout.status_code == 303
+    assert logout.headers["location"] == "https://dev.login.lsmc.com/logout"
 
 
 def test_auth_error_renders_human_readable_logout_message():

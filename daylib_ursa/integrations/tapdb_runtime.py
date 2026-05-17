@@ -26,11 +26,6 @@ DEFAULT_TAPDB_OWNER_REPO = "ursa"
 DEFAULT_TAPDB_LOCAL_DB_PORT = "5588"
 DEFAULT_TAPDB_LOCAL_UI_PORT = "8918"
 
-_TARGET_TO_TAPDB_ENV = {
-    "local": "dev",
-    "aurora": "prod",
-    "prod": "prod",
-}
 _LOCAL_ENGINE_TYPES = {"local", "postgres", "postgresql", "system-service", "pg"}
 _AURORA_ENGINE_TYPES = {"aurora", "aurora-postgres", "rds", "rds-aurora"}
 
@@ -59,81 +54,11 @@ def ensure_tapdb_version() -> str:
         raise TapDBRuntimeError("daylily-tapdb is required but not installed.") from exc
 
 
-def tapdb_env_for_target(
-    target: str,
-    *,
-    config_path: str = "",
-    client_id: str = DEFAULT_TAPDB_CLIENT_ID,
-    namespace: str = DEFAULT_TAPDB_DATABASE_NAME,
-) -> str:
+def validate_database_target(target: str) -> str:
     normalized = (target or "").strip().lower()
-    if normalized not in _TARGET_TO_TAPDB_ENV:
+    if normalized not in {"local", "aurora"}:
         raise TapDBRuntimeError(f"Unsupported database target '{target}'. Use local or aurora.")
-
-    detected = _detect_tapdb_env_for_target(
-        normalized,
-        config_path=config_path,
-        client_id=client_id,
-        namespace=namespace,
-    )
-    if detected:
-        return detected
-    return _TARGET_TO_TAPDB_ENV[normalized]
-
-
-def _detect_tapdb_env_for_target(
-    target: str,
-    *,
-    config_path: str,
-    client_id: str,
-    namespace: str,
-) -> str | None:
-    try:
-        from daylily_tapdb.cli.db_config import get_db_config_for_env
-    except Exception:
-        return None
-
-    discovered: dict[str, dict[str, str]] = {}
-    for env_name in ("dev", "prod"):
-        try:
-            cfg = (
-                get_db_config_for_env(
-                    env_name,
-                    config_path=config_path or None,
-                    client_id=client_id,
-                    database_name=namespace,
-                )
-                or {}
-            )
-        except Exception:
-            continue
-        if cfg:
-            discovered[env_name] = cfg
-    if not discovered:
-        return None
-
-    if target == "local":
-        for env_name, cfg in discovered.items():
-            engine_type = (cfg.get("engine_type") or "").strip().lower()
-            if engine_type in _LOCAL_ENGINE_TYPES and _has_required_euid_prefixes(cfg):
-                return env_name
-        for env_name, cfg in discovered.items():
-            host = (cfg.get("host") or "").strip().lower()
-            if host in {"localhost", "127.0.0.1", "::1"} and _has_required_euid_prefixes(cfg):
-                return env_name
-        return None
-
-    if target in {"aurora", "prod"}:
-        for env_name, cfg in discovered.items():
-            engine_type = (cfg.get("engine_type") or "").strip().lower()
-            if engine_type in _AURORA_ENGINE_TYPES:
-                return env_name
-        for env_name, cfg in discovered.items():
-            host = (cfg.get("host") or "").strip().lower()
-            if host.endswith(".rds.amazonaws.com"):
-                return env_name
-        return None
-    return None
+    return normalized
 
 
 def _has_required_euid_prefixes(cfg: Mapping[str, str]) -> bool:
@@ -141,23 +66,21 @@ def _has_required_euid_prefixes(cfg: Mapping[str, str]) -> bool:
     return bool(audit_log_prefix)
 
 
-def _get_tapdb_db_config_for_env(
-    tapdb_env: str,
+def _get_tapdb_db_config(
     *,
     config_path: str,
     client_id: str,
     database_name: str,
 ) -> dict[str, str]:
-    from daylily_tapdb.cli.db_config import get_db_config_for_env
+    from daylily_tapdb.cli.db_config import get_db_config
 
-    cfg = get_db_config_for_env(
-        tapdb_env,
+    cfg = get_db_config(
         config_path=config_path or None,
         client_id=client_id,
         database_name=database_name,
     )
     if not cfg:
-        raise TapDBRuntimeError(f"No TapDB database config resolved for TAPDB_ENV={tapdb_env}.")
+        raise TapDBRuntimeError("No TapDB database config resolved for the explicit target.")
     return cfg
 
 
@@ -177,7 +100,7 @@ def _build_sqlalchemy_url(cfg: Mapping[str, str], *, schema_name: str = "") -> s
     return f"postgresql+psycopg2://{auth}{host}:{port}/{database}"
 
 
-def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str, str]:
+def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str]:
     try:
         from daylib_ursa.config import get_settings
 
@@ -198,11 +121,6 @@ def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str
         physical_database = str(getattr(settings, "tapdb_physical_database", "") or "").strip()
         local_db_port = str(getattr(settings, "tapdb_local_db_port", "") or "").strip()
         local_ui_port = str(getattr(settings, "tapdb_local_ui_port", "") or "").strip()
-        tapdb_env = (
-            str(os.environ.get("TAPDB_ENV") or getattr(settings, "tapdb_env", "") or "")
-            .strip()
-            .lower()
-        )
         config_path = str(getattr(settings, "tapdb_config_path", "") or "").strip()
         domain_registry_path = str(
             getattr(settings, "tapdb_domain_registry_path", "") or ""
@@ -215,7 +133,6 @@ def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str
         namespace = ""
         schema_name = ""
         physical_database = ""
-        tapdb_env = ""
         config_path = ""
         local_db_port = ""
         local_ui_port = ""
@@ -227,7 +144,6 @@ def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str
         namespace or DEFAULT_TAPDB_DATABASE_NAME,
         schema_name or DEFAULT_TAPDB_SCHEMA_NAME,
         physical_database or "",
-        tapdb_env or "",
         config_path or "",
         local_db_port or DEFAULT_TAPDB_LOCAL_DB_PORT,
         local_ui_port or DEFAULT_TAPDB_LOCAL_UI_PORT,
@@ -243,7 +159,6 @@ def _resolve_runtime_env(
     profile: str = DEFAULT_AWS_PROFILE,
     region: str = DEFAULT_AWS_REGION,
     namespace: str = DEFAULT_TAPDB_DATABASE_NAME,
-    tapdb_env: str | None = None,
     config_path: str = "",
 ) -> dict[str, str]:
     (
@@ -251,13 +166,13 @@ def _resolve_runtime_env(
         default_namespace,
         default_schema_name,
         default_physical_database,
-        default_tapdb_env,
         default_config_path,
         default_local_db_port,
         default_local_ui_port,
         default_domain_registry_path,
         default_prefix_registry_path,
     ) = _resolved_default_identity()
+    validate_database_target(target)
     resolved_client_id = (client_id or default_client_id).strip() or default_client_id
     resolved_namespace = (namespace or default_namespace).strip() or default_namespace
     resolved_cfg_path = str(config_path or default_config_path).strip()
@@ -267,20 +182,6 @@ def _resolve_runtime_env(
             client_id=resolved_client_id,
             config_path=default_config_path,
         )
-    resolved_env = (
-        (
-            tapdb_env
-            or default_tapdb_env
-            or tapdb_env_for_target(
-                target,
-                config_path=resolved_cfg_path or "",
-                client_id=resolved_client_id,
-                namespace=resolved_namespace,
-            )
-        )
-        .strip()
-        .lower()
-    )
     return {
         "aws_profile": (profile or DEFAULT_AWS_PROFILE).strip() or DEFAULT_AWS_PROFILE,
         "aws_region": (region or DEFAULT_AWS_REGION).strip() or DEFAULT_AWS_REGION,
@@ -288,7 +189,6 @@ def _resolve_runtime_env(
         "database_name": resolved_namespace,
         "schema_name": default_schema_name,
         "physical_database": default_physical_database,
-        "tapdb_env": resolved_env,
         "config_path": resolved_cfg_path or "",
         "local_db_port": default_local_db_port,
         "local_ui_port": default_local_ui_port,
@@ -331,7 +231,7 @@ def _require_schema_name(runtime_env: Mapping[str, str]) -> str:
     if not schema_name:
         raise TapDBRuntimeError(
             "TapDB schema_name is required. Set tapdb_schema_name in Ursa config and "
-            "environments.<env>.schema_name in the TapDB config."
+            "target.schema_name in the TapDB config."
         )
     return schema_name
 
@@ -365,7 +265,6 @@ def ensure_local_tapdb_namespace_config(
         profile=profile,
         region=region,
         namespace=namespace,
-        tapdb_env="dev",
         config_path=config_path,
     )
     resolved_config_path = Path(_require_config_path(runtime_env)).expanduser()
@@ -406,21 +305,27 @@ def ensure_local_tapdb_namespace_config(
             "--database-name",
             runtime_env["database_name"],
             "--schema-name",
-            f"{runtime_env['tapdb_env']}={_require_schema_name(runtime_env)}",
+            _require_schema_name(runtime_env),
             "--owner-repo-name",
             runtime_env["owner_repo_name"],
             "--domain-code",
-            f"{runtime_env['tapdb_env']}={runtime_env['domain_code']}",
+            runtime_env["domain_code"],
             "--domain-registry-path",
             domain_registry_path,
             "--prefix-ownership-registry-path",
             prefix_registry_path,
-            "--env",
-            runtime_env["tapdb_env"],
-            "--db-port",
-            f"{runtime_env['tapdb_env']}={local_db_port}",
+            "--engine-type",
+            "local",
+            "--host",
+            "localhost",
+            "--port",
+            local_db_port,
             "--ui-port",
-            f"{runtime_env['tapdb_env']}={local_ui_port}",
+            local_ui_port,
+            "--user",
+            "postgres",
+            "--database",
+            physical_database,
         ],
         env=child_env,
         capture_output=True,
@@ -445,8 +350,6 @@ def ensure_local_tapdb_namespace_config(
             runtime_env["database_name"],
             "db-config",
             "update",
-            "--env",
-            runtime_env["tapdb_env"],
             "--owner-repo-name",
             runtime_env["owner_repo_name"],
             "--domain-code",
@@ -487,7 +390,6 @@ def export_database_url_for_target(
     profile: str = DEFAULT_AWS_PROFILE,
     region: str = DEFAULT_AWS_REGION,
     namespace: str = DEFAULT_TAPDB_DATABASE_NAME,
-    tapdb_env: str | None = None,
     config_path: str = "",
 ) -> str:
     ensure_tapdb_version()
@@ -497,12 +399,10 @@ def export_database_url_for_target(
         profile=profile,
         region=region,
         namespace=namespace,
-        tapdb_env=tapdb_env,
         config_path=config_path,
     )
     resolved_config_path = _require_config_path(runtime_env)
-    cfg = _get_tapdb_db_config_for_env(
-        runtime_env["tapdb_env"],
+    cfg = _get_tapdb_db_config(
         config_path=resolved_config_path,
         client_id=runtime_env["client_id"],
         database_name=runtime_env["database_name"],
@@ -517,7 +417,6 @@ def get_tapdb_bundle(
     profile: str = DEFAULT_AWS_PROFILE,
     region: str = DEFAULT_AWS_REGION,
     namespace: str = DEFAULT_TAPDB_DATABASE_NAME,
-    tapdb_env: str | None = None,
     config_path: str = "",
     app_username: str | None = None,
 ) -> TapdbClientBundle:
@@ -528,12 +427,10 @@ def get_tapdb_bundle(
         profile=profile,
         region=region,
         namespace=namespace,
-        tapdb_env=tapdb_env,
         config_path=config_path,
     )
     resolved_config_path = _require_config_path(runtime_env)
-    cfg = _get_tapdb_db_config_for_env(
-        runtime_env["tapdb_env"],
+    cfg = _get_tapdb_db_config(
         config_path=resolved_config_path,
         client_id=runtime_env["client_id"],
         database_name=runtime_env["database_name"],
@@ -573,7 +470,6 @@ def run_tapdb_cli(
     profile: str = DEFAULT_AWS_PROFILE,
     region: str = DEFAULT_AWS_REGION,
     namespace: str = DEFAULT_TAPDB_DATABASE_NAME,
-    tapdb_env: str | None = None,
     config_path: str = "",
     cwd: Path | None = None,
     check: bool = True,
@@ -585,7 +481,6 @@ def run_tapdb_cli(
         profile=profile,
         region=region,
         namespace=namespace,
-        tapdb_env=tapdb_env,
         config_path=config_path,
     )
     cmd = [
@@ -594,8 +489,6 @@ def run_tapdb_cli(
         "daylily_tapdb.cli",
         "--config",
         _require_config_path(runtime_env),
-        "--env",
-        runtime_env["tapdb_env"],
     ]
     cmd.extend(args)
 
@@ -628,34 +521,20 @@ def run_schema_drift_check(
     profile: str = DEFAULT_AWS_PROFILE,
     region: str = DEFAULT_AWS_REGION,
     namespace: str = DEFAULT_TAPDB_DATABASE_NAME,
-    tapdb_env: str | None = None,
     config_path: str = "",
     cwd: Path | None = None,
 ) -> dict[str, object]:
     """Run TapDB schema drift check in report-only mode and normalize the result."""
 
-    env_name = (
-        (
-            tapdb_env
-            or tapdb_env_for_target(
-                target,
-                config_path=config_path,
-                client_id=client_id,
-                namespace=namespace,
-            )
-        )
-        .strip()
-        .lower()
-    )
+    target_label = validate_database_target(target)
     tool_version = ensure_tapdb_version()
     result = run_tapdb_cli(
-        ["db", "schema", "drift-check", env_name, "--json", "--no-strict"],
+        ["db", "schema", "drift-check", "--json", "--no-strict"],
         target=target,
         client_id=client_id,
         profile=profile,
         region=region,
         namespace=namespace,
-        tapdb_env=env_name,
         config_path=config_path,
         cwd=cwd,
         check=False,
@@ -691,7 +570,7 @@ def run_schema_drift_check(
     normalized: dict[str, object] = {
         "status": status,
         "checked_at": datetime.now(UTC).isoformat(),
-        "environment": env_name,
+        "target": target_label,
         "tool_version": tool_version,
         "summary": summary,
         "report": payload,

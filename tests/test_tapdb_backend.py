@@ -178,15 +178,14 @@ def test_adapter_module_has_no_removed_repo_reference() -> None:
     assert "sys.path.insert" not in source
 
 
-def test_tapdb_env_for_target_uses_explicit_defaults(monkeypatch) -> None:
-    monkeypatch.setattr(
-        tapdb_runtime,
-        "_detect_tapdb_env_for_target",
-        lambda _target, **_kwargs: None,
-    )
+def test_validate_database_target_accepts_current_targets() -> None:
+    assert tapdb_runtime.validate_database_target("local") == "local"
+    assert tapdb_runtime.validate_database_target("AURORA") == "aurora"
 
-    assert tapdb_runtime.tapdb_env_for_target("local") == "dev"
-    assert tapdb_runtime.tapdb_env_for_target("aurora") == "prod"
+
+def test_validate_database_target_rejects_legacy_env_selectors() -> None:
+    with pytest.raises(tapdb_runtime.TapDBRuntimeError, match="Unsupported database target"):
+        tapdb_runtime.validate_database_target("dev")
 
 
 def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) -> None:
@@ -195,8 +194,8 @@ def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) ->
     )
     monkeypatch.setattr(
         tapdb_runtime,
-        "_get_tapdb_db_config_for_env",
-        lambda _env, **_kwargs: {
+        "_get_tapdb_db_config",
+        lambda **_kwargs: {
             "user": "ursa_user",
             "password": "secret",
             "host": "db.example.test",
@@ -206,8 +205,22 @@ def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) ->
     )
     monkeypatch.setattr(
         tapdb_runtime,
-        "_resolve_tapdb_config_path",
-        lambda **_kwargs: "/tmp/ursa-tapdb.yaml",
+        "_resolve_runtime_env",
+        lambda **_kwargs: {
+            "aws_profile": "test-profile",
+            "aws_region": "us-west-2",
+            "client_id": "local",
+            "database_name": "ursa",
+            "schema_name": "tapdb_ursa_dev",
+            "physical_database": "daylily_ursa",
+            "config_path": "/tmp/ursa-tapdb.yaml",
+            "local_db_port": "5588",
+            "local_ui_port": "8918",
+            "domain_code": "Z",
+            "owner_repo_name": "ursa",
+            "domain_registry_path": "/tmp/domain.json",
+            "prefix_registry_path": "/tmp/prefix.json",
+        },
     )
 
     db_url = tapdb_runtime.export_database_url_for_target(
@@ -216,7 +229,6 @@ def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) ->
         profile="test-profile",
         region="us-west-2",
         namespace="ursa",
-        tapdb_env="dev",
     )
 
     assert db_url == (
@@ -232,8 +244,22 @@ def test_run_tapdb_cli_exports_explicit_identity_env(monkeypatch) -> None:
     monkeypatch.setattr(tapdb_runtime, "ensure_tapdb_version", lambda: _tapdb_dependency_spec())
     monkeypatch.setattr(
         tapdb_runtime,
-        "_resolve_tapdb_config_path",
-        lambda **_kwargs: "/tmp/ursa-tapdb.yaml",
+        "_resolve_runtime_env",
+        lambda **_kwargs: {
+            "aws_profile": "lsmc",
+            "aws_region": "us-west-2",
+            "client_id": "local",
+            "database_name": "ursa",
+            "schema_name": "tapdb_ursa_dev",
+            "physical_database": "tapdb_shared_dev",
+            "config_path": "/tmp/ursa-tapdb.yaml",
+            "local_db_port": "5588",
+            "local_ui_port": "8918",
+            "domain_code": "Z",
+            "owner_repo_name": "ursa",
+            "domain_registry_path": "/tmp/domain.json",
+            "prefix_registry_path": "/tmp/prefix.json",
+        },
     )
 
     def fake_run(cmd, *, cwd=None, env=None, capture_output, text):
@@ -261,7 +287,7 @@ def test_run_tapdb_cli_exports_explicit_identity_env(monkeypatch) -> None:
         "--config",
         "/tmp/ursa-tapdb.yaml",
     ]
-    assert captured["cmd"][5:7] == ["--env", "dev"]
+    assert "--env" not in captured["cmd"]
     assert captured["env"]["MERIDIAN_DOMAIN_CODE"] == "Z"
     assert captured["env"]["TAPDB_OWNER_REPO"] == "ursa"
 
@@ -283,7 +309,6 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
             "physical_database": "tapdb_shared_dev",
-            "tapdb_env": "dev",
             "config_path": str(config_path),
             "local_db_port": "5588",
             "local_ui_port": "8918",
@@ -319,21 +344,27 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "--database-name",
             "ursa",
             "--schema-name",
-            "dev=tapdb_ursa_dev",
+            "tapdb_ursa_dev",
             "--owner-repo-name",
             "ursa",
             "--domain-code",
-            "dev=Z",
+            "Z",
             "--domain-registry-path",
             str(tmp_path / "domain.json"),
             "--prefix-ownership-registry-path",
             str(tmp_path / "prefix.json"),
-            "--env",
-            "dev",
-            "--db-port",
-            "dev=5588",
+            "--engine-type",
+            "local",
+            "--host",
+            "localhost",
+            "--port",
+            "5588",
             "--ui-port",
-            "dev=8918",
+            "8918",
+            "--user",
+            "postgres",
+            "--database",
+            "tapdb_shared_dev",
         ],
         [
             sys.executable,
@@ -347,8 +378,6 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "ursa",
             "db-config",
             "update",
-            "--env",
-            "dev",
             "--owner-repo-name",
             "ursa",
             "--domain-code",
@@ -386,7 +415,6 @@ def test_ensure_local_tapdb_namespace_config_requires_explicit_config_path(monke
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
             "physical_database": "",
-            "tapdb_env": "dev",
             "config_path": "",
             "local_db_port": "5588",
             "local_ui_port": "8918",
@@ -412,7 +440,6 @@ def test_ensure_local_tapdb_namespace_config_requires_explicit_registry_paths(
         "database_name": "ursa",
         "schema_name": "tapdb_ursa_dev",
         "physical_database": "",
-        "tapdb_env": "dev",
         "config_path": "/tmp/ursa-tapdb.yaml",
         "local_db_port": "5588",
         "local_ui_port": "8918",
@@ -451,7 +478,7 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
     monkeypatch.setenv("TAPDB_CONFIG_PATH", "/tmp/from-env.yaml")
     monkeypatch.setenv("TAPDB_CLIENT_ID", "env-client")
     monkeypatch.setenv("TAPDB_DATABASE_NAME", "env-db")
-    monkeypatch.setenv("TAPDB_ENV", "prod")
+    monkeypatch.setenv("TAPDB_SCHEMA_NAME", "tapdb_explicit_schema")
 
     monkeypatch.setitem(
         sys.modules,
@@ -460,7 +487,6 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
             get_settings=lambda: SimpleNamespace(
                 tapdb_client_id="yaml-client",
                 tapdb_database_name="yaml-db",
-                tapdb_env="dev",
                 tapdb_config_path="/tmp/from-yaml.yaml",
                 tapdb_schema_name="tapdb_yaml_dev",
                 tapdb_physical_database="tapdb_shared_dev",
@@ -475,9 +501,8 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
         assert tapdb_runtime._resolved_default_identity() == (
             "env-client",
             "env-db",
-            "tapdb_yaml_dev",
+            "tapdb_explicit_schema",
             "tapdb_shared_dev",
-            "prod",
             "/tmp/from-yaml.yaml",
             "5533",
             "8918",
@@ -493,21 +518,23 @@ def test_repo_ships_tapdb_config_template() -> None:
     payload = yaml.safe_load(template_path.read_text(encoding="utf-8"))
 
     assert template_path.is_file()
-    assert payload["meta"]["config_version"] == 3
-    assert payload["meta"]["client_id"] == "local"
+    assert payload["meta"]["config_version"] == 4
+    assert payload["meta"]["client_id"] == "ursa"
     assert payload["meta"]["database_name"] == "ursa"
+    assert payload["target"]["schema_name"] == "tapdb_ursa_dev"
     assert payload["meta"]["owner_repo_name"] == "ursa"
-    assert payload["meta"]["domain_code"] == "Z"
-    assert payload["meta"]["domain_registry_path"] == "/absolute/path/to/domain_code_registry.json"
+    assert payload["target"]["domain_code"] == "Z"
+    assert (
+        payload["meta"]["domain_registry_path"] == "/absolute/path/to/domain_code_registry.json"
+    )
     assert (
         payload["meta"]["prefix_ownership_registry_path"]
         == "/absolute/path/to/prefix_ownership_registry.json"
     )
-    assert payload["environments"]["dev"]["domain_code"] == "Z"
-    assert payload["environments"]["dev"]["port"] == "5588"
-    assert payload["environments"]["dev"]["database"] == "tapdb_ursa_dev"
-    assert payload["environments"]["dev"]["audit_log_euid_prefix"] == "RGX"
-    assert payload["environments"]["prod"]["domain_code"] == "Z"
+    assert payload["target"]["port"] == "5588"
+    assert payload["target"]["database"] == "tapdb_shared_dev"
+    assert payload["target"]["audit_log_euid_prefix"] == "RGX"
+    assert payload["safety"]["safety_tier"] == "local"
 
 
 def test_claim_ursa_template_prefixes_initializes_missing_registry(tmp_path: Path) -> None:
@@ -576,7 +603,6 @@ def test_backend_scopes_template_lookups_to_bundle_domain_code() -> None:
         app_username="ursa",
         client_id="local",
         namespace="ursa",
-        tapdb_env="dev",
     )
 
     with pytest.raises(RuntimeError, match="Missing Ursa templates"):
@@ -594,10 +620,11 @@ def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch)
         tapdb_runtime,
         "_resolve_runtime_env",
         lambda **_kwargs: {
-            "tapdb_env": "dev",
             "client_id": "local",
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
+            "physical_database": "tapdb_ursa_dev",
+            "config_path": "/tmp/ursa.yaml",
             "aws_region": "us-west-2",
             "domain_code": "Z",
             "owner_repo_name": "ursa",
@@ -608,7 +635,7 @@ def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch)
     )
     monkeypatch.setattr(
         tapdb_runtime,
-        "_get_tapdb_db_config_for_env",
+        "_get_tapdb_db_config",
         lambda *_args, **_kwargs: {
             "host": "localhost",
             "port": "5432",
