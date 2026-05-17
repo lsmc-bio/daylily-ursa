@@ -28,7 +28,7 @@ def _settings() -> SimpleNamespace:
         database_target="local",
         aws_profile="lsmc",
         tapdb_database_name="ursa",
-        tapdb_client_id="local",
+        tapdb_client_id="ursa",
         tapdb_schema_name="tapdb_ursa_dev",
         tapdb_physical_database="tapdb_shared_dev",
         tapdb_config_path="/tmp/ursa-tapdb.yaml",
@@ -141,7 +141,10 @@ def test_reset_uses_tapdb_delete_then_bootstrap_then_overlay(monkeypatch):
     )
 
     assert events == [
-        ("tapdb", ["db", "delete", "--confirm-target", "ursa/ursa/tapdb_ursa_dev@tapdb_shared_dev"]),
+        (
+            "tapdb",
+            ["db", "delete", "--confirm-target", "ursa/ursa/tapdb_ursa_dev@tapdb_shared_dev"],
+        ),
         ("config", "/tmp/ursa-tapdb.yaml"),
         ("tapdb", ["bootstrap", "local", "--no-gui"]),
         ("db_url", "resolved"),

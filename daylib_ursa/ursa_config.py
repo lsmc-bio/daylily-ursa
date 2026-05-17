@@ -50,20 +50,27 @@ class RegionConfig:
 
 def _sanitize_deployment_code(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9-]+", "-", str(value or "").strip()).strip("-")
-    return cleaned or "local"
+    if not cleaned:
+        raise RuntimeError("Ursa deployment code is required")
+    return cleaned
 
 
 def _resolve_deployment_code() -> str:
-    return _sanitize_deployment_code(
+    raw = (
         os.environ.get("URSA_DEPLOYMENT_CODE")
         or os.environ.get("DEPLOYMENT_CODE")
         or os.environ.get("LSMC_DEPLOYMENT_CODE")
-        or "local"
     )
+    return _sanitize_deployment_code(raw)
 
 
 def get_config_dir() -> Path:
-    xdg_config_home = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    raw_xdg_config_home = str(os.environ.get("XDG_CONFIG_HOME") or "").strip()
+    if not raw_xdg_config_home:
+        raise RuntimeError("Ursa requires explicit XDG_CONFIG_HOME")
+    xdg_config_home = Path(raw_xdg_config_home)
+    if not xdg_config_home.is_absolute():
+        raise RuntimeError(f"XDG_CONFIG_HOME must be an absolute path: {raw_xdg_config_home}")
     return xdg_config_home / f"ursa-{_resolve_deployment_code()}"
 
 
@@ -98,7 +105,7 @@ def update_config_regions(
     if not path.exists():
         raise FileNotFoundError(f"Ursa config file not found: {path}")
 
-    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Ursa config must be a YAML mapping: {path}")
 
@@ -516,10 +523,12 @@ class UrsaConfig:
 
         try:
             with open(path) as f:
-                data = yaml.safe_load(f) or {}
+                data = yaml.safe_load(f)
         except Exception as e:
             LOGGER.error("Failed to load Ursa config from %s: %s", path, e)
-            return cls(_config_path=path)
+            raise
+        if not isinstance(data, dict):
+            raise ValueError(f"Ursa config must be a YAML mapping: {path}")
 
         # Parse regions — list format only
         regions_data = data.get("regions", [])

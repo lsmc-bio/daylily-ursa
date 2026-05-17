@@ -23,11 +23,11 @@ dependencies = [
     # Cognito auth library
     "daylily-auth-cognito==2.1.5",
     # TapDB graph persistence
-    "daylily-tapdb>=7.0.1,<8.0.0",
+    "daylily-tapdb>=7.0.3,<8.0.0",
     # Ephemeral cluster API/CLI contract
     "daylily-ephemeral-cluster==2.3.2",
     # Shared Zebra runtime contract
-    "zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.11",
+    "zebra_day @ git+https://github.com/Daylily-Informatics/zebra_day.git@6.0.14",
     "fastapi>=0.104.0",
     "httpx>=0.25.0",
     "itsdangerous>=2.2.0",
