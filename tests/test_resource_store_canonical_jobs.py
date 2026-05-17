@@ -10,6 +10,8 @@ from daylib_ursa.resource_store import (
     ANALYSIS_JOB_TEMPLATE,
     CLUSTER_JOB_TEMPLATE,
     MANIFEST_TEMPLATE,
+    RUN_ANALYSIS_JOB_TEMPLATE,
+    RUN_DIRECTORY_MOUNT_TEMPLATE,
     STAGING_JOB_TEMPLATE,
     WORKSET_TEMPLATE,
     ResourceStore,
@@ -66,6 +68,10 @@ class MemoryBackend:
             "RGX/analysis/launch-job-event/1.0/": "AJE",
             STAGING_JOB_TEMPLATE: "SJ",
             "RGX/staging/job-event/1.0/": "SJE",
+            RUN_DIRECTORY_MOUNT_TEMPLATE: "RM",
+            "RGX/run-directory/mount-event/1.0/": "RME",
+            RUN_ANALYSIS_JOB_TEMPLATE: "RAJ",
+            "RGX/analysis/run-job-event/1.0/": "RAE",
         }.get(template_code, "GI")
         now = datetime.now(timezone.utc)
         instance = _Instance(
@@ -432,3 +438,86 @@ def test_staging_job_statuses_mutate_canonical_job_without_revision_children() -
     assert job_payload["stage"] == {"attempt": 1}
     assert job_payload["return_code"] == 3
     _assert_no_revision_objects(backend, job)
+
+
+def test_run_mount_and_run_analysis_jobs_are_separate_canonical_records() -> None:
+    store, backend = _store_with_backend()
+
+    mount = store.create_run_directory_mount(
+        mount_id="RUN-1",
+        run_id="RUN-1",
+        platform="ILLUMINA",
+        source_s3_uri="s3://bucket/RUN-1/",
+        mount_fsx_path="/fsx/run_dir_mounts/RUN-1/",
+        file_system_path="/run_dir_mounts/RUN-1/",
+        cluster_name="cluster-1",
+        region="us-west-2",
+        fsx_file_system_id="fs-123",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        request={"wait": True},
+        mount={"association_id": "dra-1"},
+        state="AVAILABLE",
+    )
+    event = store.add_run_directory_mount_event(
+        mount_euid=mount.mount_euid,
+        event_type="create",
+        status="AVAILABLE",
+        summary="created",
+        created_by=USER_ID,
+    )
+    job = store.create_run_analysis_job(
+        job_name="run-analysis",
+        run_id="RUN-1",
+        platform="ILLUMINA",
+        run_dir=mount.mount_fsx_path,
+        source_s3_uri=mount.source_s3_uri,
+        mount_euid=mount.mount_euid,
+        mount_id=mount.mount_id,
+        sample_sheet=None,
+        basecalling_state="complete",
+        run_status="available",
+        output_root="results/runs/RUN-1",
+        cluster_name="cluster-1",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        request={"analysis_command_id": "illumina_run_qc"},
+    )
+    running = store.update_run_analysis_job_status(
+        job_euid=job.job_euid,
+        state="RUNNING",
+        created_by=USER_ID,
+        started_at="2026-05-11T00:10:00Z",
+        launch={"session_name": "ursa-run-1"},
+    )
+    store.add_run_analysis_job_event(
+        job_euid=job.job_euid,
+        event_type="launch",
+        status="RUNNING",
+        summary="launched",
+        created_by=USER_ID,
+    )
+
+    assert mount.mount_euid.startswith("RM-")
+    assert event.mount_euid == mount.mount_euid
+    assert job.job_euid.startswith("RAJ-")
+    assert running.job_euid == job.job_euid
+    assert [
+        instance.euid
+        for instance in backend.instances
+        if instance.template_code == RUN_DIRECTORY_MOUNT_TEMPLATE
+    ] == [mount.mount_euid]
+    assert [
+        instance.euid
+        for instance in backend.instances
+        if instance.template_code == RUN_ANALYSIS_JOB_TEMPLATE
+    ] == [job.job_euid]
+    mount_instance = _instance_for_euid(backend, mount.mount_euid)
+    job_instance = _instance_for_euid(backend, job.job_euid)
+    assert from_json_addl(mount_instance)["state"] == "AVAILABLE"
+    assert from_json_addl(job_instance)["launch"] == {"session_name": "ursa-run-1"}
+    assert backend.list_children(object(), parent=mount_instance, relationship_type="event")
+    assert backend.list_children(object(), parent=job_instance, relationship_type="event")
+    _assert_no_revision_objects(backend, mount_instance)
+    _assert_no_revision_objects(backend, job_instance)

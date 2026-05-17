@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">Run Analysis</h1>
+            <p class="page-subtitle">Mount sequencer run directories and launch run-scoped Daylily workflows.</p>
+        </div>
+    </div>
+
+    <div class="grid grid-2">
+        <form id="run-mount-form" class="card">
+            <h3 class="card-title">Run Mount</h3>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="mount_run_id" class="form-label">Run ID</label>
+                    <input id="mount_run_id" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="mount_platform" class="form-label">Platform</label>
+                    <select id="mount_platform" class="form-control form-select" required>
+                        <option value="ILLUMINA">ILLUMINA</option>
+                        <option value="ONT">ONT</option>
+                        <option value="ULTIMA">ULTIMA</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="source_s3_uri" class="form-label">Source S3 URI</label>
+                <input id="source_s3_uri" class="form-control mono" placeholder="s3://bucket/runs/RUNID/" required>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="mount_cluster_name" class="form-label">Cluster</label>
+                    <select id="mount_cluster_name" class="form-control form-select" required>
+                        <option value="">Choose cluster...</option>
+                        {% for cluster in clusters %}
+                        <option value="{{ cluster.cluster_name }}" data-region="{{ cluster.region }}">{{ cluster.cluster_name }} ({{ cluster.region }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="mount_region" class="form-label">Region</label>
+                    <select id="mount_region" class="form-control form-select" required>
+                        {% for region in allowed_regions %}
+                        <option value="{{ region }}">{{ region }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="mount_id" class="form-label">Mount ID</label>
+                    <input id="mount_id" class="form-control mono">
+                </div>
+                <div class="form-group">
+                    <label for="file_system_path" class="form-label">FSx Path</label>
+                    <input id="file_system_path" class="form-control mono" placeholder="/run_dir_mounts/RUNID/">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-link"></i> Create
+                </button>
+                <button type="button" class="btn btn-outline" id="refresh-mounts-btn">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+        </form>
+
+        <form id="run-analysis-job-form" class="card">
+            <h3 class="card-title">Run Job</h3>
+            <div class="form-group">
+                <label for="mount_euid" class="form-label">Run Mount</label>
+                <select id="mount_euid" class="form-control form-select" required>
+                    <option value="">Choose mount...</option>
+                    {% for mount in run_mounts %}
+                    <option value="{{ mount.mount_euid }}" data-run-id="{{ mount.run_id }}" data-platform="{{ mount.platform }}" data-region="{{ mount.region }}" data-cluster="{{ mount.cluster_name }}">{{ mount.run_id }} ({{ mount.mount_id }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="job_run_id" class="form-label">Run ID</label>
+                    <input id="job_run_id" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="job_platform" class="form-label">Platform</label>
+                    <input id="job_platform" class="form-control" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="run_analysis_command_id" class="form-label">Command Profile</label>
+                <select id="run_analysis_command_id" class="form-control form-select" required>
+                    <option value="">Choose profile...</option>
+                    {% for command in run_analysis_command_catalog.commands %}
+                    <option value="{{ command.command_id }}">{{ command.display_name }} ({{ command.command_id }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="job_cluster_name" class="form-label">Cluster</label>
+                    <input id="job_cluster_name" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="job_region" class="form-label">Region</label>
+                    <input id="job_region" class="form-control" required>
+                </div>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="sample_sheet" class="form-label">Sample Sheet</label>
+                    <input id="sample_sheet" class="form-control mono">
+                </div>
+                <div class="form-group">
+                    <label for="output_root" class="form-label">Output Root</label>
+                    <input id="output_root" class="form-control mono">
+                </div>
+            </div>
+            <div class="grid grid-2">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="run_dry_run">
+                    <span>Daylily-EC dry run</span>
+                </label>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-outline" id="run-preview-btn">
+                    <i class="fas fa-eye"></i> Preview
+                </button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-rocket"></i> Define
+                </button>
+                <button type="button" class="btn btn-secondary" id="run-define-launch-btn">
+                    Define + Launch
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card mt-lg">
+        <div class="d-flex justify-between align-center mb-md">
+            <h3 class="card-title mb-0">Run Mounts</h3>
+        </div>
+        <div class="table-wrapper">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Mount</th>
+                        <th>Run</th>
+                        <th>Source</th>
+                        <th>FSx</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="run-mounts-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mt-lg">
+        <div class="d-flex justify-between align-center mb-md">
+            <h3 class="card-title mb-0">Run Jobs</h3>
+            <button type="button" class="btn btn-outline btn-sm" id="refresh-run-jobs-btn">
+                <i class="fas fa-sync"></i> Refresh
+            </button>
+        </div>
+        <div class="table-wrapper">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Run</th>
+                        <th>Command</th>
+                        <th>Cluster</th>
+                        <th>Status</th>
+                        <th>Updated</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="run-jobs-body"></tbody>
+            </table>
+        </div>
+        <pre id="run-command-preview" class="json-block mt-md">Select a run-analysis command profile.</pre>
+        <pre id="run-job-logs" class="json-block d-none mt-md"></pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+    const pageData = UrsaPortal.parsePageData();
+    let launchAfterDefine = false;
+
+    function mountPayload() {
+        return {
+            run_id: document.getElementById('mount_run_id')?.value || '',
+            platform: document.getElementById('mount_platform')?.value || '',
+            source_s3_uri: document.getElementById('source_s3_uri')?.value || '',
+            cluster_name: document.getElementById('mount_cluster_name')?.value || '',
+            region: document.getElementById('mount_region')?.value || '',
+            mount_id: document.getElementById('mount_id')?.value || null,
+            file_system_path: document.getElementById('file_system_path')?.value || null,
+        };
+    }
+
+    function jobPayload() {
+        return {
+            mount_euid: document.getElementById('mount_euid')?.value || '',
+            run_id: document.getElementById('job_run_id')?.value || '',
+            platform: document.getElementById('job_platform')?.value || '',
+            analysis_command_id: document.getElementById('run_analysis_command_id')?.value || '',
+            cluster_name: document.getElementById('job_cluster_name')?.value || '',
+            region: document.getElementById('job_region')?.value || '',
+            sample_sheet: document.getElementById('sample_sheet')?.value || null,
+            output_root: document.getElementById('output_root')?.value || null,
+            dry_run: Boolean(document.getElementById('run_dry_run')?.checked),
+        };
+    }
+
+    function syncMountRegion() {
+        const option = document.getElementById('mount_cluster_name')?.selectedOptions[0];
+        const region = option?.getAttribute('data-region') || '';
+        if (region) document.getElementById('mount_region').value = region;
+    }
+
+    function syncSelectedMount() {
+        const option = document.getElementById('mount_euid')?.selectedOptions[0];
+        if (!option) return;
+        document.getElementById('job_run_id').value = option.getAttribute('data-run-id') || '';
+        document.getElementById('job_platform').value = option.getAttribute('data-platform') || '';
+        document.getElementById('job_cluster_name').value = option.getAttribute('data-cluster') || '';
+        document.getElementById('job_region').value = option.getAttribute('data-region') || '';
+    }
+
+    function renderMountOptions(mounts) {
+        const select = document.getElementById('mount_euid');
+        select.innerHTML = '<option value="">Choose mount...</option>' + mounts.map((mount) => `
+            <option value="${escapeHtml(mount.mount_euid || '')}" data-run-id="${escapeHtml(mount.run_id || '')}" data-platform="${escapeHtml(mount.platform || '')}" data-region="${escapeHtml(mount.region || '')}" data-cluster="${escapeHtml(mount.cluster_name || '')}">
+                ${escapeHtml(mount.run_id || '')} (${escapeHtml(mount.mount_id || '')})
+            </option>
+        `).join('');
+    }
+
+    function renderMounts(mounts) {
+        const body = document.getElementById('run-mounts-body');
+        body.innerHTML = mounts.length ? mounts.map((mount) => `
+            <tr data-mount-euid="${escapeHtml(mount.mount_euid)}">
+                <td><span class="mono">${escapeHtml(mount.mount_id)}</span><br>${escapeHtml(mount.mount_euid)}</td>
+                <td>${escapeHtml(mount.run_id)}<br><span class="text-muted">${escapeHtml(mount.platform)}</span></td>
+                <td class="mono">${escapeHtml(mount.source_s3_uri)}</td>
+                <td class="mono">${escapeHtml(mount.mount_fsx_path)}</td>
+                <td><span class="badge badge-secondary">${escapeHtml(mount.state)}</span></td>
+                <td>
+                    <button type="button" class="btn btn-outline btn-sm" data-mount-action="verify">Verify</button>
+                    <button type="button" class="btn btn-outline btn-sm" data-mount-action="delete">Delete</button>
+                </td>
+            </tr>
+        `).join('') : '<tr><td colspan="6" class="text-muted">No run mounts yet.</td></tr>';
+        renderMountOptions(mounts);
+    }
+
+    function renderJobs(jobs) {
+        const body = document.getElementById('run-jobs-body');
+        body.innerHTML = jobs.length ? jobs.map((job) => `
+            <tr data-job-euid="${escapeHtml(job.job_euid)}">
+                <td><span class="mono">${escapeHtml(job.job_euid)}</span><br>${escapeHtml(job.job_name)}</td>
+                <td>${escapeHtml(job.run_id)}<br><span class="text-muted">${escapeHtml(job.platform)}</span></td>
+                <td>${escapeHtml(job.request?.analysis_command_id || '')}</td>
+                <td>${escapeHtml(job.cluster_name)}<br><span class="text-muted">${escapeHtml(job.region)}</span></td>
+                <td><span class="badge badge-secondary">${escapeHtml(job.state)}</span></td>
+                <td>${escapeHtml(job.updated_at)}</td>
+                <td>
+                    <button type="button" class="btn btn-outline btn-sm" data-job-action="refresh">Refresh</button>
+                    <button type="button" class="btn btn-outline btn-sm" data-job-action="logs">Logs</button>
+                    ${job.state === 'DEFINED' ? '<button type="button" class="btn btn-primary btn-sm" data-job-action="launch">Launch</button>' : ''}
+                </td>
+            </tr>
+        `).join('') : '<tr><td colspan="7" class="text-muted">No run jobs yet.</td></tr>';
+    }
+
+    async function reloadMounts() {
+        const mounts = await UrsaPortal.apiRequest('/api/v1/run-mounts');
+        renderMounts(mounts);
+    }
+
+    async function reloadJobs() {
+        const jobs = await UrsaPortal.apiRequest('/api/v1/run-analysis-jobs');
+        renderJobs(jobs);
+    }
+
+    async function createMount(event) {
+        event.preventDefault();
+        await UrsaPortal.apiRequest('/api/v1/run-mounts', { method: 'POST', body: mountPayload() });
+        await reloadMounts();
+        UrsaPortal.showToast('success', 'Run mount saved');
+    }
+
+    async function createJob(event) {
+        event.preventDefault();
+        const created = await UrsaPortal.apiRequest('/api/v1/run-analysis-jobs', { method: 'POST', body: jobPayload() });
+        if (launchAfterDefine) {
+            await UrsaPortal.apiRequest(`/api/v1/run-analysis-jobs/${encodeURIComponent(created.job_euid)}/launch`, { method: 'POST', body: {} });
+        }
+        launchAfterDefine = false;
+        await reloadJobs();
+        UrsaPortal.showToast('success', 'Run analysis job saved');
+    }
+
+    async function previewCommand() {
+        const payload = jobPayload();
+        if (!payload.analysis_command_id) return;
+        const preview = await UrsaPortal.apiRequest(`/api/v1/run-analysis-commands/${encodeURIComponent(payload.analysis_command_id)}/preview`, {
+            method: 'POST',
+            body: {
+                region: payload.region,
+                cluster_name: payload.cluster_name,
+                run_context_file: 'config/runs.tsv',
+                dry_run: payload.dry_run,
+            },
+        });
+        document.getElementById('run-command-preview').textContent = preview.shell_preview;
+    }
+
+    async function handleMountAction(event) {
+        const button = event.target.closest('button[data-mount-action]');
+        if (!button) return;
+        const mountEuid = button.closest('tr[data-mount-euid]')?.getAttribute('data-mount-euid') || '';
+        if (!mountEuid) return;
+        const action = button.getAttribute('data-mount-action');
+        if (action === 'verify') {
+            await UrsaPortal.apiRequest(`/api/v1/run-mounts/${encodeURIComponent(mountEuid)}/verify`, { method: 'POST', body: {} });
+        }
+        if (action === 'delete') {
+            await UrsaPortal.apiRequest(`/api/v1/run-mounts/${encodeURIComponent(mountEuid)}`, { method: 'DELETE', body: {} });
+        }
+        await reloadMounts();
+    }
+
+    async function handleJobAction(event) {
+        const button = event.target.closest('button[data-job-action]');
+        if (!button) return;
+        const jobEuid = button.closest('tr[data-job-euid]')?.getAttribute('data-job-euid') || '';
+        if (!jobEuid) return;
+        const action = button.getAttribute('data-job-action');
+        if (action === 'launch') {
+            await UrsaPortal.apiRequest(`/api/v1/run-analysis-jobs/${encodeURIComponent(jobEuid)}/launch`, { method: 'POST', body: {} });
+            await reloadJobs();
+            return;
+        }
+        if (action === 'refresh') {
+            await UrsaPortal.apiRequest(`/api/v1/run-analysis-jobs/${encodeURIComponent(jobEuid)}/refresh`, { method: 'POST' });
+            await reloadJobs();
+            return;
+        }
+        if (action === 'logs') {
+            const logs = await UrsaPortal.apiRequest(`/api/v1/run-analysis-jobs/${encodeURIComponent(jobEuid)}/logs`);
+            const logEl = document.getElementById('run-job-logs');
+            logEl.classList.remove('d-none');
+            logEl.textContent = logs.stdout || logs.stderr || '';
+        }
+    }
+
+    document.getElementById('mount_cluster_name')?.addEventListener('change', syncMountRegion);
+    document.getElementById('mount_euid')?.addEventListener('change', syncSelectedMount);
+    document.getElementById('run-mount-form')?.addEventListener('submit', (event) => createMount(event).catch((error) => UrsaPortal.showToast('error', error.message)));
+    document.getElementById('run-analysis-job-form')?.addEventListener('submit', (event) => createJob(event).catch((error) => {
+        launchAfterDefine = false;
+        UrsaPortal.showToast('error', error.message);
+    }));
+    document.getElementById('refresh-mounts-btn')?.addEventListener('click', () => reloadMounts().catch((error) => UrsaPortal.showToast('error', error.message)));
+    document.getElementById('refresh-run-jobs-btn')?.addEventListener('click', () => reloadJobs().catch((error) => UrsaPortal.showToast('error', error.message)));
+    document.getElementById('run-preview-btn')?.addEventListener('click', () => previewCommand().catch((error) => UrsaPortal.showToast('error', error.message)));
+    document.getElementById('run-define-launch-btn')?.addEventListener('click', () => {
+        launchAfterDefine = true;
+        document.getElementById('run-analysis-job-form')?.requestSubmit();
+    });
+    document.getElementById('run-mounts-body')?.addEventListener('click', (event) => handleMountAction(event).catch((error) => UrsaPortal.showToast('error', error.message)));
+    document.getElementById('run-jobs-body')?.addEventListener('click', (event) => handleJobAction(event).catch((error) => UrsaPortal.showToast('error', error.message)));
+    renderMounts(Array.isArray(pageData.run_mounts) ? pageData.run_mounts : []);
+    renderJobs(Array.isArray(pageData.run_analysis_jobs) ? pageData.run_analysis_jobs : []);
+    syncMountRegion();
+    syncSelectedMount();
+})();
+</script>
+{% endblock %}

@@ -18,6 +18,10 @@ from daylib_ursa.resource_store import (
     LinkedBucketRecord,
     ManifestEditorOptionRecord,
     ManifestRecord,
+    RunAnalysisJobEventRecord,
+    RunAnalysisJobRecord,
+    RunDirectoryMountEventRecord,
+    RunDirectoryMountRecord,
     StagingJobEventRecord,
     StagingJobRecord,
     WorksetRecord,
@@ -59,6 +63,8 @@ class MemoryResourceStore:
         self.buckets: dict[str, LinkedBucketRecord] = {}
         self.analysis_jobs: dict[str, AnalysisJobRecord] = {}
         self.staging_jobs: dict[str, StagingJobRecord] = {}
+        self.run_mounts: dict[str, RunDirectoryMountRecord] = {}
+        self.run_analysis_jobs: dict[str, RunAnalysisJobRecord] = {}
         self._workset_seq = 0
         self._manifest_seq = 0
         self._manifest_option_seq = 0
@@ -67,6 +73,10 @@ class MemoryResourceStore:
         self._analysis_event_seq = 0
         self._staging_job_seq = 0
         self._staging_event_seq = 0
+        self._run_mount_seq = 0
+        self._run_mount_event_seq = 0
+        self._run_analysis_job_seq = 0
+        self._run_analysis_event_seq = 0
 
     def list_worksets(self, *, tenant_id: uuid.UUID, limit: int = 100):
         _ = limit
@@ -403,6 +413,211 @@ class MemoryResourceStore:
         _ = limit
         return [item for item in self.staging_jobs.values() if item.tenant_id == tenant_id]
 
+    def create_run_directory_mount(
+        self,
+        *,
+        mount_id,
+        run_id,
+        platform,
+        source_s3_uri,
+        mount_fsx_path,
+        file_system_path,
+        cluster_name,
+        region,
+        tenant_id,
+        owner_user_id,
+        fsx_file_system_id=None,
+        request=None,
+        mount=None,
+        state="DEFINED",
+    ):
+        self._run_mount_seq += 1
+        record = RunDirectoryMountRecord(
+            mount_euid=f"RM-{self._run_mount_seq}",
+            mount_id=mount_id,
+            run_id=run_id,
+            platform=platform,
+            source_s3_uri=source_s3_uri,
+            mount_fsx_path=mount_fsx_path,
+            file_system_path=file_system_path,
+            cluster_name=cluster_name,
+            region=region,
+            fsx_file_system_id=fsx_file_system_id,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            state=state,
+            created_at="2026-03-25T00:50:00Z",
+            updated_at="2026-03-25T00:50:00Z",
+            request=dict(request or {}),
+            mount=dict(mount or {}),
+            events=[],
+        )
+        self.run_mounts[record.mount_euid] = record
+        return record
+
+    def add_run_directory_mount_event(
+        self,
+        *,
+        mount_euid,
+        event_type,
+        status,
+        summary,
+        details=None,
+        created_by=None,
+    ):
+        self._run_mount_event_seq += 1
+        event = RunDirectoryMountEventRecord(
+            event_euid=f"RME-{self._run_mount_event_seq}",
+            mount_euid=mount_euid,
+            event_type=event_type,
+            status=status,
+            summary=summary,
+            details=dict(details or {}),
+            created_by=created_by,
+            created_at="2026-03-25T00:50:01Z",
+        )
+        record = self.run_mounts[mount_euid]
+        self.run_mounts[mount_euid] = RunDirectoryMountRecord(
+            **{**record.__dict__, "events": [event, *record.events], "updated_at": event.created_at}
+        )
+        return event
+
+    def update_run_directory_mount_status(self, *, mount_euid, state, created_by, **updates):
+        _ = created_by
+        record = self.run_mounts[mount_euid]
+        self.run_mounts[mount_euid] = RunDirectoryMountRecord(
+            **{
+                **record.__dict__,
+                "state": state,
+                "updated_at": "2026-03-25T00:51:00Z",
+                "mount_id": updates.get("mount_id", record.mount_id),
+                "mount_fsx_path": updates.get("mount_fsx_path", record.mount_fsx_path),
+                "file_system_path": updates.get("file_system_path", record.file_system_path),
+                "mount": updates.get("mount", record.mount),
+            }
+        )
+        return self.run_mounts[mount_euid]
+
+    def get_run_directory_mount(self, mount_euid: str):
+        return self.run_mounts.get(mount_euid)
+
+    def list_run_directory_mounts(self, *, tenant_id: uuid.UUID | None = None, limit: int = 200):
+        _ = limit
+        return [
+            item
+            for item in self.run_mounts.values()
+            if tenant_id is None or item.tenant_id == tenant_id
+        ]
+
+    def create_run_analysis_job(
+        self,
+        *,
+        job_name,
+        run_id,
+        platform,
+        run_dir,
+        source_s3_uri,
+        mount_euid,
+        mount_id,
+        sample_sheet,
+        basecalling_state,
+        run_status,
+        output_root,
+        cluster_name,
+        region,
+        tenant_id,
+        owner_user_id,
+        request=None,
+    ):
+        self._run_analysis_job_seq += 1
+        record = RunAnalysisJobRecord(
+            job_euid=f"RAJ-{self._run_analysis_job_seq}",
+            job_name=job_name,
+            run_id=run_id,
+            platform=platform,
+            run_dir=run_dir,
+            source_s3_uri=source_s3_uri,
+            mount_euid=mount_euid,
+            mount_id=mount_id,
+            sample_sheet=sample_sheet,
+            basecalling_state=basecalling_state,
+            run_status=run_status,
+            output_root=output_root,
+            cluster_name=cluster_name,
+            region=region,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            state="DEFINED",
+            created_at="2026-03-25T01:00:00Z",
+            updated_at="2026-03-25T01:00:00Z",
+            started_at=None,
+            completed_at=None,
+            return_code=None,
+            error=None,
+            output_summary=None,
+            request=dict(request or {}),
+            launch={},
+            events=[],
+        )
+        self.run_analysis_jobs[record.job_euid] = record
+        return record
+
+    def add_run_analysis_job_event(
+        self,
+        *,
+        job_euid,
+        event_type,
+        status,
+        summary,
+        details=None,
+        created_by=None,
+    ):
+        self._run_analysis_event_seq += 1
+        event = RunAnalysisJobEventRecord(
+            event_euid=f"RAE-{self._run_analysis_event_seq}",
+            job_euid=job_euid,
+            event_type=event_type,
+            status=status,
+            summary=summary,
+            details=dict(details or {}),
+            created_by=created_by,
+            created_at="2026-03-25T01:00:01Z",
+        )
+        record = self.run_analysis_jobs[job_euid]
+        self.run_analysis_jobs[job_euid] = RunAnalysisJobRecord(
+            **{**record.__dict__, "events": [event, *record.events], "updated_at": event.created_at}
+        )
+        return event
+
+    def update_run_analysis_job_status(self, *, job_euid, state, created_by, **updates):
+        _ = created_by
+        record = self.run_analysis_jobs[job_euid]
+        self.run_analysis_jobs[job_euid] = RunAnalysisJobRecord(
+            **{
+                **record.__dict__,
+                "state": state,
+                "updated_at": "2026-03-25T01:01:00Z",
+                "started_at": updates.get("started_at", record.started_at),
+                "completed_at": updates.get("completed_at", record.completed_at),
+                "return_code": updates.get("return_code", record.return_code),
+                "error": updates.get("error", record.error),
+                "output_summary": updates.get("output_summary", record.output_summary),
+                "launch": updates.get("launch", record.launch),
+            }
+        )
+        return self.run_analysis_jobs[job_euid]
+
+    def get_run_analysis_job(self, job_euid: str):
+        return self.run_analysis_jobs.get(job_euid)
+
+    def list_run_analysis_jobs(self, *, tenant_id: uuid.UUID | None = None, limit: int = 200):
+        _ = limit
+        return [
+            item
+            for item in self.run_analysis_jobs.values()
+            if tenant_id is None or item.tenant_id == tenant_id
+        ]
+
     def list_linked_buckets(self, *, tenant_id: uuid.UUID, limit: int = 200):
         _ = limit
         return [
@@ -565,7 +780,40 @@ class DummyAnalysisStore:
         return []
 
 
+class DummyDayEcClient:
+    aws_profile = None
+
+    def run_mount_create(self, **kwargs):
+        run_id = kwargs["run_id"]
+        mount_id = kwargs.get("mount_id") or run_id
+        return {
+            "mount_id": mount_id,
+            "run_id": run_id,
+            "platform": kwargs["platform"],
+            "source_s3_uri": kwargs["s3_uri"],
+            "cluster_name": kwargs["cluster_name"],
+            "region": kwargs["region"],
+            "fsx_file_system_id": kwargs.get("fsx_file_system_id") or "fs-123",
+            "file_system_path": kwargs.get("file_system_path") or f"/run_dir_mounts/{mount_id}/",
+            "headnode_path": f"/fsx/run_dir_mounts/{mount_id}/",
+            "association_id": "dra-1",
+            "lifecycle": "AVAILABLE",
+        }
+
+    def run_mount_verify(self, **kwargs):
+        return {
+            "mount_id": kwargs["mount_id"],
+            "verified": True,
+            "verification": {"instance_id": "i-123"},
+        }
+
+    def run_mount_delete(self, **kwargs):
+        return {"mount_id": kwargs["mount_id"], "lifecycle": "DELETED"}
+
+
 class DummyClusterService:
+    client = DummyDayEcClient()
+
     def get_all_clusters_with_status(
         self, *, force_refresh: bool = False, fetch_ssh_status: bool = False
     ):
@@ -630,6 +878,42 @@ class DummyAnalysisJobManager:
             "session_name": "ursa-test",
             "lines": lines,
             "stdout": "ok\n",
+            "stderr": "",
+        }
+
+
+class DummyRunAnalysisJobManager:
+    def __init__(self, resources: MemoryResourceStore) -> None:
+        self.resources = resources
+
+    def launch_job(self, job_euid: str, *, actor_user_id: str):
+        return self.resources.update_run_analysis_job_status(
+            job_euid=job_euid,
+            state="RUNNING",
+            created_by=actor_user_id,
+            started_at="2026-03-25T01:01:00Z",
+            return_code=0,
+            output_summary="launched",
+            launch={"session_name": "ursa-run-test", "run_dir": "/home/ubuntu/daylily-runs/run"},
+        )
+
+    def refresh_job(self, job_euid: str, *, actor_user_id: str):
+        return self.resources.update_run_analysis_job_status(
+            job_euid=job_euid,
+            state="COMPLETED",
+            created_by=actor_user_id,
+            completed_at="2026-03-25T01:10:00Z",
+            return_code=0,
+            output_summary="Workflow status: COMPLETED",
+            launch={"session_name": "ursa-run-test", "status": {"exit_code": 0}},
+        )
+
+    def logs(self, job_euid: str, *, lines: int = 200):
+        return {
+            "job_euid": job_euid,
+            "session_name": "ursa-run-test",
+            "lines": lines,
+            "stdout": "run ok\n",
             "stderr": "",
         }
 
@@ -786,6 +1070,7 @@ def _create_test_app(
         dewey_client=dewey_client,
         cluster_service=DummyClusterService(),
         analysis_job_manager=DummyAnalysisJobManager(resources),
+        run_analysis_job_manager=DummyRunAnalysisJobManager(resources),
         staging_job_manager=DummyStagingJobManager(resources),
         settings=_settings(),
         s3_client=DummyS3Client(),
@@ -826,12 +1111,38 @@ def _command_payload(*, command_id: str = "illumina_snv_alignstats") -> dict:
     }
 
 
+def _run_command_payload(*, command_id: str = "illumina_run_qc") -> dict:
+    payload = _command_payload(command_id=command_id)
+    payload.update(
+        {
+            "display_name": "Illumina Run QC",
+            "command_class": "run_analysis",
+            "input_contract": "run_context",
+            "requires_staging": False,
+            "requires_run_mount": True,
+            "runtime_parameters": {"run_context_file": "config/runs.tsv"},
+        }
+    )
+    return payload
+
+
 def _command_catalog_payload() -> dict:
     return {
         "command_catalog_version": 1,
         "default_repository": "daylily-omics-analysis",
         "repositories": {"daylily-omics-analysis": {"analysis_commands": [_command_payload()]}},
         "commands": [_command_payload()],
+    }
+
+
+def _run_command_catalog_payload() -> dict:
+    return {
+        "command_catalog_version": 2,
+        "default_repository": "daylily-omics-analysis",
+        "repositories": {
+            "daylily-omics-analysis": {"analysis_commands": [_run_command_payload()]}
+        },
+        "commands": [_run_command_payload()],
     }
 
 
@@ -866,6 +1177,27 @@ def _command_preview_payload() -> dict:
             "'produce_alignstats produce_snv_concordances'"
         ),
     }
+
+
+def _run_command_preview_payload() -> dict:
+    payload = _command_preview_payload()
+    payload["command"] = _run_command_payload()
+    payload["argv"] = [
+        "workflow",
+        "launch",
+        "--repository",
+        "daylily-omics-analysis",
+        "--destination",
+        "dayoa",
+        "--dy-command",
+        "bin/day_run produce_illumina_run_qc -p -j 5 -k --config run_context_file=config/runs.tsv",
+    ]
+    payload["shell_preview"] = (
+        "daylily-ec workflow launch --repository daylily-omics-analysis "
+        "--destination dayoa --dy-command 'bin/day_run produce_illumina_run_qc "
+        "-p -j 5 -k --config run_context_file=config/runs.tsv'"
+    )
+    return payload
 
 
 def _editor_rows() -> list[dict[str, str]]:
@@ -1105,7 +1437,7 @@ def test_analysis_command_catalog_and_preview_routes_use_user_api() -> None:
 
     with (
         patch(
-            "daylib_ursa.workset_api.command_catalog_payload",
+            "daylib_ursa.workset_api.sample_analysis_command_catalog_payload",
             return_value=_command_catalog_payload(),
         ),
         patch(
@@ -1218,6 +1550,127 @@ def test_analysis_job_routes_define_launch_refresh_and_logs() -> None:
     assert refreshed.json()["state"] == "COMPLETED"
     assert logs.status_code == 200, logs.text
     assert logs.json()["stdout"] == "ok\n"
+
+
+def test_run_mount_and_run_analysis_routes_are_separate_from_sample_analysis() -> None:
+    resources = MemoryResourceStore()
+    app = _create_test_app(resource_store=resources, dewey_client=DummyDeweyClient())
+
+    with (
+        patch(
+            "daylib_ursa.workset_api.run_analysis_command_catalog_payload",
+            return_value=_run_command_catalog_payload(),
+        ),
+        patch(
+            "daylib_ursa.workset_api.run_analysis_command_payload",
+            return_value=_run_command_payload(),
+        ),
+        patch(
+            "daylib_ursa.workset_api.preview_run_analysis_command",
+            return_value=_run_command_preview_payload(),
+        ),
+        TestClient(app) as client,
+    ):
+        created_mount = client.post(
+            "/api/v1/run-mounts",
+            headers=_auth_headers(),
+            json={
+                "run_id": "RUN-1",
+                "platform": "ILLUMINA",
+                "source_s3_uri": "s3://bucket/RUN-1/",
+                "cluster_name": "cluster-1",
+                "region": "us-west-2",
+            },
+        )
+        listed_mounts = client.get("/api/v1/run-mounts", headers=_auth_headers())
+        mount_detail = client.get(
+            f"/api/v1/run-mounts/{created_mount.json()['mount_euid']}",
+            headers=_auth_headers(),
+        )
+        verified_mount = client.post(
+            f"/api/v1/run-mounts/{created_mount.json()['mount_euid']}/verify",
+            headers=_auth_headers(),
+            json={},
+        )
+        catalog = client.get("/api/v1/run-analysis-commands", headers=_auth_headers())
+        command = client.get(
+            "/api/v1/run-analysis-commands/illumina_run_qc",
+            headers=_auth_headers(),
+        )
+        preview = client.post(
+            "/api/v1/run-analysis-commands/illumina_run_qc/preview",
+            headers=_auth_headers(),
+            json={
+                "region": "us-west-2",
+                "cluster_name": "cluster-1",
+                "destination": "dayoa",
+                "run_context_file": "config/runs.tsv",
+            },
+        )
+        created_job = client.post(
+            "/api/v1/run-analysis-jobs",
+            headers=_auth_headers(),
+            json={
+                "run_id": "RUN-1",
+                "platform": "ILLUMINA",
+                "mount_euid": created_mount.json()["mount_euid"],
+                "analysis_command_id": "illumina_run_qc",
+                "destination": "dayoa",
+            },
+        )
+        listed_jobs = client.get("/api/v1/run-analysis-jobs", headers=_auth_headers())
+        job_detail = client.get(
+            f"/api/v1/run-analysis-jobs/{created_job.json()['job_euid']}",
+            headers=_auth_headers(),
+        )
+        launched = client.post(
+            f"/api/v1/run-analysis-jobs/{created_job.json()['job_euid']}/launch",
+            headers=_auth_headers(),
+            json={},
+        )
+        refreshed = client.post(
+            f"/api/v1/run-analysis-jobs/{created_job.json()['job_euid']}/refresh",
+            headers=_auth_headers(),
+        )
+        logs = client.get(
+            f"/api/v1/run-analysis-jobs/{created_job.json()['job_euid']}/logs",
+            headers=_auth_headers(),
+        )
+        deleted_mount = client.request(
+            "DELETE",
+            f"/api/v1/run-mounts/{created_mount.json()['mount_euid']}",
+            headers=_auth_headers(),
+            json={},
+        )
+
+    assert created_mount.status_code == 201, created_mount.text
+    assert created_mount.json()["state"] == "AVAILABLE"
+    assert created_mount.json()["mount_fsx_path"] == "/fsx/run_dir_mounts/RUN-1/"
+    assert listed_mounts.status_code == 200, listed_mounts.text
+    assert listed_mounts.json()[0]["mount_euid"] == created_mount.json()["mount_euid"]
+    assert mount_detail.status_code == 200, mount_detail.text
+    assert verified_mount.status_code == 200, verified_mount.text
+    assert verified_mount.json()["state"] == "VERIFIED"
+    assert catalog.status_code == 200, catalog.text
+    assert catalog.json()["commands"][0]["command_class"] == "run_analysis"
+    assert command.status_code == 200, command.text
+    assert command.json()["command_id"] == "illumina_run_qc"
+    assert preview.status_code == 200, preview.text
+    assert "run_context_file=config/runs.tsv" in preview.json()["shell_preview"]
+    assert created_job.status_code == 201, created_job.text
+    assert created_job.json()["request"]["analysis_command_id"] == "illumina_run_qc"
+    assert created_job.json()["mount_euid"] == created_mount.json()["mount_euid"]
+    assert listed_jobs.status_code == 200, listed_jobs.text
+    assert listed_jobs.json()[0]["job_euid"] == created_job.json()["job_euid"]
+    assert job_detail.status_code == 200, job_detail.text
+    assert launched.status_code == 202, launched.text
+    assert launched.json()["state"] == "RUNNING"
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["state"] == "COMPLETED"
+    assert logs.status_code == 200, logs.text
+    assert logs.json()["stdout"] == "run ok\n"
+    assert deleted_mount.status_code == 200, deleted_mount.text
+    assert deleted_mount.json()["state"] == "DELETED"
 
 
 def test_staging_job_routes_define_run_and_logs() -> None:

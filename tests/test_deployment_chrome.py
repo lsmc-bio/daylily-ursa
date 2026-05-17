@@ -34,9 +34,11 @@ from daylib_ursa.ursa_config import (
 
 
 def test_get_settings_reads_cognito_from_env_over_yaml(tmp_path, monkeypatch):
+    xdg_config_home = tmp_path / ".config"
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
     monkeypatch.setenv("URSA_DEPLOYMENT_CODE", "local")
-    config_dir = tmp_path / ".config" / "ursa-local"
+    config_dir = xdg_config_home / "ursa-local"
     config_dir.mkdir(parents=True)
     config_path = config_dir / "ursa-config-local.yaml"
     config_path.write_text(

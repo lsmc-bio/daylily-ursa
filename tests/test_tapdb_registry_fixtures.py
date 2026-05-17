@@ -187,6 +187,8 @@ def test_ursa_seed_prefers_explicit_registry_paths(
     monkeypatch.setattr(
         "daylib_ursa.config.get_settings",
         lambda: SimpleNamespace(
+            tapdb_domain_code="Z",
+            tapdb_owner_repo_name="ursa",
             tapdb_domain_registry_path="/tmp/default-domain.json",
             tapdb_prefix_ownership_registry_path="/tmp/default-prefix.json",
         ),

@@ -533,6 +533,16 @@ class MemoryResourceStore:
     def get_analysis_job(self, job_euid: str):
         return self.analysis_jobs.get(job_euid)
 
+    def list_run_directory_mounts(
+        self, *, tenant_id: uuid.UUID | None = None, limit: int = 200
+    ):
+        _ = (tenant_id, limit)
+        return []
+
+    def list_run_analysis_jobs(self, *, tenant_id: uuid.UUID | None = None, limit: int = 200):
+        _ = (tenant_id, limit)
+        return []
+
     def list_staging_jobs(self, *, tenant_id: uuid.UUID, limit: int = 200):
         _ = limit
         return [item for item in self.staging_jobs.values() if item.tenant_id == tenant_id]
@@ -597,7 +607,7 @@ class DummyClusterInfo:
                 "state": "running",
                 "instance_id": "i-0123456789abcdef0",
             },
-            "daylily_ec_pinned_version": "2.3.2",
+            "daylily_ec_pinned_version": "3.0.0",
             "aws_console_url": (
                 f"https://{self.region}.console.aws.amazon.com/ec2/home?region={self.region}"
                 "#InstanceDetails:instanceId=i-0123456789abcdef0"
@@ -613,8 +623,8 @@ class DummyClusterInfo:
                     "ttl_seconds": 86400,
                     "cached": True,
                     "data": {
-                        "daylily_ec_pinned_version": "2.3.2",
-                        "remote_daylily_ec_version": "2.3.2",
+                        "daylily_ec_pinned_version": "3.0.0",
+                        "remote_daylily_ec_version": "3.0.0",
                         "remote_git_hash": "abc123",
                         "day_clone_available": True,
                         "day_clone_help": "Usage: day-clone [OPTIONS]\n  --help",
@@ -707,8 +717,8 @@ class DummyClusterService:
             "ttl_seconds": 86400,
             "cached": not refresh,
             "data": {
-                "daylily_ec_pinned_version": "2.3.2",
-                "remote_daylily_ec_version": "2.3.2",
+                "daylily_ec_pinned_version": "3.0.0",
+                "remote_daylily_ec_version": "3.0.0",
                 "remote_git_hash": "abc123",
                 "day_clone_available": True,
                 "day_clone_help": "Usage: day-clone [OPTIONS]",
@@ -1169,7 +1179,7 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_aws_check.json()["return_code"] == 0
     assert "PASS iam.policy" in cluster_aws_check.json()["gap_analysis"]
     assert cluster_aws_check.json()["report"]["summary"] == {"PASS": 1, "WARN": 0, "FAIL": 0}
-    assert cluster_detail.json()["daylily_ec_pinned_version"] == "2.3.2"
+    assert cluster_detail.json()["daylily_ec_pinned_version"] == "3.0.0"
     assert cluster_static_probe.status_code == 200
     assert cluster_static_probe.json()["data"]["day_clone_available"] is True
     assert cluster_scheduler_probe.status_code == 200
@@ -1191,10 +1201,10 @@ def test_gui_routes_cover_remaining_pages_and_logout() -> None:
             "daylib_ursa.workset_api.run_cluster_partition_verification",
             return_value=_verification_result(),
         ),
-        patch(
-            "daylib_ursa.gui_app.command_catalog_payload",
-            return_value=_command_catalog_payload(),
-        ),
+            patch(
+                "daylib_ursa.gui_app.sample_analysis_command_catalog_payload",
+                return_value=_command_catalog_payload(),
+            ),
         patch("daylib_ursa.workset_api.run_create_dry_run_sync", _cluster_dryrun_ok),
     ):
         client.post(
@@ -1231,6 +1241,7 @@ def test_gui_routes_cover_remaining_pages_and_logout() -> None:
         manifests_page = client.get("/manifests")
         manifest_detail_page = client.get("/manifests/MF-1")
         analysis_jobs_page = client.get("/analysis-jobs")
+        run_analysis_page = client.get("/run-analysis")
         staging_page = client.get("/staging")
         bucket_detail_page = client.get("/buckets/BK-1")
         analyses_page = client.get("/analyses")
@@ -1268,10 +1279,12 @@ def test_gui_routes_cover_remaining_pages_and_logout() -> None:
     assert manifest_detail_page.status_code == 200
     assert "Manifest Manifest One" in manifest_detail_page.text
     assert analysis_jobs_page.status_code == 200
-    assert "Analysis Launches" in analysis_jobs_page.text
+    assert "Sample Analysis" in analysis_jobs_page.text
     assert "Completed Staging Job" in analysis_jobs_page.text
     assert "stage_target" in analysis_jobs_page.text
     assert "/api/v1/staging-jobs" in analysis_jobs_page.text
+    assert run_analysis_page.status_code == 200
+    assert "Run Analysis" in run_analysis_page.text
     assert staging_page.status_code == 200
     assert "Define Staging Job" in staging_page.text
     assert "Source Preview" in staging_page.text
@@ -1351,10 +1364,10 @@ def test_staging_gui_exposes_authenticated_forms_statuses_and_analysis_selector(
 
     with (
         TestClient(app, base_url=TEST_BASE_URL) as client,
-        patch(
-            "daylib_ursa.gui_app.command_catalog_payload",
-            return_value=_command_catalog_payload(),
-        ),
+            patch(
+                "daylib_ursa.gui_app.sample_analysis_command_catalog_payload",
+                return_value=_command_catalog_payload(),
+            ),
     ):
         client.post(
             "/login",

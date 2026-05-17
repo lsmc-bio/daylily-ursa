@@ -29,6 +29,14 @@ ANALYSIS_JOB_EVENT_TEMPLATE = "RGX/analysis/launch-job-event/1.0/"
 STAGING_JOB_TEMPLATE = "RGX/staging/job/1.0/"
 STAGING_JOB_EVENT_TEMPLATE = "RGX/staging/job-event/1.0/"
 STAGING_JOB_STATES = frozenset({"DEFINED", "STAGING", "COMPLETED", "FAILED"})
+RUN_DIRECTORY_MOUNT_TEMPLATE = "RGX/run-directory/mount/1.0/"
+RUN_DIRECTORY_MOUNT_EVENT_TEMPLATE = "RGX/run-directory/mount-event/1.0/"
+RUN_DIRECTORY_MOUNT_STATES = frozenset(
+    {"DEFINED", "CREATING", "AVAILABLE", "VERIFYING", "VERIFIED", "DELETING", "DELETED", "FAILED"}
+)
+RUN_ANALYSIS_JOB_TEMPLATE = "RGX/analysis/run-job/1.0/"
+RUN_ANALYSIS_JOB_EVENT_TEMPLATE = "RGX/analysis/run-job-event/1.0/"
+RUN_ANALYSIS_JOB_STATES = frozenset({"DEFINED", "LAUNCHING", "RUNNING", "COMPLETED", "FAILED"})
 LINKED_BUCKET_TEMPLATE = "RGX/storage/linked-bucket/1.0/"
 
 
@@ -206,6 +214,83 @@ class StagingJobRecord:
 
 
 @dataclass(frozen=True)
+class RunDirectoryMountEventRecord:
+    event_euid: str
+    mount_euid: str
+    event_type: str
+    status: str
+    summary: str
+    details: dict[str, Any]
+    created_by: str | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class RunDirectoryMountRecord:
+    mount_euid: str
+    mount_id: str
+    run_id: str
+    platform: str
+    source_s3_uri: str
+    mount_fsx_path: str
+    file_system_path: str
+    cluster_name: str
+    region: str
+    fsx_file_system_id: str | None
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    state: str
+    created_at: str
+    updated_at: str
+    request: dict[str, Any]
+    mount: dict[str, Any]
+    events: list[RunDirectoryMountEventRecord] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RunAnalysisJobEventRecord:
+    event_euid: str
+    job_euid: str
+    event_type: str
+    status: str
+    summary: str
+    details: dict[str, Any]
+    created_by: str | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class RunAnalysisJobRecord:
+    job_euid: str
+    job_name: str
+    run_id: str
+    platform: str
+    run_dir: str
+    source_s3_uri: str
+    mount_euid: str
+    mount_id: str
+    sample_sheet: str | None
+    basecalling_state: str
+    run_status: str
+    output_root: str
+    cluster_name: str
+    region: str
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    state: str
+    created_at: str
+    updated_at: str
+    started_at: str | None
+    completed_at: str | None
+    return_code: int | None
+    error: str | None
+    output_summary: str | None
+    request: dict[str, Any]
+    launch: dict[str, Any]
+    events: list[RunAnalysisJobEventRecord] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class LinkedBucketRecord:
     bucket_id: str
     bucket_name: str
@@ -261,6 +346,22 @@ class ResourceStore:
     def _staging_job_graph_metadata() -> dict[str, Any]:
         return expected_fanout_graph(
             node_kind="ursa_staging_job",
+            relationship_type="event",
+            expected_fanout_max=500,
+        )
+
+    @staticmethod
+    def _run_directory_mount_graph_metadata() -> dict[str, Any]:
+        return expected_fanout_graph(
+            node_kind="ursa_run_directory_mount",
+            relationship_type="event",
+            expected_fanout_max=500,
+        )
+
+    @staticmethod
+    def _run_analysis_job_graph_metadata() -> dict[str, Any]:
+        return expected_fanout_graph(
+            node_kind="ursa_run_analysis_job",
             relationship_type="event",
             expected_fanout_max=500,
         )
@@ -463,6 +564,107 @@ class ResourceStore:
             output_summary=str(payload.get("output_summary") or "").strip() or None,
             request=dict(payload.get("request") or {}),
             stage=dict(payload.get("stage") or {}),
+            events=events,
+        )
+
+    @staticmethod
+    def _run_directory_mount_event_from_instance(instance) -> RunDirectoryMountEventRecord:
+        payload = from_json_addl(instance)
+        return RunDirectoryMountEventRecord(
+            event_euid=str(instance.euid),
+            mount_euid=str(payload.get("mount_euid") or ""),
+            event_type=str(payload.get("event_type") or ""),
+            status=str(payload.get("status") or instance.bstatus),
+            summary=str(payload.get("summary") or ""),
+            details=dict(payload.get("details") or {}),
+            created_by=str(payload.get("created_by") or "").strip() or None,
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+        )
+
+    def _run_directory_mount_from_instance(self, session, instance) -> RunDirectoryMountRecord:
+        payload = from_json_addl(instance)
+        events = [
+            self._run_directory_mount_event_from_instance(child)
+            for child in self.backend.list_children(
+                session,
+                parent=instance,
+                relationship_type="event",
+            )
+        ]
+        events.sort(key=lambda item: item.created_at, reverse=True)
+        return RunDirectoryMountRecord(
+            mount_euid=str(instance.euid),
+            mount_id=str(payload.get("mount_id") or instance.name or ""),
+            run_id=str(payload.get("run_id") or ""),
+            platform=str(payload.get("platform") or ""),
+            source_s3_uri=str(payload.get("source_s3_uri") or ""),
+            mount_fsx_path=str(payload.get("mount_fsx_path") or ""),
+            file_system_path=str(payload.get("file_system_path") or ""),
+            cluster_name=str(payload.get("cluster_name") or ""),
+            region=str(payload.get("region") or ""),
+            fsx_file_system_id=str(payload.get("fsx_file_system_id") or "").strip() or None,
+            tenant_id=ResourceStore._parse_tenant_uuid(payload.get("tenant_id")),
+            owner_user_id=str(payload.get("owner_user_id") or ""),
+            state=str(payload.get("state") or instance.bstatus),
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
+            request=dict(payload.get("request") or {}),
+            mount=dict(payload.get("mount") or {}),
+            events=events,
+        )
+
+    @staticmethod
+    def _run_analysis_job_event_from_instance(instance) -> RunAnalysisJobEventRecord:
+        payload = from_json_addl(instance)
+        return RunAnalysisJobEventRecord(
+            event_euid=str(instance.euid),
+            job_euid=str(payload.get("job_euid") or ""),
+            event_type=str(payload.get("event_type") or ""),
+            status=str(payload.get("status") or instance.bstatus),
+            summary=str(payload.get("summary") or ""),
+            details=dict(payload.get("details") or {}),
+            created_by=str(payload.get("created_by") or "").strip() or None,
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+        )
+
+    def _run_analysis_job_from_instance(self, session, instance) -> RunAnalysisJobRecord:
+        payload = from_json_addl(instance)
+        events = [
+            self._run_analysis_job_event_from_instance(child)
+            for child in self.backend.list_children(
+                session,
+                parent=instance,
+                relationship_type="event",
+            )
+        ]
+        events.sort(key=lambda item: item.created_at, reverse=True)
+        return RunAnalysisJobRecord(
+            job_euid=str(instance.euid),
+            job_name=str(instance.name or payload.get("job_name") or payload.get("name") or ""),
+            run_id=str(payload.get("run_id") or ""),
+            platform=str(payload.get("platform") or ""),
+            run_dir=str(payload.get("run_dir") or ""),
+            source_s3_uri=str(payload.get("source_s3_uri") or ""),
+            mount_euid=str(payload.get("mount_euid") or ""),
+            mount_id=str(payload.get("mount_id") or ""),
+            sample_sheet=str(payload.get("sample_sheet") or "").strip() or None,
+            basecalling_state=str(payload.get("basecalling_state") or ""),
+            run_status=str(payload.get("run_status") or ""),
+            output_root=str(payload.get("output_root") or ""),
+            cluster_name=str(payload.get("cluster_name") or ""),
+            region=str(payload.get("region") or ""),
+            tenant_id=ResourceStore._parse_tenant_uuid(payload.get("tenant_id")),
+            owner_user_id=str(payload.get("owner_user_id") or ""),
+            state=str(payload.get("state") or instance.bstatus),
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
+            started_at=str(payload.get("started_at") or "").strip() or None,
+            completed_at=str(payload.get("completed_at") or "").strip() or None,
+            return_code=ResourceStore._parse_optional_int(payload.get("return_code")),
+            error=str(payload.get("error") or "").strip() or None,
+            output_summary=str(payload.get("output_summary") or "").strip() or None,
+            request=dict(payload.get("request") or {}),
+            launch=dict(payload.get("launch") or {}),
             events=events,
         )
 
@@ -1695,3 +1897,390 @@ class ResourceStore:
                 limit=limit,
             )
             return [self._staging_job_from_instance(session, item) for item in jobs]
+
+    def create_run_directory_mount(
+        self,
+        *,
+        mount_id: str,
+        run_id: str,
+        platform: str,
+        source_s3_uri: str,
+        mount_fsx_path: str,
+        file_system_path: str,
+        cluster_name: str,
+        region: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        fsx_file_system_id: str | None = None,
+        request: dict[str, Any] | None = None,
+        mount: dict[str, Any] | None = None,
+        state: str = "DEFINED",
+    ) -> RunDirectoryMountRecord:
+        if state not in RUN_DIRECTORY_MOUNT_STATES:
+            raise ValueError(f"Invalid run directory mount state: {state}")
+        now = utc_now_iso()
+        with self.backend.session_scope(commit=True) as session:
+            record = self.backend.create_instance(
+                session,
+                RUN_DIRECTORY_MOUNT_TEMPLATE,
+                mount_id,
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "mount_id": mount_id,
+                        "run_id": run_id,
+                        "platform": platform,
+                        "source_s3_uri": source_s3_uri,
+                        "mount_fsx_path": mount_fsx_path,
+                        "file_system_path": file_system_path,
+                        "cluster_name": cluster_name,
+                        "region": region,
+                        "fsx_file_system_id": str(fsx_file_system_id or "").strip() or None,
+                        "tenant_id": str(tenant_id),
+                        "owner_user_id": owner_user_id,
+                        "request": dict(request or {}),
+                        "mount": dict(mount or {}),
+                        "created_at": now,
+                        "updated_at": now,
+                        "created_by": owner_user_id,
+                        "updated_by": owner_user_id,
+                        "state": state,
+                    },
+                    refs=[],
+                    timestamp=now,
+                    graph=self._run_directory_mount_graph_metadata(),
+                ),
+                bstatus=state,
+                tenant_id=tenant_id,
+            )
+            return self._run_directory_mount_from_instance(session, record)
+
+    def update_run_directory_mount_status(
+        self,
+        *,
+        mount_euid: str,
+        state: str,
+        created_by: str,
+        mount_id: str | None = None,
+        mount_fsx_path: str | None = None,
+        file_system_path: str | None = None,
+        mount: dict[str, Any] | None = None,
+    ) -> RunDirectoryMountRecord:
+        if state not in RUN_DIRECTORY_MOUNT_STATES:
+            raise ValueError(f"Invalid run directory mount state: {state}")
+        with self.backend.session_scope(commit=True) as session:
+            record = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_DIRECTORY_MOUNT_TEMPLATE,
+                value=mount_euid,
+                for_update=True,
+            )
+            if record is None:
+                raise KeyError(f"run directory mount not found: {mount_euid}")
+            payload = from_json_addl(record)
+            updates: dict[str, Any] = {
+                "state": state,
+                "updated_by": created_by,
+                "updated_at": utc_now_iso(),
+                "mount": dict(mount if mount is not None else payload.get("mount") or {}),
+            }
+            if mount_id is not None:
+                updates["mount_id"] = mount_id
+            if mount_fsx_path is not None:
+                updates["mount_fsx_path"] = mount_fsx_path
+            if file_system_path is not None:
+                updates["file_system_path"] = file_system_path
+            self.backend.update_instance_json(session, record, updates)
+            record.bstatus = state
+            return self._run_directory_mount_from_instance(session, record)
+
+    def add_run_directory_mount_event(
+        self,
+        *,
+        mount_euid: str,
+        event_type: str,
+        status: str,
+        summary: str,
+        details: dict[str, Any] | None = None,
+        created_by: str | None = None,
+    ) -> RunDirectoryMountEventRecord:
+        created_at = utc_now_iso()
+        with self.backend.session_scope(commit=True) as session:
+            record = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_DIRECTORY_MOUNT_TEMPLATE,
+                value=mount_euid,
+                for_update=True,
+            )
+            if record is None:
+                raise KeyError(f"run directory mount not found: {mount_euid}")
+            event = self.backend.create_instance(
+                session,
+                RUN_DIRECTORY_MOUNT_EVENT_TEMPLATE,
+                f"{event_type}:{record.euid}:{created_at}",
+                json_addl={
+                    "mount_euid": str(record.euid),
+                    "event_type": event_type,
+                    "status": status,
+                    "summary": summary,
+                    "details": dict(details or {}),
+                    "created_by": created_by,
+                    "created_at": created_at,
+                },
+                bstatus=status,
+            )
+            self.backend.create_lineage(
+                session,
+                parent=record,
+                child=event,
+                relationship_type="event",
+            )
+            self.backend.update_instance_json(session, record, {"updated_at": created_at})
+            return self._run_directory_mount_event_from_instance(event)
+
+    def get_run_directory_mount(self, mount_euid: str) -> RunDirectoryMountRecord | None:
+        with self.backend.session_scope(commit=False) as session:
+            record = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_DIRECTORY_MOUNT_TEMPLATE,
+                value=mount_euid,
+            )
+            if record is None:
+                return None
+            return self._run_directory_mount_from_instance(session, record)
+
+    def list_run_directory_mounts(
+        self,
+        *,
+        tenant_id: uuid.UUID | None = None,
+        limit: int = 200,
+    ) -> list[RunDirectoryMountRecord]:
+        with self.backend.session_scope(commit=False) as session:
+            if tenant_id:
+                rows = self.backend.list_instances_by_property(
+                    session,
+                    template_code=RUN_DIRECTORY_MOUNT_TEMPLATE,
+                    key="tenant_id",
+                    value=str(tenant_id),
+                    limit=limit,
+                )
+            else:
+                rows = self.backend.list_instances_by_template(
+                    session,
+                    template_code=RUN_DIRECTORY_MOUNT_TEMPLATE,
+                    limit=limit,
+                )
+            return [self._run_directory_mount_from_instance(session, item) for item in rows]
+
+    def create_run_analysis_job(
+        self,
+        *,
+        job_name: str,
+        run_id: str,
+        platform: str,
+        run_dir: str,
+        source_s3_uri: str,
+        mount_euid: str,
+        mount_id: str,
+        sample_sheet: str | None,
+        basecalling_state: str,
+        run_status: str,
+        output_root: str,
+        cluster_name: str,
+        region: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        request: dict[str, Any] | None = None,
+    ) -> RunAnalysisJobRecord:
+        now = utc_now_iso()
+        with self.backend.session_scope(commit=True) as session:
+            mount = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_DIRECTORY_MOUNT_TEMPLATE,
+                value=mount_euid,
+                for_update=True,
+            )
+            if mount is None:
+                raise KeyError(f"run directory mount not found: {mount_euid}")
+            mount_payload = from_json_addl(mount)
+            if self._parse_tenant_uuid(mount_payload.get("tenant_id")) != tenant_id:
+                raise ValueError("run directory mount tenant does not match run analysis job")
+            job = self.backend.create_instance(
+                session,
+                RUN_ANALYSIS_JOB_TEMPLATE,
+                job_name,
+                json_addl=payload_with_tapdb_graph(
+                    {
+                        "job_name": job_name,
+                        "run_id": run_id,
+                        "platform": platform,
+                        "run_dir": run_dir,
+                        "source_s3_uri": source_s3_uri,
+                        "mount_euid": mount_euid,
+                        "mount_id": mount_id,
+                        "sample_sheet": str(sample_sheet or "").strip() or None,
+                        "basecalling_state": basecalling_state,
+                        "run_status": run_status,
+                        "output_root": output_root,
+                        "cluster_name": cluster_name,
+                        "region": region,
+                        "tenant_id": str(tenant_id),
+                        "owner_user_id": owner_user_id,
+                        "request": dict(request or {}),
+                        "created_at": now,
+                        "updated_at": now,
+                        "created_by": owner_user_id,
+                        "updated_by": owner_user_id,
+                        "state": "DEFINED",
+                        "started_at": None,
+                        "completed_at": None,
+                        "return_code": None,
+                        "error": None,
+                        "output_summary": None,
+                        "launch": {},
+                    },
+                    refs=[],
+                    timestamp=now,
+                    graph=self._run_analysis_job_graph_metadata(),
+                ),
+                bstatus="DEFINED",
+                tenant_id=tenant_id,
+            )
+            self.backend.create_lineage(
+                session,
+                parent=mount,
+                child=job,
+                relationship_type="run_mount_analysis_job",
+            )
+            self.backend.update_instance_json(session, mount, {"updated_at": now})
+            return self._run_analysis_job_from_instance(session, job)
+
+    def update_run_analysis_job_status(
+        self,
+        *,
+        job_euid: str,
+        state: str,
+        created_by: str,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+        return_code: int | None = None,
+        error: str | None = None,
+        output_summary: str | None = None,
+        launch: dict[str, Any] | None = None,
+    ) -> RunAnalysisJobRecord:
+        if state not in RUN_ANALYSIS_JOB_STATES:
+            raise ValueError(f"Invalid run analysis job state: {state}")
+        with self.backend.session_scope(commit=True) as session:
+            job = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_ANALYSIS_JOB_TEMPLATE,
+                value=job_euid,
+                for_update=True,
+            )
+            if job is None:
+                raise KeyError(f"run analysis job not found: {job_euid}")
+            payload = from_json_addl(job)
+            self.backend.update_instance_json(
+                session,
+                job,
+                {
+                    "state": state,
+                    "started_at": started_at
+                    if started_at is not None
+                    else payload.get("started_at"),
+                    "completed_at": (
+                        completed_at if completed_at is not None else payload.get("completed_at")
+                    ),
+                    "return_code": (
+                        return_code if return_code is not None else payload.get("return_code")
+                    ),
+                    "error": error if error is not None else payload.get("error"),
+                    "output_summary": (
+                        output_summary
+                        if output_summary is not None
+                        else payload.get("output_summary")
+                    ),
+                    "launch": dict(launch if launch is not None else payload.get("launch") or {}),
+                    "updated_by": created_by,
+                    "updated_at": utc_now_iso(),
+                },
+            )
+            job.bstatus = state
+            return self._run_analysis_job_from_instance(session, job)
+
+    def add_run_analysis_job_event(
+        self,
+        *,
+        job_euid: str,
+        event_type: str,
+        status: str,
+        summary: str,
+        details: dict[str, Any] | None = None,
+        created_by: str | None = None,
+    ) -> RunAnalysisJobEventRecord:
+        created_at = utc_now_iso()
+        with self.backend.session_scope(commit=True) as session:
+            job = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_ANALYSIS_JOB_TEMPLATE,
+                value=job_euid,
+                for_update=True,
+            )
+            if job is None:
+                raise KeyError(f"run analysis job not found: {job_euid}")
+            event = self.backend.create_instance(
+                session,
+                RUN_ANALYSIS_JOB_EVENT_TEMPLATE,
+                f"{event_type}:{job.euid}:{created_at}",
+                json_addl={
+                    "job_euid": str(job.euid),
+                    "event_type": event_type,
+                    "status": status,
+                    "summary": summary,
+                    "details": dict(details or {}),
+                    "created_by": created_by,
+                    "created_at": created_at,
+                },
+                bstatus=status,
+            )
+            self.backend.create_lineage(
+                session,
+                parent=job,
+                child=event,
+                relationship_type="event",
+            )
+            self.backend.update_instance_json(session, job, {"updated_at": created_at})
+            return self._run_analysis_job_event_from_instance(event)
+
+    def get_run_analysis_job(self, job_euid: str) -> RunAnalysisJobRecord | None:
+        with self.backend.session_scope(commit=False) as session:
+            job = self.backend.find_instance_by_euid(
+                session,
+                template_code=RUN_ANALYSIS_JOB_TEMPLATE,
+                value=job_euid,
+            )
+            if job is None:
+                return None
+            return self._run_analysis_job_from_instance(session, job)
+
+    def list_run_analysis_jobs(
+        self,
+        *,
+        tenant_id: uuid.UUID | None = None,
+        limit: int = 200,
+    ) -> list[RunAnalysisJobRecord]:
+        with self.backend.session_scope(commit=False) as session:
+            if tenant_id:
+                jobs = self.backend.list_instances_by_property(
+                    session,
+                    template_code=RUN_ANALYSIS_JOB_TEMPLATE,
+                    key="tenant_id",
+                    value=str(tenant_id),
+                    limit=limit,
+                )
+            else:
+                jobs = self.backend.list_instances_by_template(
+                    session,
+                    template_code=RUN_ANALYSIS_JOB_TEMPLATE,
+                    limit=limit,
+                )
+            return [self._run_analysis_job_from_instance(session, item) for item in jobs]

@@ -182,7 +182,9 @@ def test_all_decorated_routes_have_direct_request_coverage() -> None:
         ("GET", "/auth/logout"),
         ("POST", "/auth/logout"),
         ("GET", "/logout"),
+        ("GET", "/run-analysis"),
         ("GET", "/api/v1/analysis-commands/illumina_snv_alignstats"),
+        ("DELETE", "/api/v1/run-mounts/RM-1"),
     }
     missing = sorted(
         (method, route)

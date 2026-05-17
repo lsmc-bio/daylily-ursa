@@ -44,8 +44,11 @@ from daylily_auth_cognito import configure_session_middleware
 from daylib_ursa import __version__
 from daylib_ursa.analysis_commands import (
     analysis_command_payload,
-    command_catalog_payload,
     preview_analysis_command,
+    preview_run_analysis_command,
+    run_analysis_command_catalog_payload,
+    run_analysis_command_payload,
+    sample_analysis_command_catalog_payload,
 )
 from daylib_ursa.analysis_jobs import AnalysisJobManager
 from daylib_ursa.analysis_store import (
@@ -132,10 +135,15 @@ from daylib_ursa.resource_store import (
     ManifestEditorOptionRecord,
     ManifestRecord,
     ResourceStore,
+    RunAnalysisJobEventRecord,
+    RunAnalysisJobRecord,
+    RunDirectoryMountEventRecord,
+    RunDirectoryMountRecord,
     StagingJobEventRecord,
     StagingJobRecord,
     WorksetRecord,
 )
+from daylib_ursa.run_analysis_jobs import RunAnalysisJobManager
 from daylib_ursa.s3_utils import RegionAwareS3Client, normalize_bucket_name
 from daylib_ursa.analysis_samples_manifest import build_analysis_samples_manifest
 from daylib_ursa.staging_jobs import StagingJobManager
@@ -862,6 +870,163 @@ class StagingJobResponse(BaseModel):
     events: list[StagingJobEventResponse]
 
 
+class RunMountCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mount_id: str | None = None
+    run_id: str
+    platform: str
+    source_s3_uri: str
+    cluster_name: str
+    region: str
+    fsx_file_system_id: str | None = None
+    file_system_path: str | None = None
+    aws_profile: str | None = None
+    wait: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_required_fields(self) -> "RunMountCreateRequest":
+        for field_name in ("run_id", "platform", "source_s3_uri", "cluster_name", "region"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        return self
+
+
+class RunMountVerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    aws_profile: str | None = None
+
+
+class RunMountDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    aws_profile: str | None = None
+    wait: bool = True
+
+
+class RunMountEventResponse(BaseModel):
+    event_euid: str
+    mount_euid: str
+    event_type: str
+    status: str
+    summary: str
+    details: dict[str, Any]
+    created_by: str | None
+    created_at: str
+
+
+class RunMountResponse(BaseModel):
+    mount_euid: str
+    mount_id: str
+    run_id: str
+    platform: str
+    source_s3_uri: str
+    mount_fsx_path: str
+    file_system_path: str
+    cluster_name: str
+    region: str
+    fsx_file_system_id: str | None
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    state: str
+    created_at: str
+    updated_at: str
+    request: dict[str, Any]
+    mount: dict[str, Any]
+    events: list[RunMountEventResponse]
+
+
+class RunAnalysisCommandPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    optional_features: list[str] = Field(default_factory=list)
+    profile: str | None = None
+    region: str | None = None
+    cluster_name: str | None = None
+    run_context_file: str = "config/runs.tsv"
+    session_name: str | None = None
+    destination: str | None = None
+    project: str | None = None
+    dry_run: bool = False
+
+
+class RunAnalysisJobCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_name: str | None = None
+    run_id: str
+    platform: str
+    mount_euid: str
+    analysis_command_id: str
+    cluster_name: str | None = None
+    region: str | None = None
+    sample_sheet: str | None = None
+    basecalling_state: str = "complete"
+    run_status: str = "available"
+    output_root: str | None = None
+    optional_features: list[str] = Field(default_factory=list)
+    destination: str | None = None
+    session_name: str | None = None
+    project: str | None = None
+    aws_profile: str | None = None
+    dry_run: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_required_fields(self) -> "RunAnalysisJobCreateRequest":
+        for field_name in ("run_id", "platform", "mount_euid", "analysis_command_id"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        return self
+
+
+class RunAnalysisJobLaunchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RunAnalysisJobEventResponse(BaseModel):
+    event_euid: str
+    job_euid: str
+    event_type: str
+    status: str
+    summary: str
+    details: dict[str, Any]
+    created_by: str | None
+    created_at: str
+
+
+class RunAnalysisJobResponse(BaseModel):
+    job_euid: str
+    job_name: str
+    run_id: str
+    platform: str
+    run_dir: str
+    source_s3_uri: str
+    mount_euid: str
+    mount_id: str
+    sample_sheet: str | None
+    basecalling_state: str
+    run_status: str
+    output_root: str
+    cluster_name: str
+    region: str
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    state: str
+    created_at: str
+    updated_at: str
+    started_at: str | None
+    completed_at: str | None
+    return_code: int | None
+    error: str | None
+    output_summary: str | None
+    request: dict[str, Any]
+    launch: dict[str, Any]
+    events: list[RunAnalysisJobEventResponse]
+
+
 class ArtifactImportResponse(BaseModel):
     import_euid: str
     artifact_euid: str
@@ -1378,6 +1543,71 @@ def _staging_job_response(record: StagingJobRecord) -> StagingJobResponse:
         request=record.request,
         stage=record.stage,
         events=[_staging_job_event_response(item) for item in record.events],
+    )
+
+
+def _run_mount_event_response(record: RunDirectoryMountEventRecord) -> RunMountEventResponse:
+    return RunMountEventResponse(**record.__dict__)
+
+
+def _run_mount_response(record: RunDirectoryMountRecord) -> RunMountResponse:
+    return RunMountResponse(
+        mount_euid=record.mount_euid,
+        mount_id=record.mount_id,
+        run_id=record.run_id,
+        platform=record.platform,
+        source_s3_uri=record.source_s3_uri,
+        mount_fsx_path=record.mount_fsx_path,
+        file_system_path=record.file_system_path,
+        cluster_name=record.cluster_name,
+        region=record.region,
+        fsx_file_system_id=record.fsx_file_system_id,
+        tenant_id=record.tenant_id,
+        owner_user_id=record.owner_user_id,
+        state=record.state,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        request=record.request,
+        mount=record.mount,
+        events=[_run_mount_event_response(item) for item in record.events],
+    )
+
+
+def _run_analysis_job_event_response(
+    record: RunAnalysisJobEventRecord,
+) -> RunAnalysisJobEventResponse:
+    return RunAnalysisJobEventResponse(**record.__dict__)
+
+
+def _run_analysis_job_response(record: RunAnalysisJobRecord) -> RunAnalysisJobResponse:
+    return RunAnalysisJobResponse(
+        job_euid=record.job_euid,
+        job_name=record.job_name,
+        run_id=record.run_id,
+        platform=record.platform,
+        run_dir=record.run_dir,
+        source_s3_uri=record.source_s3_uri,
+        mount_euid=record.mount_euid,
+        mount_id=record.mount_id,
+        sample_sheet=record.sample_sheet,
+        basecalling_state=record.basecalling_state,
+        run_status=record.run_status,
+        output_root=record.output_root,
+        cluster_name=record.cluster_name,
+        region=record.region,
+        tenant_id=record.tenant_id,
+        owner_user_id=record.owner_user_id,
+        state=record.state,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        started_at=record.started_at,
+        completed_at=record.completed_at,
+        return_code=record.return_code,
+        error=record.error,
+        output_summary=record.output_summary,
+        request=record.request,
+        launch=record.launch,
+        events=[_run_analysis_job_event_response(item) for item in record.events],
     )
 
 
@@ -1995,6 +2225,7 @@ def create_app(
     user_directory: CognitoUserDirectoryService | None = None,
     cluster_service: ClusterService | None = None,
     analysis_job_manager: AnalysisJobManager | None = None,
+    run_analysis_job_manager: RunAnalysisJobManager | None = None,
     staging_job_manager: StagingJobManager | None = None,
     settings: Settings | None = None,
     require_api_key: bool | None = None,
@@ -2083,6 +2314,15 @@ def create_app(
     )
     app.state.analysis_job_manager = analysis_job_manager or (
         AnalysisJobManager(
+            resource_store=resource_store,
+            client=cluster_service.client,
+            workspace_root=Path.cwd(),
+        )
+        if resource_store is not None and hasattr(cluster_service, "client")
+        else None
+    )
+    app.state.run_analysis_job_manager = run_analysis_job_manager or (
+        RunAnalysisJobManager(
             resource_store=resource_store,
             client=cluster_service.client,
             workspace_root=Path.cwd(),
@@ -2353,6 +2593,15 @@ def create_app(
         manager = getattr(app.state, "analysis_job_manager", None)
         if manager is None:
             raise HTTPException(status_code=503, detail="Analysis job manager is not configured")
+        return manager
+
+    def require_run_analysis_job_manager() -> RunAnalysisJobManager:
+        manager = getattr(app.state, "run_analysis_job_manager", None)
+        if manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Run analysis job manager is not configured",
+            )
         return manager
 
     def require_staging_job_manager() -> StagingJobManager:
@@ -3489,7 +3738,7 @@ def create_app(
     async def list_analysis_commands(actor: RequireAuth) -> dict[str, Any]:
         _ = actor
         try:
-            return command_catalog_payload()
+            return sample_analysis_command_catalog_payload()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -3499,7 +3748,7 @@ def create_app(
     async def get_analysis_command(command_id: str, actor: RequireAuth) -> dict[str, Any]:
         _ = actor
         try:
-            return analysis_command_payload(command_id)
+            return analysis_command_payload(command_id, command_class="sample_analysis")
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -3524,6 +3773,270 @@ def create_app(
                     region=request.region,
                     cluster_name=request.cluster_name,
                     stage_dir=request.stage_dir,
+                    session_name=request.session_name,
+                    destination=request.destination,
+                    project=request.project,
+                    command_class="sample_analysis",
+                    dry_run=request.dry_run,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def _mount_payload_string(payload: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = str(payload.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _require_run_mount_access(
+        *,
+        mount_euid: str,
+        actor: CurrentUser,
+        resources: ResourceStore,
+    ) -> RunDirectoryMountRecord:
+        record = resources.get_run_directory_mount(mount_euid)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Run directory mount not found")
+        if not actor.is_admin and record.tenant_id != actor.tenant_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Run directory mount is outside the caller tenant",
+            )
+        return record
+
+    def _require_run_analysis_job_access(
+        *,
+        job_euid: str,
+        actor: CurrentUser,
+        resources: ResourceStore,
+    ) -> RunAnalysisJobRecord:
+        record = resources.get_run_analysis_job(job_euid)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Run analysis job not found")
+        if not actor.is_admin and record.tenant_id != actor.tenant_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Run analysis job is outside the caller tenant",
+            )
+        return record
+
+    @app.get("/api/v1/run-mounts", response_model=list[RunMountResponse])
+    async def list_run_mounts(
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> list[RunMountResponse]:
+        records = resources.list_run_directory_mounts(
+            tenant_id=None if actor.is_admin else actor.tenant_id
+        )
+        return [_run_mount_response(item) for item in records]
+
+    @app.post(
+        "/api/v1/run-mounts",
+        response_model=RunMountResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_run_mount(
+        request: RunMountCreateRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+        service: ClusterService = Depends(require_cluster_service),
+    ) -> RunMountResponse:
+        client = getattr(service, "client", None)
+        if client is None or not hasattr(client, "run_mount_create"):
+            raise HTTPException(status_code=503, detail="Daylily-EC run mount client is not configured")
+        try:
+            payload = client.run_mount_create(
+                s3_uri=request.source_s3_uri,
+                region=request.region,
+                cluster_name=request.cluster_name,
+                fsx_file_system_id=request.fsx_file_system_id,
+                mount_id=request.mount_id,
+                run_id=request.run_id,
+                platform=request.platform,
+                file_system_path=request.file_system_path,
+                wait=request.wait,
+                aws_profile=request.aws_profile,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        mount_id = _mount_payload_string(payload, "mount_id") or str(request.mount_id or request.run_id)
+        file_system_path = _mount_payload_string(payload, "file_system_path")
+        mount_fsx_path = _mount_payload_string(payload, "headnode_path", "mount_fsx_path")
+        request_payload = request.model_dump(mode="json")
+        try:
+            record = resources.create_run_directory_mount(
+                mount_id=mount_id,
+                run_id=request.run_id,
+                platform=request.platform,
+                source_s3_uri=_mount_payload_string(payload, "source_s3_uri") or request.source_s3_uri,
+                mount_fsx_path=mount_fsx_path,
+                file_system_path=file_system_path,
+                cluster_name=_mount_payload_string(payload, "cluster_name") or request.cluster_name,
+                region=_mount_payload_string(payload, "region") or request.region,
+                fsx_file_system_id=_mount_payload_string(payload, "fsx_file_system_id")
+                or request.fsx_file_system_id,
+                tenant_id=actor.tenant_id,
+                owner_user_id=actor.user_id,
+                request=request_payload,
+                mount=dict(payload),
+                state="AVAILABLE" if str(payload.get("lifecycle") or "").upper() == "AVAILABLE" else "CREATING",
+            )
+            resources.add_run_directory_mount_event(
+                mount_euid=record.mount_euid,
+                event_type="create",
+                status=record.state,
+                summary=f"Created run directory mount {mount_id}",
+                details=dict(payload),
+                created_by=actor.user_id,
+            )
+            record = resources.get_run_directory_mount(record.mount_euid) or record
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _run_mount_response(record)
+
+    @app.get("/api/v1/run-mounts/{mount_euid}", response_model=RunMountResponse)
+    async def get_run_mount(
+        mount_euid: str,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> RunMountResponse:
+        return _run_mount_response(
+            _require_run_mount_access(mount_euid=mount_euid, actor=actor, resources=resources)
+        )
+
+    @app.post("/api/v1/run-mounts/{mount_euid}/verify", response_model=RunMountResponse)
+    async def verify_run_mount(
+        mount_euid: str,
+        request: RunMountVerifyRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+        service: ClusterService = Depends(require_cluster_service),
+    ) -> RunMountResponse:
+        record = _require_run_mount_access(
+            mount_euid=mount_euid,
+            actor=actor,
+            resources=resources,
+        )
+        client = getattr(service, "client", None)
+        if client is None or not hasattr(client, "run_mount_verify"):
+            raise HTTPException(status_code=503, detail="Daylily-EC run mount client is not configured")
+        try:
+            payload = client.run_mount_verify(
+                mount_id=record.mount_id,
+                region=record.region,
+                cluster_name=record.cluster_name,
+                aws_profile=request.aws_profile or str(record.request.get("aws_profile") or "").strip() or None,
+            )
+            updated = resources.update_run_directory_mount_status(
+                mount_euid=record.mount_euid,
+                state="VERIFIED",
+                created_by=actor.user_id,
+                mount=dict(payload),
+            )
+            resources.add_run_directory_mount_event(
+                mount_euid=record.mount_euid,
+                event_type="verify",
+                status="VERIFIED",
+                summary=f"Verified run directory mount {record.mount_id}",
+                details=dict(payload),
+                created_by=actor.user_id,
+            )
+            updated = resources.get_run_directory_mount(record.mount_euid) or updated
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _run_mount_response(updated)
+
+    @app.delete("/api/v1/run-mounts/{mount_euid}", response_model=RunMountResponse)
+    async def delete_run_mount(
+        mount_euid: str,
+        request: RunMountDeleteRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+        service: ClusterService = Depends(require_cluster_service),
+    ) -> RunMountResponse:
+        record = _require_run_mount_access(
+            mount_euid=mount_euid,
+            actor=actor,
+            resources=resources,
+        )
+        client = getattr(service, "client", None)
+        if client is None or not hasattr(client, "run_mount_delete"):
+            raise HTTPException(status_code=503, detail="Daylily-EC run mount client is not configured")
+        try:
+            payload = client.run_mount_delete(
+                mount_id=record.mount_id,
+                region=record.region,
+                cluster_name=record.cluster_name,
+                fsx_file_system_id=record.fsx_file_system_id,
+                wait=request.wait,
+                aws_profile=request.aws_profile or str(record.request.get("aws_profile") or "").strip() or None,
+            )
+            updated = resources.update_run_directory_mount_status(
+                mount_euid=record.mount_euid,
+                state="DELETED",
+                created_by=actor.user_id,
+                mount=dict(payload),
+            )
+            resources.add_run_directory_mount_event(
+                mount_euid=record.mount_euid,
+                event_type="delete",
+                status="DELETED",
+                summary=f"Deleted run directory mount {record.mount_id}",
+                details=dict(payload),
+                created_by=actor.user_id,
+            )
+            updated = resources.get_run_directory_mount(record.mount_euid) or updated
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _run_mount_response(updated)
+
+    @app.get("/api/v1/run-analysis-commands")
+    async def list_run_analysis_commands(actor: RequireAuth) -> dict[str, Any]:
+        _ = actor
+        try:
+            return run_analysis_command_catalog_payload()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/v1/run-analysis-commands/{command_id}")
+    async def get_run_analysis_command(command_id: str, actor: RequireAuth) -> dict[str, Any]:
+        _ = actor
+        try:
+            return run_analysis_command_payload(command_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/v1/run-analysis-commands/{command_id}/preview",
+        response_model=AnalysisCommandPreviewResponse,
+    )
+    async def preview_run_analysis_launch_command(
+        command_id: str,
+        request: RunAnalysisCommandPreviewRequest,
+        actor: RequireAuth,
+    ) -> AnalysisCommandPreviewResponse:
+        _ = actor
+        try:
+            return AnalysisCommandPreviewResponse.model_validate(
+                preview_run_analysis_command(
+                    command_id,
+                    optional_features=request.optional_features,
+                    profile=request.profile,
+                    region=request.region,
+                    cluster_name=request.cluster_name,
+                    run_context_file=request.run_context_file,
                     session_name=request.session_name,
                     destination=request.destination,
                     project=request.project,
@@ -3915,6 +4428,7 @@ def create_app(
             command = analysis_command_payload(
                 request.analysis_command_id,
                 optional_features=request.optional_features,
+                command_class="sample_analysis",
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -4018,6 +4532,158 @@ def create_app(
         manager: AnalysisJobManager = Depends(require_analysis_job_manager),
     ) -> dict[str, Any]:
         require_analysis_job_access(job_euid=job_euid, actor=actor, resources=resources)
+        try:
+            return manager.logs(job_euid, lines=lines)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/v1/run-analysis-jobs", response_model=list[RunAnalysisJobResponse])
+    async def list_run_analysis_jobs(
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> list[RunAnalysisJobResponse]:
+        records = resources.list_run_analysis_jobs(
+            tenant_id=None if actor.is_admin else actor.tenant_id
+        )
+        return [_run_analysis_job_response(item) for item in records]
+
+    @app.post(
+        "/api/v1/run-analysis-jobs",
+        response_model=RunAnalysisJobResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_run_analysis_job(
+        request: RunAnalysisJobCreateRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> RunAnalysisJobResponse:
+        mount = _require_run_mount_access(
+            mount_euid=request.mount_euid,
+            actor=actor,
+            resources=resources,
+        )
+        if mount.state not in {"AVAILABLE", "VERIFIED"}:
+            raise HTTPException(status_code=409, detail="Run directory mount is not available")
+        if request.run_id != mount.run_id:
+            raise HTTPException(status_code=400, detail="Run id does not match run directory mount")
+        if request.platform != mount.platform:
+            raise HTTPException(status_code=400, detail="Platform does not match run directory mount")
+        try:
+            command = run_analysis_command_payload(
+                request.analysis_command_id,
+                optional_features=request.optional_features,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        cluster_name = str(request.cluster_name or mount.cluster_name).strip()
+        region = str(request.region or mount.region).strip()
+        output_root = str(request.output_root or f"results/runs/{request.run_id}").strip()
+        request_payload = {
+            "analysis_command_id": request.analysis_command_id,
+            "optional_features": list(request.optional_features),
+            "destination": request.destination,
+            "session_name": request.session_name,
+            "project": request.project,
+            "aws_profile": request.aws_profile,
+            "dry_run": bool(request.dry_run),
+            "command": command,
+            "metadata": dict(request.metadata or {}),
+        }
+        job_name = str(request.job_name or "").strip() or (
+            f"{request.run_id}:{command.get('command_id')}"
+        )
+        try:
+            record = resources.create_run_analysis_job(
+                job_name=job_name,
+                run_id=request.run_id,
+                platform=request.platform,
+                run_dir=mount.mount_fsx_path,
+                source_s3_uri=mount.source_s3_uri,
+                mount_euid=mount.mount_euid,
+                mount_id=mount.mount_id,
+                sample_sheet=request.sample_sheet,
+                basecalling_state=request.basecalling_state,
+                run_status=request.run_status,
+                output_root=output_root,
+                cluster_name=cluster_name,
+                region=region,
+                tenant_id=mount.tenant_id,
+                owner_user_id=actor.user_id,
+                request=request_payload,
+            )
+            resources.add_run_analysis_job_event(
+                job_euid=record.job_euid,
+                event_type="defined",
+                status="DEFINED",
+                summary=f"Defined run analysis job for {command.get('command_id')}",
+                details={"mount_euid": mount.mount_euid, "run_id": mount.run_id},
+                created_by=actor.user_id,
+            )
+            record = resources.get_run_analysis_job(record.job_euid) or record
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _run_analysis_job_response(record)
+
+    @app.get("/api/v1/run-analysis-jobs/{job_euid}", response_model=RunAnalysisJobResponse)
+    async def get_run_analysis_job(
+        job_euid: str,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> RunAnalysisJobResponse:
+        return _run_analysis_job_response(
+            _require_run_analysis_job_access(job_euid=job_euid, actor=actor, resources=resources)
+        )
+
+    @app.post(
+        "/api/v1/run-analysis-jobs/{job_euid}/launch",
+        response_model=RunAnalysisJobResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def launch_run_analysis_job(
+        job_euid: str,
+        request: RunAnalysisJobLaunchRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+        manager: RunAnalysisJobManager = Depends(require_run_analysis_job_manager),
+    ) -> RunAnalysisJobResponse:
+        _ = request
+        _require_run_analysis_job_access(job_euid=job_euid, actor=actor, resources=resources)
+        try:
+            record = manager.launch_job(job_euid, actor_user_id=actor.user_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _run_analysis_job_response(record)
+
+    @app.post("/api/v1/run-analysis-jobs/{job_euid}/refresh", response_model=RunAnalysisJobResponse)
+    async def refresh_run_analysis_job(
+        job_euid: str,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+        manager: RunAnalysisJobManager = Depends(require_run_analysis_job_manager),
+    ) -> RunAnalysisJobResponse:
+        _require_run_analysis_job_access(job_euid=job_euid, actor=actor, resources=resources)
+        try:
+            return _run_analysis_job_response(
+                manager.refresh_job(job_euid, actor_user_id=actor.user_id)
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/v1/run-analysis-jobs/{job_euid}/logs")
+    async def get_run_analysis_job_logs(
+        job_euid: str,
+        actor: RequireAuth,
+        lines: int = Query(default=200, ge=1, le=5000),
+        resources: ResourceStore = Depends(require_resource_store),
+        manager: RunAnalysisJobManager = Depends(require_run_analysis_job_manager),
+    ) -> dict[str, Any]:
+        _require_run_analysis_job_access(job_euid=job_euid, actor=actor, resources=resources)
         try:
             return manager.logs(job_euid, lines=lines)
         except (KeyError, ValueError) as exc:

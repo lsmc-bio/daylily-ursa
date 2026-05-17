@@ -32,7 +32,10 @@ from daylib_ursa.auth import (
 )
 from daylib_ursa.cluster_jobs import region_from_region_az
 from daylib_ursa.config import _require_bare_cognito_domain
-from daylib_ursa.analysis_commands import command_catalog_payload
+from daylib_ursa.analysis_commands import (
+    run_analysis_command_catalog_payload,
+    sample_analysis_command_catalog_payload,
+)
 from daylib_ursa.manifest_editor_options import manifest_editor_static_payload
 from daylib_ursa.observability import (
     build_api_health_payload,
@@ -653,6 +656,16 @@ def mount_gui(app: FastAPI) -> None:
             tenant_id=None if actor.is_admin else actor.tenant_id
         )
 
+    def _list_run_mounts(actor: CurrentUser) -> list[Any]:
+        return _resource_store().list_run_directory_mounts(
+            tenant_id=None if actor.is_admin else actor.tenant_id
+        )
+
+    def _list_run_analysis_jobs(actor: CurrentUser) -> list[Any]:
+        return _resource_store().list_run_analysis_jobs(
+            tenant_id=None if actor.is_admin else actor.tenant_id
+        )
+
     def _list_staging_jobs(actor: CurrentUser) -> list[Any]:
         return _resource_store().list_staging_jobs(tenant_id=actor.tenant_id)
 
@@ -803,7 +816,15 @@ def mount_gui(app: FastAPI) -> None:
 
     def _analysis_command_catalog_context() -> dict[str, Any]:
         try:
-            return command_catalog_payload()
+            return sample_analysis_command_catalog_payload()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def _run_analysis_command_catalog_context() -> dict[str, Any]:
+        try:
+            return run_analysis_command_catalog_payload()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
@@ -1515,7 +1536,7 @@ def mount_gui(app: FastAPI) -> None:
         return _render_page(
             request,
             template_name="analysis_jobs.html",
-            page_title="Analysis Launches",
+            page_title="Sample Analysis",
             active_page="analysis_jobs",
             context={
                 "worksets": _list_worksets(actor),
@@ -1527,6 +1548,39 @@ def mount_gui(app: FastAPI) -> None:
                     for job in _list_staging_jobs(actor)
                     if getattr(job, "state", "") == "COMPLETED"
                 ],
+                "clusters": clusters,
+                "allowed_regions": _allowed_regions(),
+                "is_admin": actor.is_admin,
+            },
+        )
+
+    @app.get("/run-analysis", response_class=HTMLResponse)
+    async def run_analysis_page(request: Request):
+        actor = _session_actor(request)
+        if actor is None:
+            return RedirectResponse(
+                url=f"/login?next={request.url.path}", status_code=status.HTTP_303_SEE_OTHER
+            )
+        clusters = (
+            [
+                item.to_dict(include_sensitive=False)
+                for item in _cluster_service().get_all_clusters_with_status(
+                    force_refresh=False,
+                    fetch_ssh_status=False,
+                )
+            ]
+            if actor.is_admin
+            else []
+        )
+        return _render_page(
+            request,
+            template_name="run_analysis.html",
+            page_title="Run Analysis",
+            active_page="run_analysis",
+            context={
+                "run_mounts": _list_run_mounts(actor),
+                "run_analysis_jobs": _list_run_analysis_jobs(actor),
+                "run_analysis_command_catalog": _run_analysis_command_catalog_context(),
                 "clusters": clusters,
                 "allowed_regions": _allowed_regions(),
                 "is_admin": actor.is_admin,

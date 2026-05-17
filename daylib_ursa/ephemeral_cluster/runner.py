@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "2.3.2"
+REQUIRED_DAYLILY_EC_VERSION = "3.0.0"
 DAYLILY_EC_INSTALL_SPEC = (
     f"{DAYLILY_EC_DISTRIBUTION} @ "
     f"git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
@@ -156,7 +156,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 2.3.2 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 3.0.0 contract."""
 
     def __init__(
         self,
@@ -332,6 +332,118 @@ class DaylilyEcClient:
     ) -> subprocess.CompletedProcess[str]:
         return self.run(args, cwd=cwd)
 
+    def run_mount_list(
+        self,
+        *,
+        region: str,
+        cluster_name: str | None = None,
+        fsx_file_system_id: str | None = None,
+        aws_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        args = ["mounts", "list", "--region", region]
+        if cluster_name:
+            args.extend(["--cluster", cluster_name])
+        if fsx_file_system_id:
+            args.extend(["--fsx-file-system-id", fsx_file_system_id])
+        resolved_profile = aws_profile if aws_profile is not None else self.aws_profile
+        if resolved_profile:
+            args.extend(["--profile", resolved_profile])
+        return self.run_json(args, aws_profile=aws_profile)
+
+    def run_mount_create(
+        self,
+        *,
+        s3_uri: str,
+        region: str,
+        cluster_name: str | None = None,
+        fsx_file_system_id: str | None = None,
+        mount_id: str | None = None,
+        run_id: str | None = None,
+        platform: str | None = None,
+        file_system_path: str | None = None,
+        wait: bool = True,
+        aws_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        args = ["mounts", "create", "--s3-uri", s3_uri, "--region", region]
+        for flag, value in (
+            ("--cluster", cluster_name),
+            ("--fsx-file-system-id", fsx_file_system_id),
+            ("--mount-id", mount_id),
+            ("--run-id", run_id),
+            ("--platform", platform),
+            ("--file-system-path", file_system_path),
+        ):
+            if value:
+                args.extend([flag, value])
+        args.append("--wait" if wait else "--no-wait")
+        resolved_profile = aws_profile if aws_profile is not None else self.aws_profile
+        if resolved_profile:
+            args.extend(["--profile", resolved_profile])
+        return self.run_json(args, aws_profile=aws_profile)
+
+    def run_mount_describe(
+        self,
+        *,
+        mount_id: str,
+        region: str,
+        cluster_name: str | None = None,
+        fsx_file_system_id: str | None = None,
+        aws_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        args = ["mounts", "describe", "--mount-id", mount_id, "--region", region]
+        if cluster_name:
+            args.extend(["--cluster", cluster_name])
+        if fsx_file_system_id:
+            args.extend(["--fsx-file-system-id", fsx_file_system_id])
+        resolved_profile = aws_profile if aws_profile is not None else self.aws_profile
+        if resolved_profile:
+            args.extend(["--profile", resolved_profile])
+        return self.run_json(args, aws_profile=aws_profile)
+
+    def run_mount_delete(
+        self,
+        *,
+        mount_id: str,
+        region: str,
+        cluster_name: str | None = None,
+        fsx_file_system_id: str | None = None,
+        wait: bool = True,
+        aws_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        args = ["mounts", "delete", "--mount-id", mount_id, "--region", region]
+        if cluster_name:
+            args.extend(["--cluster", cluster_name])
+        if fsx_file_system_id:
+            args.extend(["--fsx-file-system-id", fsx_file_system_id])
+        args.append("--wait" if wait else "--no-wait")
+        resolved_profile = aws_profile if aws_profile is not None else self.aws_profile
+        if resolved_profile:
+            args.extend(["--profile", resolved_profile])
+        return self.run_json(args, aws_profile=aws_profile)
+
+    def run_mount_verify(
+        self,
+        *,
+        mount_id: str,
+        region: str,
+        cluster_name: str,
+        aws_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        args = [
+            "mounts",
+            "verify",
+            "--mount-id",
+            mount_id,
+            "--cluster",
+            cluster_name,
+            "--region",
+            region,
+        ]
+        resolved_profile = aws_profile if aws_profile is not None else self.aws_profile
+        if resolved_profile:
+            args.extend(["--profile", resolved_profile])
+        return self.run_json(args, aws_profile=aws_profile)
+
     def delete_dry_run(self, *, cluster_name: str, region: str) -> subprocess.CompletedProcess[str]:
         args = [
             "delete",
@@ -365,7 +477,7 @@ def write_dayec_cluster_config(
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write a non-interactive cluster request through the day-ec 2.3.2 library."""
+    """Write a non-interactive cluster request through the day-ec 3.0.0 library."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.config")

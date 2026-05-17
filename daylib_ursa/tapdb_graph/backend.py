@@ -49,6 +49,10 @@ URSA_TEMPLATE_DEFINITIONS: list[TemplateSpec] = [
     TemplateSpec("RGX/cluster/ephemeral-job-event/1.0/"),
     TemplateSpec("RGX/analysis/launch-job/1.0/"),
     TemplateSpec("RGX/analysis/launch-job-event/1.0/"),
+    TemplateSpec("RGX/run-directory/mount/1.0/"),
+    TemplateSpec("RGX/run-directory/mount-event/1.0/"),
+    TemplateSpec("RGX/analysis/run-job/1.0/"),
+    TemplateSpec("RGX/analysis/run-job-event/1.0/"),
     TemplateSpec("RGX/anomaly/local-record/1.0/"),
 ]
 

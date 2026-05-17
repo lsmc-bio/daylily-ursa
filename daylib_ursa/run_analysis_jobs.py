@@ -1,25 +1,41 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
 import subprocess
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from daylib_ursa.analysis_commands import get_analysis_command
 from daylib_ursa.ephemeral_cluster.runner import DaylilyEcClient, _summarize_process_output
-from daylib_ursa.resource_store import AnalysisJobRecord, ResourceStore, StagingJobRecord
+from daylib_ursa.resource_store import ResourceStore, RunAnalysisJobRecord
 from daylib_ursa.tapdb_graph import utc_now_iso
 
 
 _MARKER_RE = re.compile(r"^__(?P<name>DAYLILY_[A-Z_]+)__=(?P<value>.*)$", re.MULTILINE)
 _SNAKEMAKE_COMPLETE_RE = re.compile(r"\b(?P<done>\d+) of (?P<total>\d+) steps \(100%\) done\b")
+RUNS_TSV_COLUMNS = [
+    "RUNID",
+    "PLATFORM",
+    "RUN_DIR",
+    "SOURCE_S3_URI",
+    "MOUNT_ID",
+    "SAMPLE_SHEET",
+    "BASECALLING_STATE",
+    "RUN_STATUS",
+    "OUTPUT_ROOT",
+    "REGION",
+    "PROFILE",
+]
 
 
 def _safe_session_name(job_euid: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(job_euid or "").strip()).strip("-")
     if not cleaned:
         raise ValueError("job_euid is required")
-    return f"ursa-{cleaned}"[:80]
+    return f"ursa-run-{cleaned}"[:80]
 
 
 def _parse_launch_markers(stdout: str) -> dict[str, str]:
@@ -49,8 +65,40 @@ def _snakemake_log_reports_success(text: str) -> bool:
     return False
 
 
-class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec 3.0.0."""
+def _runs_tsv_content(job: RunAnalysisJobRecord, *, aws_profile: str | None) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=RUNS_TSV_COLUMNS, delimiter="\t", lineterminator="\n")
+    writer.writeheader()
+    writer.writerow(
+        {
+            "RUNID": job.run_id,
+            "PLATFORM": job.platform,
+            "RUN_DIR": job.run_dir,
+            "SOURCE_S3_URI": job.source_s3_uri,
+            "MOUNT_ID": job.mount_id,
+            "SAMPLE_SHEET": job.sample_sheet or "",
+            "BASECALLING_STATE": job.basecalling_state,
+            "RUN_STATUS": job.run_status,
+            "OUTPUT_ROOT": job.output_root,
+            "REGION": job.region,
+            "PROFILE": aws_profile or "",
+        }
+    )
+    return buffer.getvalue()
+
+
+def _require_run_analysis_command(command: Any, command_id: str) -> Any:
+    if getattr(command, "command_class", "") != "run_analysis":
+        raise ValueError(f"{command_id} is not a run_analysis command")
+    if getattr(command, "input_contract", "") != "run_context":
+        raise ValueError(f"{command_id} does not use the run_context input contract")
+    if not bool(getattr(command, "requires_run_mount", False)):
+        raise ValueError(f"{command_id} does not require a run mount")
+    return command
+
+
+class RunAnalysisJobManager:
+    """Launch manager for run-directory analysis jobs through daylily-ec 3.0.0."""
 
     def __init__(
         self,
@@ -63,79 +111,12 @@ class AnalysisJobManager:
         self.client = client
         self.workspace_root = (workspace_root or Path.cwd()).resolve()
 
-    @staticmethod
-    def _stage_dir_from_completed_staging_job(
-        *, analysis_job: AnalysisJobRecord, staging_job: StagingJobRecord
-    ) -> str:
-        if staging_job.tenant_id != analysis_job.tenant_id:
-            raise ValueError("Staging job tenant does not match analysis job tenant")
-        if staging_job.workset_euid != analysis_job.workset_euid:
-            raise ValueError("Staging job does not belong to analysis job workset")
-        if staging_job.manifest_euid != analysis_job.manifest_euid:
-            raise ValueError("Staging job does not belong to analysis job manifest")
-        if staging_job.state != "COMPLETED":
-            raise ValueError("Staging job must be COMPLETED before analysis launch")
-        stage_dir = str((staging_job.stage or {}).get("stage_dir") or "").strip()
-        if not stage_dir:
-            raise ValueError("Staging job is completed but has no stage_dir")
-        return stage_dir
-
-    def _run_staging_job_for_analysis(
-        self,
-        *,
-        job: AnalysisJobRecord,
-        request: dict[str, Any],
-        aws_profile: str | None,
-        actor_user_id: str,
-    ) -> tuple[StagingJobRecord, str]:
-        from daylib_ursa.staging_jobs import StagingJobManager
-
-        reference_bucket = str(request.get("reference_bucket") or "").strip()
-        if not reference_bucket:
-            raise ValueError("reference_bucket is required for analysis launch staging")
-        staging_job = self.resource_store.create_staging_job(
-            job_name=f"{job.job_name}:staging",
-            workset_euid=job.workset_euid,
-            manifest_euid=job.manifest_euid,
-            cluster_name=job.cluster_name,
-            region=job.region,
-            tenant_id=job.tenant_id,
-            owner_user_id=job.owner_user_id,
-            request={
-                "reference_bucket": reference_bucket,
-                "stage_target": str(request.get("stage_target") or "").strip()
-                or "/data/staged_sample_data",
-                "aws_profile": aws_profile,
-                "analysis_job_euid": job.job_euid,
-            },
-        )
-        self.resource_store.add_staging_job_event(
-            job_euid=staging_job.job_euid,
-            event_type="defined",
-            status="DEFINED",
-            summary="Defined staging job for analysis launch",
-            details={"analysis_job_euid": job.job_euid, "manifest_euid": job.manifest_euid},
-            created_by=actor_user_id,
-        )
-        manager = StagingJobManager(
-            resource_store=self.resource_store,
-            client=self.client,
-            workspace_root=self.workspace_root,
-        )
-        completed = manager.run_job(staging_job.job_euid, actor_user_id=actor_user_id)
-        if completed.state != "COMPLETED":
-            raise RuntimeError(completed.error or completed.output_summary or "Staging job failed")
-        stage_dir = self._stage_dir_from_completed_staging_job(
-            analysis_job=job, staging_job=completed
-        )
-        return completed, stage_dir
-
     def _launch_workflow(
         self,
         *,
-        job: AnalysisJobRecord,
+        job: RunAnalysisJobRecord,
         request: dict[str, Any],
-        stage_dir: str,
+        run_context_file: Path,
         aws_profile: str | None,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
         command_id = str(
@@ -146,7 +127,10 @@ class AnalysisJobManager:
             for item in list(request.get("optional_features") or [])
             if str(item or "").strip()
         ]
-        command = get_analysis_command(command_id, optional_features=optional_features)
+        command = _require_run_analysis_command(
+            get_analysis_command(command_id, optional_features=optional_features),
+            command_id,
+        )
         session_name = str(request.get("session_name") or "").strip() or _safe_session_name(
             job.job_euid
         )
@@ -155,7 +139,7 @@ class AnalysisJobManager:
             profile=aws_profile,
             region=job.region,
             cluster=job.cluster_name,
-            stage_dir=stage_dir,
+            run_context_file=str(run_context_file),
             session_name=session_name,
             project=str(request.get("project") or "").strip() or None,
             dry_run=bool(request.get("dry_run")),
@@ -168,89 +152,54 @@ class AnalysisJobManager:
             "command_id": command.command_id,
             "optional_features": optional_features,
             "argv": list(argv),
-            "stage_dir": stage_dir,
+            "run_context_file": str(run_context_file),
+            "run_id": job.run_id,
+            "mount_euid": job.mount_euid,
+            "mount_id": job.mount_id,
             "stdout": (result.stdout or "")[-8000:],
             "stderr": (result.stderr or "")[-8000:],
             **markers,
         }
         return result, launch
 
-    def launch_job(self, job_euid: str, *, actor_user_id: str) -> AnalysisJobRecord:
-        job = self.resource_store.get_analysis_job(job_euid)
+    def launch_job(self, job_euid: str, *, actor_user_id: str) -> RunAnalysisJobRecord:
+        job = self.resource_store.get_run_analysis_job(job_euid)
         if job is None:
-            raise KeyError(f"analysis job not found: {job_euid}")
+            raise KeyError(f"run analysis job not found: {job_euid}")
         request = dict(job.request or {})
         aws_profile = (
             str(request.get("aws_profile") or self.client.aws_profile or "").strip() or None
         )
         started_at = utc_now_iso()
         try:
-            self.resource_store.update_analysis_job_status(
-                job_euid=job_euid,
-                state="STAGING",
-                created_by=actor_user_id,
-                started_at=started_at,
-            )
-            self.resource_store.add_analysis_job_event(
-                job_euid=job_euid,
-                event_type="stage",
-                status="RUNNING",
-                summary="Preparing analysis staging",
-                details={"manifest_euid": job.manifest_euid},
-                created_by=actor_user_id,
-            )
-            requested_staging_job_euid = str(request.get("staging_job_euid") or "").strip()
-            if requested_staging_job_euid:
-                staging_job = self.resource_store.get_staging_job(requested_staging_job_euid)
-                if staging_job is None:
-                    raise KeyError(f"staging job not found: {requested_staging_job_euid}")
-                stage_dir = self._stage_dir_from_completed_staging_job(
-                    analysis_job=job,
-                    staging_job=staging_job,
-                )
-                staging_job_euid = staging_job.job_euid
-                self.resource_store.add_analysis_job_event(
-                    job_euid=job_euid,
-                    event_type="stage",
-                    status="COMPLETED",
-                    summary=f"Using staged samples from {stage_dir}",
-                    details={
-                        "staging_job_euid": staging_job_euid,
-                        "stage_dir": stage_dir,
-                    },
-                    created_by=actor_user_id,
-                )
-            else:
-                staging_job, stage_dir = self._run_staging_job_for_analysis(
-                    job=job,
-                    request=request,
-                    aws_profile=aws_profile,
-                    actor_user_id=actor_user_id,
-                )
-                staging_job_euid = staging_job.job_euid
-                self.resource_store.add_analysis_job_event(
-                    job_euid=job_euid,
-                    event_type="stage",
-                    status="COMPLETED",
-                    summary=f"Staged samples to {stage_dir}",
-                    details={"staging_job_euid": staging_job_euid, "stage_dir": stage_dir},
-                    created_by=actor_user_id,
-                )
-            self.resource_store.update_analysis_job_status(
+            self.resource_store.update_run_analysis_job_status(
                 job_euid=job_euid,
                 state="LAUNCHING",
                 created_by=actor_user_id,
                 started_at=started_at,
-                launch={"stage_dir": stage_dir, "staging_job_euid": staging_job_euid},
             )
-            launch_result, launch = self._launch_workflow(
-                job=job,
-                request=request,
-                stage_dir=stage_dir,
-                aws_profile=aws_profile,
+            self.resource_store.add_run_analysis_job_event(
+                job_euid=job_euid,
+                event_type="launch",
+                status="RUNNING",
+                summary="Preparing run analysis context",
+                details={"run_id": job.run_id, "mount_euid": job.mount_euid},
+                created_by=actor_user_id,
             )
-            launch["staging_job_euid"] = staging_job_euid
-            self.resource_store.add_analysis_job_event(
+            with TemporaryDirectory(prefix="ursa-run-analysis-") as temp_dir_name:
+                run_context_path = Path(temp_dir_name) / "runs.tsv"
+                run_context_path.write_text(
+                    _runs_tsv_content(job, aws_profile=aws_profile),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                launch_result, launch = self._launch_workflow(
+                    job=job,
+                    request=request,
+                    run_context_file=run_context_path,
+                    aws_profile=aws_profile,
+                )
+            self.resource_store.add_run_analysis_job_event(
                 job_euid=job_euid,
                 event_type="launch",
                 status="RUNNING",
@@ -259,11 +208,11 @@ class AnalysisJobManager:
                     "session_name": launch["session_name"],
                     "run_dir": launch["run_dir"],
                     "return_code": int(launch_result.returncode),
-                    "staging_job_euid": staging_job_euid,
+                    "mount_euid": job.mount_euid,
                 },
                 created_by=actor_user_id,
             )
-            return self.resource_store.update_analysis_job_status(
+            return self.resource_store.update_run_analysis_job_status(
                 job_euid=job_euid,
                 state="RUNNING",
                 created_by=actor_user_id,
@@ -274,7 +223,7 @@ class AnalysisJobManager:
             )
         except Exception as exc:
             error_message = f"{type(exc).__name__}: {exc}"
-            self.resource_store.add_analysis_job_event(
+            self.resource_store.add_run_analysis_job_event(
                 job_euid=job_euid,
                 event_type="runner",
                 status="FAILED",
@@ -282,7 +231,7 @@ class AnalysisJobManager:
                 details={},
                 created_by=actor_user_id,
             )
-            return self.resource_store.update_analysis_job_status(
+            return self.resource_store.update_run_analysis_job_status(
                 job_euid=job_euid,
                 state="FAILED",
                 created_by=actor_user_id,
@@ -293,13 +242,13 @@ class AnalysisJobManager:
                 output_summary=error_message,
             )
 
-    def refresh_job(self, job_euid: str, *, actor_user_id: str) -> AnalysisJobRecord:
-        job = self.resource_store.get_analysis_job(job_euid)
+    def refresh_job(self, job_euid: str, *, actor_user_id: str) -> RunAnalysisJobRecord:
+        job = self.resource_store.get_run_analysis_job(job_euid)
         if job is None:
-            raise KeyError(f"analysis job not found: {job_euid}")
+            raise KeyError(f"run analysis job not found: {job_euid}")
         session_name = str(job.launch.get("session_name") or "").strip()
         if not session_name:
-            raise ValueError("Analysis job has not been launched")
+            raise ValueError("Run analysis job has not been launched")
         status_payload = self.client.workflow_status(
             session_name=session_name,
             region=job.region,
@@ -337,7 +286,7 @@ class AnalysisJobManager:
             return_code = int(exit_code) if isinstance(exit_code, int) else 1
             state = "COMPLETED" if return_code == 0 else "FAILED"
             error = None if return_code == 0 else f"Workflow exited with status {return_code}"
-        record = self.resource_store.update_analysis_job_status(
+        record = self.resource_store.update_run_analysis_job_status(
             job_euid=job_euid,
             state=state,
             created_by=actor_user_id,
@@ -347,7 +296,7 @@ class AnalysisJobManager:
             output_summary=f"Workflow status: {state}",
             launch=launch,
         )
-        self.resource_store.add_analysis_job_event(
+        self.resource_store.add_run_analysis_job_event(
             job_euid=job_euid,
             event_type="refresh",
             status=state,
@@ -358,12 +307,12 @@ class AnalysisJobManager:
         return record
 
     def logs(self, job_euid: str, *, lines: int = 200) -> dict[str, Any]:
-        job = self.resource_store.get_analysis_job(job_euid)
+        job = self.resource_store.get_run_analysis_job(job_euid)
         if job is None:
-            raise KeyError(f"analysis job not found: {job_euid}")
+            raise KeyError(f"run analysis job not found: {job_euid}")
         session_name = str(job.launch.get("session_name") or "").strip()
         if not session_name:
-            raise ValueError("Analysis job has not been launched")
+            raise ValueError("Run analysis job has not been launched")
         result = self.client.workflow_logs(
             session_name=session_name,
             region=job.region,

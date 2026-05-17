@@ -32,10 +32,14 @@ def mount_tapdb_dag_api(app: FastAPI, settings: Settings) -> bool:
     if not config_path:
         app.state.tapdb_dag_configured = False
         return False
+    env_name = str(getattr(settings, "database_target", "") or "").strip()
+    if not env_name:
+        raise RuntimeError("Ursa TapDB DAG requires an explicit database_target.")
 
     app.include_router(
         create_tapdb_dag_router(
             config_path=config_path,
+            env_name=env_name,
             service_name="ursa",
         ),
         dependencies=[Depends(get_observability_user)],

@@ -288,3 +288,113 @@ def test_create_dry_run_builds_daylily_ec_create_with_day_break(
     assert env["AWS_PROFILE"] == "lsmc"
     assert env["DAY_CONTACT_EMAIL"] == "ops@example.com"
     assert env["DAY_BREAK"] == "1"
+
+
+def test_run_mount_create_uses_json_cli_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='{"mount_id":"RUN-1","headnode_path":"/fsx/run_dir_mounts/RUN-1/"}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    client = runner.DaylilyEcClient(aws_profile="lsmc")
+    payload = client.run_mount_create(
+        s3_uri="s3://bucket/RUN-1/",
+        region="us-west-2",
+        cluster_name="cluster-a",
+        mount_id="RUN-1",
+        run_id="RUN-1",
+        platform="ILLUMINA",
+        file_system_path="/run_dir_mounts/RUN-1/",
+        wait=False,
+    )
+
+    assert payload["mount_id"] == "RUN-1"
+    assert captured["command"] == [
+        runner.sys.executable,
+        "-m",
+        "daylily_ec.cli",
+        "--json",
+        "mounts",
+        "create",
+        "--s3-uri",
+        "s3://bucket/RUN-1/",
+        "--region",
+        "us-west-2",
+        "--cluster",
+        "cluster-a",
+        "--mount-id",
+        "RUN-1",
+        "--run-id",
+        "RUN-1",
+        "--platform",
+        "ILLUMINA",
+        "--file-system-path",
+        "/run_dir_mounts/RUN-1/",
+        "--no-wait",
+        "--profile",
+        "lsmc",
+    ]
+
+
+def test_run_mount_verify_uses_json_cli_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runner,
+        "require_daylily_ec_version",
+        lambda: runner.REQUIRED_DAYLILY_EC_VERSION,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='{"mount_id":"RUN-1","verified":true}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    client = runner.DaylilyEcClient(aws_profile="lsmc")
+    payload = client.run_mount_verify(
+        mount_id="RUN-1",
+        region="us-west-2",
+        cluster_name="cluster-a",
+    )
+
+    assert payload["verified"] is True
+    assert captured["command"] == [
+        runner.sys.executable,
+        "-m",
+        "daylily_ec.cli",
+        "--json",
+        "mounts",
+        "verify",
+        "--mount-id",
+        "RUN-1",
+        "--cluster",
+        "cluster-a",
+        "--region",
+        "us-west-2",
+        "--profile",
+        "lsmc",
+    ]
