@@ -209,6 +209,7 @@ VALID_FIELDS = {
     "ursa_tapdb_mount_enabled": (bool, "Mount TapDB admin UI/API inside Ursa"),
     "ursa_tapdb_mount_path": (str, "Ursa path prefix for embedded TapDB admin UI/API"),
     "bloom_base_url": (str, "Bloom base URL"),
+    "bloom_timeout_seconds": (float, "Bloom resolver HTTP timeout in seconds"),
     "bloom_verify_ssl": (bool, "Verify Bloom TLS certificates"),
     "atlas_base_url": (str, "Atlas base URL"),
     "atlas_verify_ssl": (bool, "Verify Atlas TLS certificates"),
@@ -332,6 +333,15 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
                 errors.append(
                     f"'{field_name}' must be an integer, got {type(data[field_name]).__name__}"
                 )
+
+    for field_name in ["bloom_timeout_seconds"]:
+        if field_name in data and data[field_name] is not None:
+            if not isinstance(data[field_name], (int, float)):
+                errors.append(
+                    f"'{field_name}' must be a number, got {type(data[field_name]).__name__}"
+                )
+            elif float(data[field_name]) <= 0:
+                errors.append(f"'{field_name}' must be greater than zero")
 
     for field_name in [
         "bloom_verify_ssl",
@@ -464,6 +474,9 @@ class UrsaConfig:
 
     bloom_base_url: Optional[str] = None
     """Bloom base URL read from YAML config."""
+
+    bloom_timeout_seconds: Optional[float] = None
+    """Bloom resolver HTTP timeout in seconds read from YAML config."""
 
     bloom_verify_ssl: Optional[bool] = None
     """Bloom TLS verification flag read from YAML config."""
@@ -621,6 +634,7 @@ class UrsaConfig:
         ursa_tapdb_mount_enabled = data.get("ursa_tapdb_mount_enabled")
         ursa_tapdb_mount_path = data.get("ursa_tapdb_mount_path")
         bloom_base_url = data.get("bloom_base_url")
+        bloom_timeout_seconds = data.get("bloom_timeout_seconds")
         bloom_verify_ssl = data.get("bloom_verify_ssl")
         atlas_base_url = data.get("atlas_base_url")
         atlas_verify_ssl = data.get("atlas_verify_ssl")
@@ -673,6 +687,7 @@ class UrsaConfig:
             ursa_tapdb_mount_enabled=ursa_tapdb_mount_enabled,
             ursa_tapdb_mount_path=ursa_tapdb_mount_path,
             bloom_base_url=bloom_base_url,
+            bloom_timeout_seconds=bloom_timeout_seconds,
             bloom_verify_ssl=bloom_verify_ssl,
             atlas_base_url=atlas_base_url,
             atlas_verify_ssl=atlas_verify_ssl,

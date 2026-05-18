@@ -91,6 +91,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bloom_client = BloomResolverClient(
         base_url=settings.bloom_base_url,
         token=bloom_token,
+        timeout_seconds=settings.bloom_timeout_seconds,
         verify_ssl=settings.bloom_verify_ssl,
     )
     atlas_client = AtlasResultClient(

@@ -33,6 +33,7 @@ def test_resolve_run_assignment_returns_resolution():
     resolver = BloomResolverClient(
         base_url="https://bloom.example",
         token="bloom-token",
+        timeout_seconds=30.0,
         client=client,
     )
 
@@ -48,7 +49,10 @@ def test_resolve_run_assignment_raises_for_bad_response():
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     resolver = BloomResolverClient(
-        base_url="https://bloom.example", token="bloom-token", client=client
+        base_url="https://bloom.example",
+        token="bloom-token",
+        timeout_seconds=30.0,
+        client=client,
     )
 
     with pytest.raises(BloomResolverError, match="404"):
@@ -68,7 +72,10 @@ def test_resolve_run_assignment_raises_for_missing_fields():
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     resolver = BloomResolverClient(
-        base_url="https://bloom.example", token="bloom-token", client=client
+        base_url="https://bloom.example",
+        token="bloom-token",
+        timeout_seconds=30.0,
+        client=client,
     )
 
     with pytest.raises(BloomResolverError, match="missing required fields"):
@@ -76,7 +83,11 @@ def test_resolve_run_assignment_raises_for_missing_fields():
 
 
 def test_resolve_run_assignment_rejects_non_https_base_url():
-    resolver = BloomResolverClient(base_url="http://bloom.example", token="bloom-token")
+    resolver = BloomResolverClient(
+        base_url="http://bloom.example",
+        token="bloom-token",
+        timeout_seconds=30.0,
+    )
 
     with pytest.raises(BloomResolverError, match="absolute https:// URL"):
         resolver.resolve_run_assignment("RUN-1", "FLOW-1", "1", "LIB-1")

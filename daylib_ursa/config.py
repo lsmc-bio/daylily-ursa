@@ -102,6 +102,7 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "api_host": cfg.api_host,
         "api_port": cfg.api_port,
         "bloom_base_url": cfg.bloom_base_url,
+        "bloom_timeout_seconds": cfg.bloom_timeout_seconds,
         "bloom_verify_ssl": cfg.bloom_verify_ssl,
         "atlas_base_url": cfg.atlas_base_url,
         "atlas_verify_ssl": cfg.atlas_verify_ssl,
@@ -260,6 +261,7 @@ api_port: 8913
 
 # Peer service URLs
 bloom_base_url: https://localhost:8912
+bloom_timeout_seconds: 30
 bloom_verify_ssl: true
 atlas_base_url: https://localhost:8915
 atlas_verify_ssl: true
@@ -559,6 +561,11 @@ class Settings(BaseSettings):
     bloom_base_url: str = Field(
         default=DEFAULT_BLOOM_BASE_URL,
         description="Bloom base URL for run/index resolver requests",
+    )
+    bloom_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Bloom resolver HTTP timeout in seconds",
     )
     bloom_api_token: Optional[str] = Field(
         default=None,

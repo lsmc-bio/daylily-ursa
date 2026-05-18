@@ -53,6 +53,7 @@ def test_main_bootstraps_and_runs_with_atlas_client(monkeypatch: pytest.MonkeyPa
     settings = SimpleNamespace(
         bloom_base_url="https://bloom.example",
         bloom_api_token="bloom-token",
+        bloom_timeout_seconds=30.0,
         bloom_verify_ssl=True,
         atlas_base_url="https://atlas.example",
         atlas_internal_api_key="atlas-key",
@@ -113,6 +114,8 @@ def test_main_bootstraps_and_runs_with_atlas_client(monkeypatch: pytest.MonkeyPa
     assert rc == 0
     assert configured == [True]
     assert created_store["store"].bootstrapped is True
+    assert app_inputs["bloom_client"].kind == "bloom"
+    assert app_inputs["bloom_client"].kwargs["timeout_seconds"] == 30.0
     assert app_inputs["atlas_client"].kind == "atlas"
     assert run_calls[0]["app"] == "fake-app"
     assert run_calls[0]["host"] == "127.0.0.1"
@@ -141,6 +144,7 @@ def test_main_skips_bootstrap_and_fails_without_atlas_key(monkeypatch: pytest.Mo
     settings = SimpleNamespace(
         bloom_base_url="https://bloom.example",
         bloom_api_token="bloom-token",
+        bloom_timeout_seconds=30.0,
         bloom_verify_ssl=False,
         atlas_base_url="https://atlas.example",
         atlas_internal_api_key="",

@@ -28,9 +28,15 @@ def _require_https_url(value: str, *, field_name: str) -> str:
 class BloomResolverClient:
     base_url: str
     token: str
-    timeout_seconds: float = 10.0
+    timeout_seconds: float
     verify_ssl: bool = True
     client: httpx.Client | None = None
+
+    def __post_init__(self) -> None:
+        timeout = float(self.timeout_seconds)
+        if timeout <= 0:
+            raise BloomResolverError("Bloom resolver timeout_seconds must be greater than zero")
+        self.timeout_seconds = timeout
 
     def _headers(self) -> dict[str, str]:
         token = str(self.token or "").strip()
