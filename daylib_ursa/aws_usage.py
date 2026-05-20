@@ -14,6 +14,7 @@ import boto3
 
 AWS_USAGE_CACHE_TTL_SECONDS = 15 * 60
 AWS_BILLING_REGION = "us-east-1"
+DAYEC_COST_BASIS_TAG_KEY = "aws-parallelcluster-clustername"
 DAYEC_PARALLELCLUSTER_TAG_KEYS: tuple[str, ...] = (
     "aws-parallelcluster-project",
     "aws-parallelcluster-clustername",
@@ -172,8 +173,16 @@ class AwsUsageReport:
 
     def to_dict(self) -> dict[str, Any]:
         totals: dict[str, float] = defaultdict(float)
+        service_totals: dict[str, float] = defaultdict(float)
+        tag_value_totals: dict[tuple[str, str], float] = defaultdict(float)
+        basis_rows = [
+            row for row in self.costs_by_tag_service if row.tag_key == DAYEC_COST_BASIS_TAG_KEY
+        ]
         for row in self.costs_by_tag_service:
             totals[row.tag_key] += row.amount
+        for row in basis_rows:
+            service_totals[row.service] += row.amount
+            tag_value_totals[(row.tag_key, row.tag_value)] += row.amount
         return {
             "aws_profile": self.aws_profile,
             "account_id": self.account_id,
@@ -184,9 +193,26 @@ class AwsUsageReport:
             "cache_expires_at": self.cache_expires_at,
             "ttl_seconds": AWS_USAGE_CACHE_TTL_SECONDS,
             "tag_keys": list(self.tag_keys),
+            "cost_basis_tag_key": DAYEC_COST_BASIS_TAG_KEY,
             "budgets": [row.to_dict() for row in self.budgets],
             "costs_by_tag_service": [row.to_dict() for row in self.costs_by_tag_service],
+            "cost_basis_rows": [row.to_dict() for row in basis_rows],
             "cost_totals_by_tag_key": dict(sorted(totals.items())),
+            "cost_totals_by_service": [
+                {"service": service, "amount": amount, "unit": "USD"}
+                for service, amount in sorted(
+                    service_totals.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )
+            ],
+            "cost_totals_by_tag_value": [
+                {"tag_key": tag_key, "tag_value": tag_value, "amount": amount, "unit": "USD"}
+                for (tag_key, tag_value), amount in sorted(
+                    tag_value_totals.items(),
+                    key=lambda item: (item[0][0], -item[1], item[0][1]),
+                )
+            ],
+            "total_cost_amount": round(sum(service_totals.values()), 6),
             "resource_inventory": [row.to_dict() for row in self.resource_inventory],
         }
 
@@ -242,7 +268,6 @@ class AwsUsageReportService:
         fetched_at = _utc_now_iso()
         start_date, end_date = _month_to_date_window()
         account_id = str(self._session().client("sts").get_caller_identity()["Account"])
-        budgets = self._list_budgets(account_id)
         costs = self._costs_by_tag_service(start_date=start_date, end_date=end_date)
         inventory = self._resource_inventory()
         cache_expires_at = datetime.fromtimestamp(
@@ -258,7 +283,7 @@ class AwsUsageReportService:
             fetched_at=fetched_at,
             cache_expires_at=cache_expires_at,
             tag_keys=list(DAYEC_PARALLELCLUSTER_TAG_KEYS),
-            budgets=budgets,
+            budgets=[],
             costs_by_tag_service=costs,
             resource_inventory=inventory,
         )
@@ -406,6 +431,7 @@ class AwsUsageReportService:
 
 __all__ = [
     "AWS_USAGE_CACHE_TTL_SECONDS",
+    "DAYEC_COST_BASIS_TAG_KEY",
     "DAYEC_PARALLELCLUSTER_TAG_KEYS",
     "AwsUsageReport",
     "AwsUsageReportService",

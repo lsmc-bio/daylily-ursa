@@ -49,14 +49,18 @@
     </article>
 </section>
 
-{% if stats.clusters is defined %}
 <section class="grid grid-2" style="margin-bottom: 1.5rem;">
     <article class="card">
-        <h3 class="card-title">Admin Summary</h3>
+        <h3 class="card-title">Cluster Summary</h3>
         <div class="grid grid-3">
             <div><div class="stat-value">{{ stats.clusters }}</div><div class="stat-label">Clusters</div></div>
-            <div><div class="stat-value">{{ stats.cluster_jobs }}</div><div class="stat-label">Cluster Jobs</div></div>
-            <div><div class="stat-value">{{ stats.running_jobs }}</div><div class="stat-label">Running Jobs</div></div>
+            <div><div class="stat-value">{{ stats.running_clusters }}</div><div class="stat-label">Running Clusters</div></div>
+            <div><div class="stat-value">{{ stats.slurm_active_jobs }}</div><div class="stat-label">Active Slurm Jobs</div></div>
+        </div>
+        <div class="grid grid-3" style="margin-top: 1rem;">
+            <div><div class="stat-value">{{ stats.slurm_configuring_jobs }}</div><div class="stat-label">Configuring</div></div>
+            <div><div class="stat-value">{{ stats.slurm_running_jobs }}</div><div class="stat-label">Running</div></div>
+            <div><div class="stat-value">{{ stats.slurm_pending_jobs }}</div><div class="stat-label">Pending</div></div>
         </div>
     </article>
     <article class="card">
@@ -66,7 +70,36 @@
         <p class="small">Auth Source: {{ actor.auth_source }}</p>
     </article>
 </section>
-{% endif %}
+
+<section class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h3 class="card-title">Month-To-Date Spend By Service</h3>
+        {% if dashboard_spend.window %}
+        <span class="badge badge-outline">{{ dashboard_spend.window }}</span>
+        {% endif %}
+    </div>
+    {% if dashboard_spend.error %}
+    <div class="alert alert-warning">{{ dashboard_spend.error }}</div>
+    {% elif dashboard_spend.by_service %}
+    <div class="grid grid-4" style="margin-bottom: 1rem;">
+        <article>
+            <div class="stat-value">{{ dashboard_spend.total | usd }}</div>
+            <div class="stat-label">Tagged Spend</div>
+        </article>
+        {% for row in dashboard_spend.by_service[:3] %}
+        <article>
+            <div class="stat-value">{{ row.amount | usd }}</div>
+            <div class="stat-label">{{ row.service }}</div>
+        </article>
+        {% endfor %}
+    </div>
+    <div style="height: 260px;">
+        <canvas id="dashboard-spend-service-chart" aria-label="Month-to-date spend by service"></canvas>
+    </div>
+    {% else %}
+    <p class="text-muted">No tagged spend returned for the current month.</p>
+    {% endif %}
+</section>
 
 <section class="grid grid-2">
     <article class="card">
@@ -115,4 +148,52 @@
         </div>
     </article>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+    const rows = {{ dashboard_spend.by_service | tojson }};
+    const canvas = document.getElementById('dashboard-spend-service-chart');
+    if (!canvas || !rows.length || typeof Chart === 'undefined') return;
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    const wholeCurrencyFormatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0,
+    });
+    new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map((row) => row.service),
+            datasets: [{
+                label: 'Spend',
+                data: rows.map((row) => Number(row.amount || 0)),
+                backgroundColor: '#0f766e',
+                borderColor: '#0b4f4a',
+                borderWidth: 1,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            indexAxis: 'y',
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => currencyFormatter.format(Number(context.raw || 0)),
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: { callback: (value) => wholeCurrencyFormatter.format(Number(value || 0)) },
+                },
+            },
+        },
+    });
+})();
+</script>
 {% endblock %}

@@ -439,6 +439,14 @@
             </div>
         </div>
         <div class="stat-card">
+            <div class="card-icon info"><i class="fas fa-list-check"></i></div>
+            <div>
+                <div class="stat-value" id="slurm-active-jobs">0</div>
+                <div class="stat-label"># Slurm Jobs [Cfg|Run|Pnd]</div>
+                <div class="text-xs text-muted" id="slurm-job-breakdown">0 | 0 | 0</div>
+            </div>
+        </div>
+        <div class="stat-card">
             <div class="card-icon warning"><i class="fas fa-microchip"></i></div>
             <div>
                 <div class="stat-value" id="active-create-jobs">{{ active_create_jobs_count }}</div>
@@ -607,9 +615,9 @@
                             {% elif job_queue %}
                             <div class="grid grid-4 gap-sm mb-sm">
                                 <div><span class="text-muted text-xs">Total</span><div class="stat-value">{{ job_queue.total_jobs }}</div></div>
+                                <div><span class="text-muted text-xs">Configuring</span><div class="stat-value">{{ job_queue.configuring_jobs }}</div></div>
                                 <div><span class="text-muted text-xs">Running</span><div class="stat-value">{{ job_queue.running_jobs }}</div></div>
                                 <div><span class="text-muted text-xs">Pending</span><div class="stat-value">{{ job_queue.pending_jobs }}</div></div>
-                                <div><span class="text-muted text-xs">CPUs</span><div class="stat-value">{{ job_queue.total_cpus }}</div></div>
                             </div>
                             {% if job_queue.jobs %}
                             <div class="table-container">
@@ -759,6 +767,9 @@ let clusterInventoryState = {
     totalExpected: 0,
     running: 0,
     failed: 0,
+    slurmConfiguring: 0,
+    slurmRunning: 0,
+    slurmPending: 0,
 };
 
 const CLUSTER_DETAIL_CONCURRENCY = 3;
@@ -1038,15 +1049,29 @@ function clusterStatusBadgeClass(status) {
 }
 
 function resetClusterInventoryStats() {
-    clusterInventoryState = { totalExpected: 0, running: 0, failed: 0 };
+    clusterInventoryState = {
+        totalExpected: 0,
+        running: 0,
+        failed: 0,
+        slurmConfiguring: 0,
+        slurmRunning: 0,
+        slurmPending: 0,
+    };
     updateClusterInventoryStats();
 }
 
 function updateClusterInventoryStats() {
     const totalEl = document.getElementById('total-clusters');
     const runningEl = document.getElementById('running-clusters');
+    const activeJobsEl = document.getElementById('slurm-active-jobs');
+    const jobBreakdownEl = document.getElementById('slurm-job-breakdown');
     if (totalEl) totalEl.textContent = String(clusterInventoryState.totalExpected);
     if (runningEl) runningEl.textContent = String(clusterInventoryState.running);
+    const activeJobs = clusterInventoryState.slurmConfiguring + clusterInventoryState.slurmRunning + clusterInventoryState.slurmPending;
+    if (activeJobsEl) activeJobsEl.textContent = String(activeJobs);
+    if (jobBreakdownEl) {
+        jobBreakdownEl.textContent = `${clusterInventoryState.slurmConfiguring} | ${clusterInventoryState.slurmRunning} | ${clusterInventoryState.slurmPending}`;
+    }
 }
 
 function setRegionLiveCount(region, count, failed = false) {
@@ -1157,13 +1182,24 @@ function jobQueueHtml(queue) {
             </div>
             <div class="grid grid-4 gap-sm mb-sm">
                 <div><span class="text-muted text-xs">Total</span><div class="stat-value">${escapeHtml(String(queue.total_jobs ?? 0))}</div></div>
+                <div><span class="text-muted text-xs">Configuring</span><div class="stat-value">${escapeHtml(String(queue.configuring_jobs ?? 0))}</div></div>
                 <div><span class="text-muted text-xs">Running</span><div class="stat-value">${escapeHtml(String(queue.running_jobs ?? 0))}</div></div>
                 <div><span class="text-muted text-xs">Pending</span><div class="stat-value">${escapeHtml(String(queue.pending_jobs ?? 0))}</div></div>
-                <div><span class="text-muted text-xs">CPUs</span><div class="stat-value">${escapeHtml(String(queue.total_cpus ?? 0))}</div></div>
             </div>
             ${table}
         </section>
     `;
+}
+
+function jobQueueCounts(queue) {
+    if (!queue || queue.error) {
+        return { configuring: 0, running: 0, pending: 0 };
+    }
+    return {
+        configuring: Number(queue.configuring_jobs || 0),
+        running: Number(queue.running_jobs || 0),
+        pending: Number(queue.pending_jobs || 0),
+    };
 }
 
 function renderClusterCard(cluster) {
@@ -1348,6 +1384,10 @@ async function loadClusterRegion(region, refresh = false) {
                 if (String(detail.compute_fleet_status || '').toUpperCase() === 'RUNNING') {
                     clusterInventoryState.running += 1;
                 }
+                const jobCounts = jobQueueCounts(detail.job_queue || null);
+                clusterInventoryState.slurmConfiguring += jobCounts.configuring;
+                clusterInventoryState.slurmRunning += jobCounts.running;
+                clusterInventoryState.slurmPending += jobCounts.pending;
                 card.outerHTML = renderClusterCard(detail);
             } catch (error) {
                 clusterInventoryState.failed += 1;

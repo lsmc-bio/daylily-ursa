@@ -1645,7 +1645,7 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert login.status_code == 303
     assert dashboard.status_code == 200
     assert "Welcome back" in dashboard.text
-    assert "Running Jobs" in dashboard.text
+    assert "Active Slurm Jobs" in dashboard.text
     assert usage_page.status_code == 200
     assert "Usage Summary" in usage_page.text
     assert "AWS usage report failed" in usage_page.text
@@ -1740,10 +1740,9 @@ def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
 
     assert response.status_code == 200
     assert service_calls == [True]
-    assert "DayEC Budgets" in response.text
+    assert "Spend Visuals" in response.text
     assert "Tag Spend By Service" in response.text
     assert "Tagged Resource Inventory" in response.text
-    assert "da-us-west-2d-cluster-a" in response.text
     assert "aws-parallelcluster-project" in response.text
     assert "Amazon Elastic Compute Cloud - Compute" in response.text
     assert "$42.50" in response.text
