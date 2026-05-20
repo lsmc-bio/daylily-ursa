@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import secrets
 import subprocess
+import threading
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -13,6 +17,7 @@ import httpx
 from daylily_auth_cognito import complete_cognito_callback, start_cognito_login
 from daylily_auth_cognito.browser.session import CognitoWebAuthError
 from fastapi import FastAPI, Form, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -57,6 +62,7 @@ CLUSTER_CREATE_REGION_SUGGESTIONS = [
     "ap-south-1",
     "eu-central-1",
 ]
+_GUI_PAYLOAD_CACHE_TTL_SECONDS = 15 * 60
 _SENSITIVE_CONFIG_TOKENS = (
     "secret",
     "token",
@@ -1281,6 +1287,79 @@ def mount_gui(app: FastAPI) -> None:
             "analyses": analyses[:20],
         }
 
+
+    def _gui_payload_cache_state() -> tuple[dict[tuple[str, str, str], tuple[float, dict[str, Any]]], threading.RLock]:
+        cache = getattr(app.state, "gui_payload_cache", None)
+        if cache is None:
+            cache = {}
+            app.state.gui_payload_cache = cache
+        lock = getattr(app.state, "gui_payload_cache_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            app.state.gui_payload_cache_lock = lock
+        return cache, lock
+
+    def _gui_payload_cache_key(name: str, actor: CurrentUser) -> tuple[str, str, str]:
+        visibility_scope = "admin" if actor.is_admin else str(actor.tenant_id)
+        return (name, visibility_scope, str(actor.sub))
+
+    def _cached_gui_payload(
+        name: str,
+        actor: CurrentUser,
+        builder: Any,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        cache, lock = _gui_payload_cache_state()
+        key = _gui_payload_cache_key(name, actor)
+        now = time.time()
+        with lock:
+            cached = cache.get(key)
+            if not force_refresh and cached is not None:
+                expires_at, payload = cached
+                if now < expires_at:
+                    result = copy.deepcopy(payload)
+                    result["cache"] = {
+                        "cached": True,
+                        "ttl_seconds": _GUI_PAYLOAD_CACHE_TTL_SECONDS,
+                        "expires_in_seconds": max(0, int(expires_at - now)),
+                    }
+                    return result
+                cache.pop(key, None)
+        payload = jsonable_encoder(builder())
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{name} GUI payload must be a JSON object")
+        expires_at = now + _GUI_PAYLOAD_CACHE_TTL_SECONDS
+        payload["cache"] = {
+            "cached": False,
+            "ttl_seconds": _GUI_PAYLOAD_CACHE_TTL_SECONDS,
+            "expires_in_seconds": _GUI_PAYLOAD_CACHE_TTL_SECONDS,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with lock:
+            cache[key] = (expires_at, copy.deepcopy(payload))
+        return copy.deepcopy(payload)
+
+    @app.get("/api/v1/gui/dashboard")
+    async def dashboard_gui_payload(request: Request):
+        actor = _session_actor(request)
+        if actor is None:
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        return _cached_gui_payload("dashboard", actor, lambda: _dashboard_context(actor))
+
+    @app.get("/api/v1/gui/usage")
+    async def usage_gui_payload(request: Request, refresh: bool = False):
+        actor = _session_actor(request)
+        if actor is None:
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        return _cached_gui_payload(
+            "usage",
+            actor,
+            lambda: _usage_context(actor, refresh=refresh),
+            force_refresh=refresh,
+        )
+
+
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request, next: str = "/", reason: str = ""):
         actor = _session_actor(request)
@@ -1470,7 +1549,7 @@ def mount_gui(app: FastAPI) -> None:
             template_name="dashboard.html",
             page_title="Dashboard",
             active_page="dashboard",
-            context=_dashboard_context(actor),
+            context={"dashboard_lazy": True},
         )
 
     @app.get("/graph", response_class=HTMLResponse)
@@ -1502,7 +1581,7 @@ def mount_gui(app: FastAPI) -> None:
             template_name="usage.html",
             page_title="Usage Summary",
             active_page="usage",
-            context=_usage_context(actor, refresh=refresh),
+            context={"usage_lazy": True, "usage_refresh": bool(refresh)},
         )
 
     @app.get("/worksets", response_class=HTMLResponse)

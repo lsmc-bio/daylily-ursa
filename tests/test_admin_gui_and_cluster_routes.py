@@ -1646,9 +1646,10 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert dashboard.status_code == 200
     assert "Welcome back" in dashboard.text
     assert "Active Slurm Jobs" in dashboard.text
+    assert "Loading dashboard data" in dashboard.text
     assert usage_page.status_code == 200
     assert "Usage Summary" in usage_page.text
-    assert "AWS usage report failed" in usage_page.text
+    assert "Loading usage data" in usage_page.text
     assert staging_page.status_code == 200
     assert "Staging" in staging_page.text
     assert buckets_page.status_code == 200
@@ -1671,6 +1672,64 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert admin_config_page.status_code == 200
     assert "Configuration" in admin_config_page.text
 
+
+
+
+def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
+    app, _resources = _create_test_app(admin=True)
+    dashboard_calls = {"clusters": 0, "usage": 0}
+
+    class DummyClusterService:
+        regions = ["us-west-2"]
+
+        def get_all_clusters_with_status(self, *, force_refresh=False, fetch_ssh_status=False):
+            dashboard_calls["clusters"] += 1
+            return []
+
+    class DummyUsageReport:
+        def to_dict(self):
+            return {
+                "aws_profile": "lsmc",
+                "account_id": "123456789012",
+                "regions": ["us-west-2"],
+                "start_date": "2026-05-01",
+                "end_date": "2026-05-21",
+                "fetched_at": "2026-05-20T04:30:00Z",
+                "cache_expires_at": "2026-05-20T04:45:00Z",
+                "ttl_seconds": 900,
+                "tag_keys": [],
+                "budgets": [],
+                "costs_by_tag_service": [],
+                "cost_totals_by_service": [],
+                "cost_totals_by_tag_key": {},
+                "resource_inventory": [],
+            }
+
+    class DummyUsageService:
+        def get_report(self, *, force_refresh=False):
+            dashboard_calls["usage"] += 1
+            return DummyUsageReport()
+
+    app.state.cluster_service = DummyClusterService()
+    app.state.aws_usage_report_service = DummyUsageService()
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        first_dashboard = client.get("/api/v1/gui/dashboard")
+        second_dashboard = client.get("/api/v1/gui/dashboard")
+        first_usage = client.get("/api/v1/gui/usage")
+        second_usage = client.get("/api/v1/gui/usage")
+        refreshed_usage = client.get("/api/v1/gui/usage?refresh=true")
+
+    assert first_dashboard.status_code == 200
+    assert second_dashboard.status_code == 200
+    assert first_dashboard.json()["cache"]["cached"] is False
+    assert second_dashboard.json()["cache"]["cached"] is True
+    assert first_usage.json()["cache"]["cached"] is False
+    assert second_usage.json()["cache"]["cached"] is True
+    assert refreshed_usage.json()["cache"]["cached"] is False
+    assert dashboard_calls["clusters"] == 1
+    assert dashboard_calls["usage"] == 3
 
 def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
     app, _resources = _create_test_app(admin=True)
@@ -1736,17 +1795,18 @@ def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
             data={"access_token": "atlas-token", "next_path": "/usage"},
             follow_redirects=False,
         )
-        response = client.get("/usage?refresh=true")
+        page = client.get("/usage?refresh=true")
+        response = client.get("/api/v1/gui/usage?refresh=true")
 
+    assert page.status_code == 200
+    assert "Loading usage data" in page.text
     assert response.status_code == 200
+    payload = response.json()
     assert service_calls == [True]
-    assert "Spend Visuals" in response.text
-    assert "Tag Spend By Service" in response.text
-    assert "Tagged Resource Inventory" in response.text
-    assert "aws-parallelcluster-project" in response.text
-    assert "Amazon Elastic Compute Cloud - Compute" in response.text
-    assert "$42.50" in response.text
-    assert "placeholder" not in response.text
+    assert payload["usage_report"]["tag_keys"] == ["aws-parallelcluster-project"]
+    assert payload["usage_report"]["costs_by_tag_service"][0]["service"] == "Amazon Elastic Compute Cloud - Compute"
+    assert payload["usage_report"]["costs_by_tag_service"][0]["amount"] == 42.5
+    assert payload["cache"]["cached"] is False
 
 
 def test_cluster_create_blocks_when_partition_verification_fails() -> None:

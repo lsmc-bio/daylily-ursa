@@ -38,180 +38,90 @@
     </div>
 </div>
 
+<section class="alert alert-info" data-usage-loading>
+    Loading usage data...
+</section>
+<section class="alert alert-danger d-none" data-usage-error></section>
+
 <section class="grid grid-4" style="margin-bottom: 1rem;">
-    <article class="stat-card"><div><div class="stat-value">{{ usage.worksets_total }}</div><div class="stat-label">Total Worksets</div></div></article>
-    <article class="stat-card"><div><div class="stat-value">{{ usage.manifests_total }}</div><div class="stat-label">Manifests</div></div></article>
-    <article class="stat-card"><div><div class="stat-value">{{ usage.analysis_total }}</div><div class="stat-label">Analyses</div></div></article>
-    <article class="stat-card"><div><div class="stat-value">{{ usage.artifact_references }}</div><div class="stat-label">Artifact References</div></div></article>
+    <article class="stat-card"><div><div class="stat-value" data-usage-stat="worksets_total">...</div><div class="stat-label">Total Worksets</div></div></article>
+    <article class="stat-card"><div><div class="stat-value" data-usage-stat="manifests_total">...</div><div class="stat-label">Manifests</div></div></article>
+    <article class="stat-card"><div><div class="stat-value" data-usage-stat="analysis_total">...</div><div class="stat-label">Analyses</div></div></article>
+    <article class="stat-card"><div><div class="stat-value" data-usage-stat="artifact_references">...</div><div class="stat-label">Artifact References</div></div></article>
 </section>
 
 <section class="grid grid-3" style="margin-bottom: 1.5rem;">
     <article class="card">
         <h3 class="card-title">Execution</h3>
-        <p class="small">Active worksets: <strong>{{ usage.active_worksets }}</strong></p>
-        <p class="small">Completed worksets: <strong>{{ usage.completed_worksets }}</strong></p>
+        <p class="small">Active worksets: <strong data-usage-stat="active_worksets">...</strong></p>
+        <p class="small">Completed worksets: <strong data-usage-stat="completed_worksets">...</strong></p>
     </article>
     <article class="card">
         <h3 class="card-title">Linked Storage</h3>
-        <p class="small">Linked buckets: <strong>{{ usage.linked_buckets }}</strong></p>
+        <p class="small">Linked buckets: <strong data-usage-stat="linked_buckets">...</strong></p>
     </article>
     <article class="card">
         <h3 class="card-title">AWS Cost Source</h3>
-        {% if usage_report %}
-        <p class="small">Profile: <strong>{{ usage_report.aws_profile }}</strong></p>
-        <p class="small">Window: <strong>{{ usage_report.start_date }}</strong> through <strong>{{ usage_report.end_date }}</strong></p>
-        <p class="small">Cached: <strong>{{ usage_report.fetched_at[:19] }}</strong></p>
-        {% elif usage_report_error %}
-        <p class="small text-danger">{{ usage_report_error }}</p>
-        {% else %}
-        <p class="small text-muted">AWS usage report unavailable.</p>
-        {% endif %}
+        <div data-usage-cost-source>Loading AWS usage report...</div>
     </article>
 </section>
 
-{% if usage_report_error %}
-<section class="alert alert-danger" style="margin-bottom: 1.5rem;">
-    AWS usage report failed: {{ usage_report_error }}
-</section>
-{% endif %}
+<section class="alert alert-danger d-none" style="margin-bottom: 1.5rem;" data-usage-report-error></section>
 
-{% if usage_report %}
-<section class="grid grid-4" style="margin-bottom: 1rem;">
-    <article class="stat-card"><div><div class="stat-value">{{ usage_report.total_cost_amount | usd }}</div><div class="stat-label">Tagged Spend</div></div></article>
-    <article class="stat-card"><div><div class="stat-value">{{ usage_report.costs_by_tag_service | length }}</div><div class="stat-label">Tag-Service Rows</div></div></article>
-    <article class="stat-card"><div><div class="stat-value">{{ usage_report.cost_totals_by_service | length }}</div><div class="stat-label">Services</div></div></article>
-    <article class="stat-card"><div><div class="stat-value">{{ usage_report.resource_inventory | length }}</div><div class="stat-label">Inventory Rows</div></div></article>
-</section>
+<section data-usage-report-content class="d-none">
+    <section class="grid grid-4" style="margin-bottom: 1rem;">
+        <article class="stat-card"><div><div class="stat-value" data-usage-report-stat="total_cost_amount">...</div><div class="stat-label">Tagged Spend</div></div></article>
+        <article class="stat-card"><div><div class="stat-value" data-usage-report-stat="costs_by_tag_service">...</div><div class="stat-label">Tag-Service Rows</div></div></article>
+        <article class="stat-card"><div><div class="stat-value" data-usage-report-stat="cost_totals_by_service">...</div><div class="stat-label">Services</div></div></article>
+        <article class="stat-card"><div><div class="stat-value" data-usage-report-stat="resource_inventory">...</div><div class="stat-label">Inventory Rows</div></div></article>
+    </section>
 
-<section class="card" style="margin-bottom: 1.5rem;">
-    <div class="card-header">
-        <h3 class="card-title">Spend Visuals</h3>
-        <div class="usage-filter-bar">
-            {% if usage_report.cost_basis_tag_key %}
-            <span class="badge badge-outline">Spend basis {{ usage_report.cost_basis_tag_key }}</span>
-            {% endif %}
-            <label class="form-label" for="usage-tag-key-filter" style="margin: 0;">Tag Key</label>
-            <select id="usage-tag-key-filter" class="form-control form-select" style="min-width: 18rem;">
-                {% for tag_key in usage_report.tag_keys %}
-                <option value="{{ tag_key }}" {% if tag_key == usage_report.cost_basis_tag_key %}selected{% endif %}>{{ tag_key }}</option>
-                {% endfor %}
-            </select>
+    <section class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+            <h3 class="card-title">Spend Visuals</h3>
+            <div class="usage-filter-bar" data-usage-filter-bar></div>
         </div>
-    </div>
-    <div class="usage-chart-grid">
-        <article class="usage-chart-panel">
-            <h4 class="text-sm text-muted">Service Spend</h4>
-            <div class="usage-chart-frame"><canvas id="usage-service-spend-chart" aria-label="Tag spend by service"></canvas></div>
-        </article>
-        <article class="usage-chart-panel">
-            <h4 class="text-sm text-muted">Selected Tag Breakdown</h4>
-            <div class="usage-chart-frame"><canvas id="usage-tag-service-chart" aria-label="Selected tag spend by service"></canvas></div>
-        </article>
-        <article class="usage-chart-panel">
-            <h4 class="text-sm text-muted">Tag Key Totals</h4>
-            <div class="usage-chart-frame"><canvas id="usage-tag-key-chart" aria-label="Tag key spend totals"></canvas></div>
-        </article>
-        <article class="usage-chart-panel">
-            <h4 class="text-sm text-muted">Tagged Resources</h4>
-            <div class="usage-chart-frame"><canvas id="usage-resource-chart" aria-label="Tagged resources by service"></canvas></div>
-        </article>
-    </div>
-</section>
+        <div class="usage-chart-grid">
+            <article class="usage-chart-panel"><h4 class="text-sm text-muted">Service Spend</h4><div class="usage-chart-frame"><canvas id="usage-service-spend-chart" aria-label="Tag spend by service"></canvas></div></article>
+            <article class="usage-chart-panel"><h4 class="text-sm text-muted">Selected Tag Breakdown</h4><div class="usage-chart-frame"><canvas id="usage-tag-service-chart" aria-label="Selected tag spend by service"></canvas></div></article>
+            <article class="usage-chart-panel"><h4 class="text-sm text-muted">Tag Key Totals</h4><div class="usage-chart-frame"><canvas id="usage-tag-key-chart" aria-label="Tag key spend totals"></canvas></div></article>
+            <article class="usage-chart-panel"><h4 class="text-sm text-muted">Tagged Resources</h4><div class="usage-chart-frame"><canvas id="usage-resource-chart" aria-label="Tagged resources by service"></canvas></div></article>
+        </div>
+    </section>
 
-<section class="card" style="margin-bottom: 1.5rem;">
-    <div class="card-header">
-        <h3 class="card-title">Tag Spend By Service</h3>
-    </div>
-    <div class="table-container">
-        <table>
-            <thead><tr><th>Tag Key</th><th>Tag Value</th><th>Service</th><th>Amount</th></tr></thead>
-            <tbody>
-                {% for row in usage_report.costs_by_tag_service %}
-                <tr data-cost-row data-tag-key="{{ row.tag_key }}">
-                    <td class="mono">{{ row.tag_key }}</td>
-                    <td class="mono">{{ row.tag_value or "<untagged>" }}</td>
-                    <td>{{ row.service }}</td>
-                    <td>{{ row.amount | usd }}</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="4" class="text-muted">No Cost Explorer rows returned for the configured tags.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</section>
+    <section class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header"><h3 class="card-title">Tag Spend By Service</h3></div>
+        <div class="table-container" data-usage-cost-table>Loading spend rows...</div>
+    </section>
 
-<section class="card" style="margin-bottom: 1.5rem;">
-    <div class="card-header">
-        <h3 class="card-title">Tagged Resource Inventory</h3>
-    </div>
-    <div class="table-container">
-        <table>
-            <thead><tr><th>Tag Key</th><th>Tag Value</th><th>Service</th><th>Region</th><th>Resources</th></tr></thead>
-            <tbody>
-                {% for row in usage_report.resource_inventory %}
-                <tr>
-                    <td class="mono">{{ row.tag_key }}</td>
-                    <td class="mono">{{ row.tag_value or "<empty>" }}</td>
-                    <td>{{ row.service }}</td>
-                    <td>{{ row.region }}</td>
-                    <td>{{ row.resource_count }}</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="5" class="text-muted">No currently tagged resources found in configured regions.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <section class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header"><h3 class="card-title">Tagged Resource Inventory</h3></div>
+        <div class="table-container" data-usage-resource-table>Loading resource rows...</div>
+    </section>
 </section>
-{% endif %}
 
 <section class="card">
-    <div class="card-header">
-        <h3 class="card-title">Recent Workload</h3>
-    </div>
-    <div class="table-container">
-        <table>
-            <thead><tr><th>Kind</th><th>Name</th><th>State</th><th>Link</th></tr></thead>
-            <tbody>
-                {% for workset in worksets %}
-                <tr><td>Workset</td><td>{{ workset.name }}</td><td>{{ workset.state }}</td><td><a href="/worksets/{{ workset.workset_euid }}">Open</a></td></tr>
-                {% endfor %}
-                {% for manifest in manifests[:10] %}
-                <tr><td>Manifest</td><td>{{ manifest.name }}</td><td>{{ manifest.state }}</td><td><a href="/manifests/{{ manifest.manifest_euid }}">Open</a></td></tr>
-                {% endfor %}
-                {% for analysis in analyses[:10] %}
-                <tr><td>Analysis</td><td class="mono">{{ analysis.analysis_euid }}</td><td>{{ analysis.state }}</td><td><a href="/analyses/{{ analysis.analysis_euid }}">Open</a></td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <div class="card-header"><h3 class="card-title">Recent Workload</h3></div>
+    <div class="table-container" data-usage-workload>Loading recent workload...</div>
 </section>
 {% endblock %}
 
 {% block extra_js %}
-{% if usage_report %}
 <script>
 (() => {
-    const report = {{ usage_report | tojson }};
-    const costRows = Array.isArray(report.costs_by_tag_service) ? report.costs_by_tag_service : [];
-    const inventoryRows = Array.isArray(report.resource_inventory) ? report.resource_inventory : [];
+    const html = window.escapeHtml || ((value) => String(value ?? ""));
+    const refresh = new URLSearchParams(window.location.search).get('refresh') === 'true';
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    const wholeCurrencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
     const charts = {};
     const colors = ['#0f766e', '#2563eb', '#ca8a04', '#dc2626', '#7c3aed', '#0891b2', '#16a34a', '#be123c', '#4b5563'];
 
-    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-    const wholeCurrencyFormatter = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        maximumFractionDigits: 0,
-    });
-
-    function currency(value) {
-        return currencyFormatter.format(Number(value || 0));
+    function setText(selector, value) {
+        document.querySelectorAll(selector).forEach((node) => { node.textContent = String(value ?? "0"); });
     }
 
-    function wholeCurrency(value) {
-        return wholeCurrencyFormatter.format(Number(value || 0));
+    function money(value) {
+        return currencyFormatter.format(Number(value || 0));
     }
 
     function sumBy(rows, keyFn, valueFn) {
@@ -220,9 +130,18 @@
             const key = keyFn(row);
             totals.set(key, (totals.get(key) || 0) + valueFn(row));
         });
-        return Array.from(totals.entries())
-            .map(([key, amount]) => ({ key, amount }))
-            .sort((a, b) => b.amount - a.amount || String(a.key).localeCompare(String(b.key)));
+        return Array.from(totals.entries()).map(([key, amount]) => ({ key, amount })).sort((a, b) => b.amount - a.amount || String(a.key).localeCompare(String(b.key)));
+    }
+
+    function renderTable(selector, columns, rows, emptyText) {
+        const container = document.querySelector(selector);
+        if (!container) return;
+        if (!Array.isArray(rows) || !rows.length) {
+            container.innerHTML = `<p class="text-muted">${html(emptyText)}</p>`;
+            return;
+        }
+        container.innerHTML = `<table><thead><tr>${columns.map((col) => `<th>${html(col.label)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${columns.map((col) => `<td>${col.render(row)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        window.UrsaPortal?.initSortableTables?.(container);
     }
 
     function destroyChart(id) {
@@ -238,107 +157,103 @@
         destroyChart(id);
         charts[id] = new Chart(canvas, {
             type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label,
-                    data: values,
-                    backgroundColor: labels.map((_, index) => colors[index % colors.length]),
-                    borderWidth: 1,
-                }],
-            },
+            data: { labels, datasets: [{ label, data: values, backgroundColor: labels.map((_, index) => colors[index % colors.length]), borderWidth: 1 }] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 indexAxis: options.indexAxis || 'x',
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: (context) => currency(context.raw) } },
-                },
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => money(context.raw) } } },
                 scales: {
-                    x: options.currencyAxis === 'x' ? { beginAtZero: true, ticks: { callback: (value) => wholeCurrency(value) } } : { ticks: { autoSkip: false, maxRotation: 45 } },
-                    y: options.currencyAxis === 'y' ? { beginAtZero: true, ticks: { callback: (value) => wholeCurrency(value) } } : { beginAtZero: true },
+                    x: options.currencyAxis === 'x' ? { beginAtZero: true, ticks: { callback: (value) => wholeCurrencyFormatter.format(Number(value || 0)) } } : { ticks: { autoSkip: false, maxRotation: 45 } },
+                    y: options.currencyAxis === 'y' ? { beginAtZero: true, ticks: { callback: (value) => wholeCurrencyFormatter.format(Number(value || 0)) } } : { beginAtZero: true },
                 },
             },
         });
     }
 
-    function renderStackedTagChart(tagKey) {
-        const canvas = document.getElementById('usage-tag-service-chart');
-        if (!canvas || typeof Chart === 'undefined') return;
-        destroyChart('usage-tag-service-chart');
-        const rows = costRows.filter((row) => row.tag_key === tagKey);
-        const tagValues = sumBy(rows, (row) => row.tag_value || '<untagged>', (row) => Number(row.amount || 0)).slice(0, 12).map((row) => row.key);
-        const services = sumBy(rows, (row) => row.service || 'unknown', (row) => Number(row.amount || 0)).slice(0, 8).map((row) => row.key);
-        const datasets = services.map((service, index) => ({
-            label: service,
-            data: tagValues.map((tagValue) => rows
-                .filter((row) => (row.tag_value || '<untagged>') === tagValue && (row.service || 'unknown') === service)
-                .reduce((sum, row) => sum + Number(row.amount || 0), 0)),
-            backgroundColor: colors[index % colors.length],
-        }));
-        charts['usage-tag-service-chart'] = new Chart(canvas, {
-            type: 'bar',
-            data: { labels: tagValues, datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${currency(context.raw)}` } } },
-                scales: {
-                    x: { stacked: true, ticks: { autoSkip: false, maxRotation: 45 } },
-                    y: { stacked: true, beginAtZero: true, ticks: { callback: (value) => wholeCurrency(value) } },
-                },
-            },
-        });
-    }
-
-    function renderAllCharts() {
+    function renderUsageCharts(report) {
+        const costRows = Array.isArray(report.costs_by_tag_service) ? report.costs_by_tag_service : [];
+        const inventoryRows = Array.isArray(report.resource_inventory) ? report.resource_inventory : [];
         const serviceTotals = Array.isArray(report.cost_totals_by_service) && report.cost_totals_by_service.length
-            ? report.cost_totals_by_service.map((row) => ({ key: row.service, amount: Number(row.amount || 0) }))
+            ? report.cost_totals_by_service.map((row) => ({ key: row.service || 'unknown', amount: Number(row.amount || 0) }))
             : sumBy(costRows, (row) => row.service || 'unknown', (row) => Number(row.amount || 0));
-        renderBar(
-            'usage-service-spend-chart',
-            serviceTotals.slice(0, 12).map((row) => row.key),
-            serviceTotals.slice(0, 12).map((row) => row.amount),
-            'Spend',
-            { indexAxis: 'y', currencyAxis: 'x' },
-        );
-
-        const tagTotals = sumBy(costRows, (row) => row.tag_key || 'unknown', (row) => Number(row.amount || 0));
-        renderBar(
-            'usage-tag-key-chart',
-            tagTotals.map((row) => row.key),
-            tagTotals.map((row) => row.amount),
-            'Spend',
-            { indexAxis: 'y', currencyAxis: 'x' },
-        );
-
+        renderBar('usage-service-spend-chart', serviceTotals.map((row) => row.key), serviceTotals.map((row) => row.amount), 'Spend', { indexAxis: 'y', currencyAxis: 'x' });
+        const selectedTagKey = report.cost_basis_tag_key || (report.tag_keys || [])[0] || '';
+        const selectedRows = selectedTagKey ? costRows.filter((row) => row.tag_key === selectedTagKey) : costRows;
+        const selectedTotals = sumBy(selectedRows, (row) => row.service || 'unknown', (row) => Number(row.amount || 0));
+        renderBar('usage-tag-service-chart', selectedTotals.map((row) => row.key), selectedTotals.map((row) => row.amount), 'Spend', { indexAxis: 'y', currencyAxis: 'x' });
+        const tagTotals = Object.entries(report.cost_totals_by_tag_key || {}).map(([key, amount]) => ({ key, amount: Number(amount || 0) }));
+        renderBar('usage-tag-key-chart', tagTotals.map((row) => row.key), tagTotals.map((row) => row.amount), 'Spend', { indexAxis: 'y', currencyAxis: 'x' });
         const resourceTotals = sumBy(inventoryRows, (row) => row.service || 'unknown', (row) => Number(row.resource_count || 0));
-        renderBar(
-            'usage-resource-chart',
-            resourceTotals.slice(0, 12).map((row) => row.key),
-            resourceTotals.slice(0, 12).map((row) => row.amount),
-            'Resources',
-            { indexAxis: 'y' },
-        );
+        renderBar('usage-resource-chart', resourceTotals.map((row) => row.key), resourceTotals.map((row) => row.amount), 'Resources');
+        const filterBar = document.querySelector('[data-usage-filter-bar]');
+        if (filterBar) {
+            filterBar.innerHTML = `${report.cost_basis_tag_key ? `<span class="badge badge-outline">Spend basis ${html(report.cost_basis_tag_key)}</span>` : ''}<span class="badge badge-outline">Cache TTL ${(report.ttl_seconds || 900)}s</span>`;
+        }
     }
 
-    function applyTagFilter(tagKey) {
-        renderStackedTagChart(tagKey);
-        document.querySelectorAll('[data-cost-row]').forEach((row) => {
-            row.hidden = tagKey && row.dataset.tagKey !== tagKey;
-        });
+    async function loadUsage() {
+        const loading = document.querySelector('[data-usage-loading]');
+        const error = document.querySelector('[data-usage-error]');
+        try {
+            const payload = await window.UrsaPortal.apiRequest(`/api/v1/gui/usage?refresh=${refresh ? 'true' : 'false'}`);
+            const usage = payload.usage || {};
+            Object.entries(usage).forEach(([key, value]) => setText(`[data-usage-stat="${key}"]`, value));
+            const costSource = document.querySelector('[data-usage-cost-source]');
+            const report = payload.usage_report;
+            const reportError = payload.usage_report_error || '';
+            if (report) {
+                if (costSource) {
+                    costSource.innerHTML = `<p class="small">Profile: <strong>${html(report.aws_profile)}</strong></p><p class="small">Window: <strong>${html(report.start_date)}</strong> through <strong>${html(report.end_date)}</strong></p><p class="small">Cached: <strong>${html(String(report.fetched_at || '').slice(0, 19))}</strong></p>`;
+                }
+                document.querySelector('[data-usage-report-content]')?.classList.remove('d-none');
+                setText('[data-usage-report-stat="total_cost_amount"]', money(report.total_cost_amount || 0));
+                setText('[data-usage-report-stat="costs_by_tag_service"]', (report.costs_by_tag_service || []).length);
+                setText('[data-usage-report-stat="cost_totals_by_service"]', (report.cost_totals_by_service || []).length);
+                setText('[data-usage-report-stat="resource_inventory"]', (report.resource_inventory || []).length);
+                renderUsageCharts(report);
+                renderTable('[data-usage-cost-table]', [
+                    { label: 'Tag Key', render: (row) => `<span class="mono">${html(row.tag_key)}</span>` },
+                    { label: 'Tag Value', render: (row) => `<span class="mono">${html(row.tag_value || '<untagged>')}</span>` },
+                    { label: 'Service', render: (row) => html(row.service) },
+                    { label: 'Amount', render: (row) => money(row.amount) },
+                ], report.costs_by_tag_service || [], 'No Cost Explorer rows returned for the configured tags.');
+                renderTable('[data-usage-resource-table]', [
+                    { label: 'Tag Key', render: (row) => `<span class="mono">${html(row.tag_key)}</span>` },
+                    { label: 'Tag Value', render: (row) => `<span class="mono">${html(row.tag_value || '<empty>')}</span>` },
+                    { label: 'Service', render: (row) => html(row.service) },
+                    { label: 'Region', render: (row) => html(row.region) },
+                    { label: 'Resources', render: (row) => html(row.resource_count) },
+                ], report.resource_inventory || [], 'No currently tagged resources found in configured regions.');
+            } else if (reportError) {
+                if (costSource) costSource.innerHTML = `<p class="small text-danger">${html(reportError)}</p>`;
+                const node = document.querySelector('[data-usage-report-error]');
+                if (node) {
+                    node.textContent = `AWS usage report failed: ${reportError}`;
+                    node.classList.remove('d-none');
+                }
+            }
+            const workloadRows = []
+                .concat((payload.worksets || []).map((row) => ({ kind: 'Workset', name: row.name, state: row.state, url: `/worksets/${encodeURIComponent(row.workset_euid)}` })))
+                .concat((payload.manifests || []).slice(0, 10).map((row) => ({ kind: 'Manifest', name: row.name, state: row.state, url: `/manifests/${encodeURIComponent(row.manifest_euid)}` })))
+                .concat((payload.analyses || []).slice(0, 10).map((row) => ({ kind: 'Analysis', name: row.analysis_euid, state: row.state, url: `/analyses/${encodeURIComponent(row.analysis_euid)}` })));
+            renderTable('[data-usage-workload]', [
+                { label: 'Kind', render: (row) => html(row.kind) },
+                { label: 'Name', render: (row) => html(row.name) },
+                { label: 'State', render: (row) => html(row.state) },
+                { label: 'Link', render: (row) => `<a href="${html(row.url)}">Open</a>` },
+            ], workloadRows, 'No recent workload found.');
+            loading?.remove();
+        } catch (err) {
+            if (loading) loading.classList.add('d-none');
+            if (error) {
+                error.textContent = `Usage load failed: ${err.message || err}`;
+                error.classList.remove('d-none');
+            }
+        }
     }
 
-    const tagSelect = document.getElementById('usage-tag-key-filter');
-    renderAllCharts();
-    if (tagSelect) {
-        const firstActive = report.cost_basis_tag_key || costRows.find((row) => row.tag_key)?.tag_key || tagSelect.value;
-        if (firstActive) tagSelect.value = firstActive;
-        applyTagFilter(tagSelect.value);
-        tagSelect.addEventListener('change', () => applyTagFilter(tagSelect.value));
-    }
+    document.addEventListener('DOMContentLoaded', loadUsage);
 })();
 </script>
-{% endif %}
 {% endblock %}

@@ -15,52 +15,39 @@
     </div>
 </div>
 
-<section class="grid grid-4" style="margin-bottom: 1rem;">
+<section class="alert alert-info" data-dashboard-loading>
+    Loading dashboard data...
+</section>
+<section class="alert alert-danger d-none" data-dashboard-error></section>
+
+<section class="grid grid-4" style="margin-bottom: 1rem;" data-dashboard-primary-stats>
+    {% for label in ["Worksets", "Manifests", "Analyses", "Tokens"] %}
     <article class="stat-card">
-        <div class="card-icon"><i class="fa-solid fa-layer-group"></i></div>
-        <div><div class="stat-value">{{ stats.worksets }}</div><div class="stat-label">Worksets</div></div>
+        <div><div class="stat-value" data-stat-value="{{ label|lower }}">...</div><div class="stat-label">{{ label }}</div></div>
     </article>
-    <article class="stat-card">
-        <div class="card-icon success"><i class="fa-solid fa-list-check"></i></div>
-        <div><div class="stat-value">{{ stats.manifests }}</div><div class="stat-label">Manifests</div></div>
-    </article>
-    <article class="stat-card">
-        <div class="card-icon info"><i class="fa-solid fa-flask"></i></div>
-        <div><div class="stat-value">{{ stats.analyses }}</div><div class="stat-label">Analyses</div></div>
-    </article>
-    <article class="stat-card">
-        <div class="card-icon highlight"><i class="fa-solid fa-key"></i></div>
-        <div><div class="stat-value">{{ stats.tokens }}</div><div class="stat-label">Tokens</div></div>
-    </article>
+    {% endfor %}
 </section>
 
-<section class="grid grid-4" style="margin-bottom: 1.5rem;">
+<section class="grid grid-4" style="margin-bottom: 1.5rem;" data-dashboard-secondary-stats>
+    {% for label in ["Active", "Completed", "Errors", "Linked Buckets"] %}
     <article class="stat-card">
-        <div><div class="stat-value">{{ stats.active_worksets }}</div><div class="stat-label">Active</div></div>
+        <div><div class="stat-value" data-stat-secondary="{{ label|lower|replace(' ', '_') }}">...</div><div class="stat-label">{{ label }}</div></div>
     </article>
-    <article class="stat-card">
-        <div><div class="stat-value">{{ stats.completed_worksets }}</div><div class="stat-label">Completed</div></div>
-    </article>
-    <article class="stat-card">
-        <div><div class="stat-value">{{ stats.errored_worksets }}</div><div class="stat-label">Errors</div></div>
-    </article>
-    <article class="stat-card">
-        <div><div class="stat-value">{{ stats.buckets }}</div><div class="stat-label">Linked Buckets</div></div>
-    </article>
+    {% endfor %}
 </section>
 
 <section class="grid grid-2" style="margin-bottom: 1.5rem;">
     <article class="card">
         <h3 class="card-title">Cluster Summary</h3>
         <div class="grid grid-3">
-            <div><div class="stat-value">{{ stats.clusters }}</div><div class="stat-label">Clusters</div></div>
-            <div><div class="stat-value">{{ stats.running_clusters }}</div><div class="stat-label">Running Clusters</div></div>
-            <div><div class="stat-value">{{ stats.slurm_active_jobs }}</div><div class="stat-label">Active Slurm Jobs</div></div>
+            <div><div class="stat-value" data-cluster-stat="clusters">...</div><div class="stat-label">Clusters</div></div>
+            <div><div class="stat-value" data-cluster-stat="running_clusters">...</div><div class="stat-label">Running Clusters</div></div>
+            <div><div class="stat-value" data-cluster-stat="slurm_active_jobs">...</div><div class="stat-label">Active Slurm Jobs</div></div>
         </div>
         <div class="grid grid-3" style="margin-top: 1rem;">
-            <div><div class="stat-value">{{ stats.slurm_configuring_jobs }}</div><div class="stat-label">Configuring</div></div>
-            <div><div class="stat-value">{{ stats.slurm_running_jobs }}</div><div class="stat-label">Running</div></div>
-            <div><div class="stat-value">{{ stats.slurm_pending_jobs }}</div><div class="stat-label">Pending</div></div>
+            <div><div class="stat-value" data-cluster-stat="slurm_configuring_jobs">...</div><div class="stat-label">Configuring</div></div>
+            <div><div class="stat-value" data-cluster-stat="slurm_running_jobs">...</div><div class="stat-label">Running</div></div>
+            <div><div class="stat-value" data-cluster-stat="slurm_pending_jobs">...</div><div class="stat-label">Pending</div></div>
         </div>
     </article>
     <article class="card">
@@ -74,31 +61,15 @@
 <section class="card" style="margin-bottom: 1.5rem;">
     <div class="card-header">
         <h3 class="card-title">Month-To-Date Spend By Service</h3>
-        {% if dashboard_spend.window %}
-        <span class="badge badge-outline">{{ dashboard_spend.window }}</span>
-        {% endif %}
+        <span class="badge badge-outline" data-dashboard-spend-window>Loading</span>
     </div>
-    {% if dashboard_spend.error %}
-    <div class="alert alert-warning">{{ dashboard_spend.error }}</div>
-    {% elif dashboard_spend.by_service %}
-    <div class="grid grid-4" style="margin-bottom: 1rem;">
-        <article>
-            <div class="stat-value">{{ dashboard_spend.total | usd }}</div>
-            <div class="stat-label">Tagged Spend</div>
-        </article>
-        {% for row in dashboard_spend.by_service[:3] %}
-        <article>
-            <div class="stat-value">{{ row.amount | usd }}</div>
-            <div class="stat-label">{{ row.service }}</div>
-        </article>
-        {% endfor %}
+    <div class="alert alert-warning d-none" data-dashboard-spend-error></div>
+    <div class="grid grid-4" style="margin-bottom: 1rem;" data-dashboard-spend-summary>
+        <article><div class="stat-value" data-dashboard-spend-total>...</div><div class="stat-label">Tagged Spend</div></article>
     </div>
     <div style="height: 260px;">
         <canvas id="dashboard-spend-service-chart" aria-label="Month-to-date spend by service"></canvas>
     </div>
-    {% else %}
-    <p class="text-muted">No tagged spend returned for the current month.</p>
-    {% endif %}
 </section>
 
 <section class="grid grid-2">
@@ -107,45 +78,14 @@
             <h3 class="card-title">Recent Worksets</h3>
             <a href="/worksets" class="btn btn-outline btn-sm">View All</a>
         </div>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>Name</th><th>EUID</th><th>State</th><th>Artifacts</th></tr></thead>
-                <tbody>
-                    {% for workset in worksets %}
-                    <tr>
-                        <td><a href="/worksets/{{ workset.workset_euid }}">{{ workset.name }}</a></td>
-                        <td class="mono">{{ workset.workset_euid }}</td>
-                        <td><span class="badge badge-info">{{ workset.state }}</span></td>
-                        <td>{{ workset.artifact_set_euids | length }}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="4" class="text-muted">No worksets yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        <div class="table-container" data-dashboard-worksets>Loading recent worksets...</div>
     </article>
     <article class="card">
         <div class="card-header">
             <h3 class="card-title">Recent Manifests</h3>
             <a href="/manifests" class="btn btn-outline btn-sm">Open Generator</a>
         </div>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>Name</th><th>Workset</th><th>Inputs</th></tr></thead>
-                <tbody>
-                    {% for manifest in recent_manifests %}
-                    <tr>
-                        <td><a href="/manifests/{{ manifest.manifest_euid }}">{{ manifest.name }}</a></td>
-                        <td class="mono">{{ manifest.workset_euid }}</td>
-                        <td>{{ manifest.artifact_euids | length }}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="3" class="text-muted">No manifests yet.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        <div class="table-container" data-dashboard-manifests>Loading recent manifests...</div>
     </article>
 </section>
 {% endblock %}
@@ -153,47 +93,97 @@
 {% block extra_js %}
 <script>
 (() => {
-    const rows = {{ dashboard_spend.by_service | tojson }};
-    const canvas = document.getElementById('dashboard-spend-service-chart');
-    if (!canvas || !rows.length || typeof Chart === 'undefined') return;
+    const html = window.escapeHtml || ((value) => String(value ?? ""));
     const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-    const wholeCurrencyFormatter = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        maximumFractionDigits: 0,
-    });
-    new Chart(canvas, {
-        type: 'bar',
-        data: {
-            labels: rows.map((row) => row.service),
-            datasets: [{
-                label: 'Spend',
-                data: rows.map((row) => Number(row.amount || 0)),
-                backgroundColor: '#0f766e',
-                borderColor: '#0b4f4a',
-                borderWidth: 1,
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            indexAxis: 'y',
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: (context) => currencyFormatter.format(Number(context.raw || 0)),
-                    },
-                },
+    const wholeCurrencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+    let spendChart = null;
+
+    function setText(selector, value) {
+        const node = document.querySelector(selector);
+        if (node) node.textContent = String(value ?? "0");
+    }
+
+    function money(value) {
+        return currencyFormatter.format(Number(value || 0));
+    }
+
+    function renderRows(containerSelector, columns, rows, emptyText) {
+        const container = document.querySelector(containerSelector);
+        if (!container) return;
+        if (!Array.isArray(rows) || !rows.length) {
+            container.innerHTML = `<p class="text-muted">${html(emptyText)}</p>`;
+            return;
+        }
+        container.innerHTML = `<table><thead><tr>${columns.map((col) => `<th>${html(col.label)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${columns.map((col) => `<td>${col.render(row)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        window.UrsaPortal?.initSortableTables?.(container);
+    }
+
+    function renderSpend(rows) {
+        const canvas = document.getElementById('dashboard-spend-service-chart');
+        if (!canvas || typeof Chart === 'undefined' || !Array.isArray(rows) || !rows.length) return;
+        if (spendChart) spendChart.destroy();
+        spendChart = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: rows.map((row) => row.service),
+                datasets: [{ label: 'Spend', data: rows.map((row) => Number(row.amount || 0)), backgroundColor: '#0f766e', borderColor: '#0b4f4a', borderWidth: 1 }],
             },
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    ticks: { callback: (value) => wholeCurrencyFormatter.format(Number(value || 0)) },
-                },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => money(context.raw) } } },
+                scales: { x: { beginAtZero: true, ticks: { callback: (value) => wholeCurrencyFormatter.format(Number(value || 0)) } } },
             },
-        },
-    });
+        });
+    }
+
+    async function loadDashboard() {
+        const loading = document.querySelector('[data-dashboard-loading]');
+        const error = document.querySelector('[data-dashboard-error]');
+        try {
+            const payload = await window.UrsaPortal.apiRequest('/api/v1/gui/dashboard');
+            const stats = payload.stats || {};
+            setText('[data-stat-value="worksets"]', stats.worksets);
+            setText('[data-stat-value="manifests"]', stats.manifests);
+            setText('[data-stat-value="analyses"]', stats.analyses);
+            setText('[data-stat-value="tokens"]', stats.tokens);
+            setText('[data-stat-secondary="active"]', stats.active_worksets);
+            setText('[data-stat-secondary="completed"]', stats.completed_worksets);
+            setText('[data-stat-secondary="errors"]', stats.errored_worksets);
+            setText('[data-stat-secondary="linked_buckets"]', stats.buckets);
+            ['clusters', 'running_clusters', 'slurm_active_jobs', 'slurm_configuring_jobs', 'slurm_running_jobs', 'slurm_pending_jobs'].forEach((key) => setText(`[data-cluster-stat="${key}"]`, stats[key]));
+            const spend = payload.dashboard_spend || {};
+            setText('[data-dashboard-spend-window]', spend.window || (payload.cache?.cached ? 'Cached' : 'Loaded'));
+            setText('[data-dashboard-spend-total]', money(spend.total || 0));
+            const spendError = document.querySelector('[data-dashboard-spend-error]');
+            if (spend.error && spendError) {
+                spendError.textContent = spend.error;
+                spendError.classList.remove('d-none');
+            }
+            renderSpend(spend.by_service || []);
+            renderRows('[data-dashboard-worksets]', [
+                { label: 'Name', render: (row) => `<a href="/worksets/${encodeURIComponent(row.workset_euid)}">${html(row.name)}</a>` },
+                { label: 'EUID', render: (row) => `<span class="mono">${html(row.workset_euid)}</span>` },
+                { label: 'State', render: (row) => `<span class="badge badge-info">${html(row.state)}</span>` },
+                { label: 'Artifacts', render: (row) => String((row.artifact_set_euids || []).length) },
+            ], payload.worksets || [], 'No worksets yet.');
+            renderRows('[data-dashboard-manifests]', [
+                { label: 'Name', render: (row) => `<a href="/manifests/${encodeURIComponent(row.manifest_euid)}">${html(row.name)}</a>` },
+                { label: 'Workset', render: (row) => `<span class="mono">${html(row.workset_euid)}</span>` },
+                { label: 'Inputs', render: (row) => String((row.artifact_euids || []).length) },
+            ], payload.recent_manifests || [], 'No manifests yet.');
+            loading?.remove();
+        } catch (err) {
+            if (loading) loading.classList.add('d-none');
+            if (error) {
+                error.textContent = `Dashboard load failed: ${err.message || err}`;
+                error.classList.remove('d-none');
+            }
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadDashboard);
 })();
 </script>
 {% endblock %}
