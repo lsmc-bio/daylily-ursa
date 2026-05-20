@@ -4,7 +4,10 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Usage Summary</h1>
-        <p class="page-subtitle">Current Ursa-owned workload and reference volume. Billing-specific customer constructs stay retired.</p>
+        <p class="page-subtitle">Current Ursa workload, DayEC budgets, and ParallelCluster tag spend.</p>
+    </div>
+    <div class="toolbar">
+        <a href="/usage?refresh=true" class="btn btn-outline"><i class="fa-solid fa-rotate"></i> Force Refresh</a>
     </div>
 </div>
 
@@ -24,15 +27,101 @@
     <article class="card">
         <h3 class="card-title">Linked Storage</h3>
         <p class="small">Linked buckets: <strong>{{ usage.linked_buckets }}</strong></p>
-        <p class="small">Storage cost model: <strong>$0.00</strong> placeholder, retired customer billing logic not restored.</p>
     </article>
     <article class="card">
-        <h3 class="card-title">Cost-Style Summary</h3>
-        <p class="small">Compute: <strong>${{ "%.2f"|format(usage.estimated_compute_cost_usd) }}</strong></p>
-        <p class="small">Storage: <strong>${{ "%.2f"|format(usage.estimated_storage_cost_usd) }}</strong></p>
-        <p class="small">Transfer: <strong>${{ "%.2f"|format(usage.estimated_transfer_cost_usd) }}</strong></p>
+        <h3 class="card-title">AWS Cost Source</h3>
+        {% if usage_report %}
+        <p class="small">Profile: <strong>{{ usage_report.aws_profile }}</strong></p>
+        <p class="small">Window: <strong>{{ usage_report.start_date }}</strong> through <strong>{{ usage_report.end_date }}</strong></p>
+        <p class="small">Cached: <strong>{{ usage_report.fetched_at[:19] }}</strong></p>
+        {% elif usage_report_error %}
+        <p class="small text-danger">{{ usage_report_error }}</p>
+        {% else %}
+        <p class="small text-muted">AWS usage report unavailable.</p>
+        {% endif %}
     </article>
 </section>
+
+{% if usage_report_error %}
+<section class="alert alert-danger" style="margin-bottom: 1.5rem;">
+    AWS usage report failed: {{ usage_report_error }}
+</section>
+{% endif %}
+
+{% if usage_report %}
+<section class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h3 class="card-title">DayEC Budgets</h3>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Budget</th><th>Project</th><th>Cluster</th><th>Actual</th><th>Forecast</th><th>Limit</th><th>Used</th></tr></thead>
+            <tbody>
+                {% for budget in usage_report.budgets %}
+                <tr>
+                    <td class="mono">{{ budget.budget_name }}</td>
+                    <td>{{ budget.project or "daylily-global" }}</td>
+                    <td>{{ budget.cluster_name or "all" }}</td>
+                    <td>${{ "%.2f"|format(budget.actual_amount) }}</td>
+                    <td>${{ "%.2f"|format(budget.forecast_amount) }}</td>
+                    <td>${{ "%.2f"|format(budget.limit_amount) }}</td>
+                    <td>{{ "%.1f"|format(budget.percent_used) ~ "%" if budget.percent_used is not none else "n/a" }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-muted">No DayEC budget filters found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h3 class="card-title">Tag Spend By Service</h3>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Tag Key</th><th>Tag Value</th><th>Service</th><th>Amount</th></tr></thead>
+            <tbody>
+                {% for row in usage_report.costs_by_tag_service %}
+                <tr>
+                    <td class="mono">{{ row.tag_key }}</td>
+                    <td class="mono">{{ row.tag_value or "<untagged>" }}</td>
+                    <td>{{ row.service }}</td>
+                    <td>${{ "%.2f"|format(row.amount) }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-muted">No Cost Explorer rows returned for the configured tags.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h3 class="card-title">Tagged Resource Inventory</h3>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Tag Key</th><th>Tag Value</th><th>Service</th><th>Region</th><th>Resources</th></tr></thead>
+            <tbody>
+                {% for row in usage_report.resource_inventory %}
+                <tr>
+                    <td class="mono">{{ row.tag_key }}</td>
+                    <td class="mono">{{ row.tag_value or "<empty>" }}</td>
+                    <td>{{ row.service }}</td>
+                    <td>{{ row.region }}</td>
+                    <td>{{ row.resource_count }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-muted">No currently tagged resources found in configured regions.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
 
 <section class="card">
     <div class="card-header">

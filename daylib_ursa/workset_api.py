@@ -4574,9 +4574,12 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail=f"Unsupported cluster region: {resolved_region}"
             )
-        if refresh:
-            service.clear_cache()
-        names = await run_in_threadpool(service.list_clusters_in_region, resolved_region)
+        names = await run_in_threadpool(
+            lambda: service.list_clusters_in_region(
+                resolved_region,
+                force_refresh=refresh,
+            )
+        )
         return {
             "region": resolved_region,
             "items": [
@@ -4695,12 +4698,14 @@ def create_app(
 
         def _load_cluster_payload() -> dict[str, Any]:
             resolved_region = resolve_cluster_region(cluster_name, region=region, service=service)
-            cluster = service.describe_cluster(cluster_name, resolved_region)
+            cluster = service.describe_cluster(
+                cluster_name,
+                resolved_region,
+                force_refresh=refresh,
+            )
             if fetch_ssh_status:
-                cluster = service.fetch_headnode_status(cluster)
+                cluster = service.fetch_headnode_status(cluster, force_refresh=refresh)
             payload = cluster.to_dict(include_sensitive=fetch_ssh_status)
-            if refresh:
-                service.clear_cache()
             return payload
 
         payload = await run_in_threadpool(_load_cluster_payload)

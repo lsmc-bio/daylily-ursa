@@ -30,6 +30,7 @@ from daylib_ursa.auth import (
     persist_session_user,
     session_principal_from_current_user,
 )
+from daylib_ursa.aws_usage import AwsUsageReportService
 from daylib_ursa.cluster_jobs import region_from_region_az
 from daylib_ursa.config import _require_bare_cognito_domain
 from daylib_ursa.analysis_commands import command_catalog_payload
@@ -285,7 +286,9 @@ def mount_gui(app: FastAPI) -> None:
             "handoff_exchange_url": str(
                 getattr(settings, "external_broker_handoff_exchange_url", "") or ""
             ).strip(),
-            "callback_url": str(getattr(settings, "external_broker_callback_url", "") or "").strip(),
+            "callback_url": str(
+                getattr(settings, "external_broker_callback_url", "") or ""
+            ).strip(),
             "logout_url": str(getattr(settings, "external_broker_logout_url", "") or "").strip(),
             "ca_bundle": str(getattr(settings, "external_broker_ca_bundle", "") or "").strip(),
         }
@@ -411,7 +414,10 @@ def mount_gui(app: FastAPI) -> None:
         for entitlement in entitlements:
             if not isinstance(entitlement, dict):
                 continue
-            if str(entitlement.get("service") or broker["service_id"]).strip() != broker["service_id"]:
+            if (
+                str(entitlement.get("service") or broker["service_id"]).strip()
+                != broker["service_id"]
+            ):
                 continue
             for role in entitlement.get("roles") or []:
                 normalized = str(role or "").strip().lower().replace("-", "_")
@@ -803,6 +809,18 @@ def mount_gui(app: FastAPI) -> None:
         value = str(getattr(settings, "aws_profile", "") or "").strip()
         return value or "default"
 
+    def _aws_usage_report_service() -> AwsUsageReportService:
+        service = getattr(app.state, "aws_usage_report_service", None)
+        if service is not None:
+            return service
+        settings = getattr(app.state, "settings", None)
+        service = AwsUsageReportService(
+            aws_profile=str(getattr(settings, "aws_profile", "") or "").strip(),
+            regions=_allowed_regions(),
+        )
+        app.state.aws_usage_report_service = service
+        return service
+
     def _analysis_command_catalog_context() -> dict[str, Any]:
         try:
             return command_catalog_payload()
@@ -1109,11 +1127,16 @@ def mount_gui(app: FastAPI) -> None:
         }
         if actor.is_admin:
             cluster_items = _cluster_service().get_all_clusters_with_status(
-                force_refresh=False, fetch_ssh_status=False
+                force_refresh=False, fetch_ssh_status=True
             )
             cluster_jobs = _resource_store().list_cluster_jobs(tenant_id=None)
             stats["clusters"] = len(cluster_items)
             stats["cluster_jobs"] = len(cluster_jobs)
+            stats["running_jobs"] = sum(
+                int(item.job_queue.running_jobs)
+                for item in cluster_items
+                if item.job_queue is not None
+            )
         return {
             "stats": stats,
             "worksets": worksets[:8],
@@ -1121,12 +1144,27 @@ def mount_gui(app: FastAPI) -> None:
             "recent_analyses": analyses[:5],
         }
 
-    def _usage_context(actor: CurrentUser) -> dict[str, Any]:
+    def _usage_context(actor: CurrentUser, *, refresh: bool = False) -> dict[str, Any]:
         worksets = _list_worksets(actor)
         manifests = _list_manifests(actor)
         analyses = _list_analyses(actor)
         buckets = _list_buckets(actor)
         total_manifest_refs = sum(len(item.artifact_euids) for item in manifests)
+        usage_report: dict[str, Any] | None = None
+        usage_report_error = ""
+        try:
+            usage_report = (
+                _aws_usage_report_service()
+                .get_report(
+                    force_refresh=refresh,
+                )
+                .to_dict()
+            )
+        except ValueError as exc:
+            usage_report_error = str(exc)
+        except Exception as exc:
+            LOGGER.exception("Failed to build AWS usage report")
+            usage_report_error = str(exc)
         return {
             "usage": {
                 "worksets_total": len(worksets),
@@ -1148,10 +1186,9 @@ def mount_gui(app: FastAPI) -> None:
                 "analysis_total": len(analyses),
                 "linked_buckets": len(buckets),
                 "artifact_references": total_manifest_refs,
-                "estimated_compute_cost_usd": 0.0,
-                "estimated_storage_cost_usd": 0.0,
-                "estimated_transfer_cost_usd": 0.0,
             },
+            "usage_report": usage_report,
+            "usage_report_error": usage_report_error,
             "worksets": worksets[:20],
             "manifests": manifests[:20],
             "analyses": analyses[:20],
@@ -1369,7 +1406,7 @@ def mount_gui(app: FastAPI) -> None:
         )
 
     @app.get("/usage", response_class=HTMLResponse)
-    async def usage_page(request: Request):
+    async def usage_page(request: Request, refresh: bool = False):
         actor = _session_actor(request)
         if actor is None:
             return _login_redirect_response(request)
@@ -1378,7 +1415,7 @@ def mount_gui(app: FastAPI) -> None:
             template_name="usage.html",
             page_title="Usage Summary",
             active_page="usage",
-            context=_usage_context(actor),
+            context=_usage_context(actor, refresh=refresh),
         )
 
     @app.get("/worksets", response_class=HTMLResponse)
@@ -1718,6 +1755,7 @@ def mount_gui(app: FastAPI) -> None:
                 raise HTTPException(status_code=404, detail="Cluster not found")
             resolved_region = cluster.region
         cluster = service.describe_cluster(cluster_name, resolved_region)
+        cluster = service.fetch_headnode_status(cluster)
         jobs = [
             item
             for item in _resource_store().list_cluster_jobs(tenant_id=None)

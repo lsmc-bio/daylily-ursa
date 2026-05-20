@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from daylily_tapdb import InstanceFactory, TAPDBConnection, TemplateManager
 
@@ -98,9 +98,22 @@ def _build_sqlalchemy_url(cfg: Mapping[str, str], *, schema_name: str = "") -> s
     if not database:
         raise TapDBRuntimeError("TapDB DB config is missing database name.")
     auth = f"{user}:{password}@" if password else f"{user}@"
+    query: dict[str, str] = {}
     if schema_name:
-        return f"postgresql+psycopg2://{auth}{host}:{port}/{database}?options={quote(f'-csearch_path={schema_name}', safe='')}"
-    return f"postgresql+psycopg2://{auth}{host}:{port}/{database}"
+        query["options"] = f"-csearch_path={schema_name}"
+    if str(cfg.get("engine_type") or "").strip().lower() == "aurora":
+        sslrootcert = str(cfg.get("sslrootcert") or "").strip()
+        if not sslrootcert:
+            raise TapDBRuntimeError("TapDB Aurora config is missing sslrootcert")
+        query["sslmode"] = "verify-full"
+        query["sslrootcert"] = sslrootcert
+        hostaddr = str(cfg.get("hostaddr") or "").strip()
+        if hostaddr:
+            query["hostaddr"] = hostaddr
+    url = f"postgresql+psycopg2://{auth}{host}:{port}/{database}"
+    if query:
+        url += f"?{urlencode(query)}"
+    return url
 
 
 def _resolved_default_identity() -> tuple[str, str, str, str, str, str, str, str, str, str, str]:
@@ -477,6 +490,7 @@ def get_tapdb_bundle(
         domain_code=runtime_env["domain_code"],
         owner_repo_name=runtime_env["owner_repo_name"],
         schema_name=_require_schema_name(runtime_env),
+        db_hostaddr=str(cfg.get("hostaddr") or "").strip() or None,
     )
     template_manager = TemplateManager(Path(resolved_config_path) if resolved_config_path else None)
     instance_factory = InstanceFactory(

@@ -212,6 +212,7 @@ def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) ->
             "client_id": "local",
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
             "physical_database": "daylily_ursa",
             "config_path": "/tmp/ursa-tapdb.yaml",
             "local_db_port": "5588",
@@ -238,6 +239,98 @@ def test_export_database_url_for_target_sets_runtime_environment(monkeypatch) ->
     assert "DATABASE_URL" not in tapdb_runtime.os.environ
 
 
+def test_export_database_url_supports_explicit_aurora_hostaddr(monkeypatch) -> None:
+    monkeypatch.setattr(tapdb_runtime, "ensure_tapdb_version", lambda: _tapdb_dependency_spec())
+    monkeypatch.setattr(
+        tapdb_runtime,
+        "_resolve_runtime_env",
+        lambda **_kwargs: {
+            "aws_profile": "test-profile",
+            "aws_region": "us-west-2",
+            "client_id": "ursa",
+            "database_name": "ursa",
+            "schema_name": "tapdb_ursa_unidbtst_local",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
+            "physical_database": "tapdb_unidbtst_local",
+            "config_path": "/tmp/ursa-tapdb.yaml",
+        },
+    )
+    monkeypatch.setattr(
+        tapdb_runtime,
+        "_get_tapdb_db_config",
+        lambda **_kwargs: {
+            "engine_type": "aurora",
+            "host": "dayhoff-test.cluster-example.us-west-2.rds.amazonaws.com",
+            "hostaddr": "127.0.0.1",
+            "port": "15432",
+            "user": "ursa_user",
+            "password": "secret",
+            "database": "tapdb_unidbtst_local",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
+        },
+    )
+
+    db_url = tapdb_runtime.export_database_url_for_target(
+        target="aurora",
+        client_id="ursa",
+        profile="test-profile",
+        region="us-west-2",
+        namespace="ursa",
+    )
+
+    assert db_url == (
+        "postgresql+psycopg2://ursa_user:secret@"
+        "dayhoff-test.cluster-example.us-west-2.rds.amazonaws.com:15432/tapdb_unidbtst_local"
+        "?options=-csearch_path%3Dtapdb_ursa_unidbtst_local"
+        "&sslmode=verify-full&sslrootcert=%2Ftmp%2Frds-ca-bundle.pem&hostaddr=127.0.0.1"
+    )
+
+
+def test_export_database_url_supports_direct_aurora_without_hostaddr(monkeypatch) -> None:
+    monkeypatch.setattr(tapdb_runtime, "ensure_tapdb_version", lambda: _tapdb_dependency_spec())
+    monkeypatch.setattr(
+        tapdb_runtime,
+        "_resolve_runtime_env",
+        lambda **_kwargs: {
+            "aws_profile": "test-profile",
+            "aws_region": "us-west-2",
+            "client_id": "ursa",
+            "database_name": "ursa",
+            "schema_name": "tapdb_ursa_unidbtst_local",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
+            "physical_database": "tapdb_unidbtst_local",
+            "config_path": "/tmp/ursa-tapdb.yaml",
+        },
+    )
+    monkeypatch.setattr(
+        tapdb_runtime,
+        "_get_tapdb_db_config",
+        lambda **_kwargs: {
+            "engine_type": "aurora",
+            "host": "dayhoff-test.cluster-example.us-west-2.rds.amazonaws.com",
+            "port": "5432",
+            "user": "ursa_user",
+            "password": "secret",
+            "database": "tapdb_unidbtst_local",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
+        },
+    )
+
+    db_url = tapdb_runtime.export_database_url_for_target(
+        target="aurora",
+        client_id="ursa",
+        profile="test-profile",
+        region="us-west-2",
+        namespace="ursa",
+    )
+
+    assert db_url == (
+        "postgresql+psycopg2://ursa_user:secret@"
+        "dayhoff-test.cluster-example.us-west-2.rds.amazonaws.com:5432/tapdb_unidbtst_local"
+        "?options=-csearch_path%3Dtapdb_ursa_unidbtst_local&sslmode=verify-full&sslrootcert=%2Ftmp%2Frds-ca-bundle.pem"
+    )
+
+
 def test_run_tapdb_cli_exports_explicit_identity_env(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -251,6 +344,7 @@ def test_run_tapdb_cli_exports_explicit_identity_env(monkeypatch) -> None:
             "client_id": "local",
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
             "physical_database": "tapdb_shared_dev",
             "config_path": "/tmp/ursa-tapdb.yaml",
             "local_db_port": "5588",
@@ -308,6 +402,7 @@ def test_ensure_local_tapdb_namespace_config_initializes_namespaced_config(
             "client_id": "local",
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
             "physical_database": "tapdb_shared_dev",
             "config_path": str(config_path),
             "local_db_port": "5588",
@@ -414,6 +509,7 @@ def test_ensure_local_tapdb_namespace_config_requires_explicit_config_path(monke
             "client_id": "local",
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
             "physical_database": "",
             "config_path": "",
             "local_db_port": "5588",
@@ -439,6 +535,7 @@ def test_ensure_local_tapdb_namespace_config_requires_explicit_registry_paths(
         "client_id": "local",
         "database_name": "ursa",
         "schema_name": "tapdb_ursa_dev",
+        "sslrootcert": "/tmp/rds-ca-bundle.pem",
         "physical_database": "",
         "config_path": "/tmp/ursa-tapdb.yaml",
         "local_db_port": "5588",
@@ -634,12 +731,8 @@ def test_backend_passes_settings_profile_and_region_to_tapdb_bundle(monkeypatch)
             instance_factory=SimpleNamespace(),
         )
 
-    monkeypatch.setattr(
-        backend_module, "get_tapdb_bundle", fake_get_tapdb_bundle
-    )
-    monkeypatch.setattr(
-        "daylib_ursa.config.get_settings", lambda: _FakeSettings()
-    )
+    monkeypatch.setattr(backend_module, "get_tapdb_bundle", fake_get_tapdb_bundle)
+    monkeypatch.setattr("daylib_ursa.config.get_settings", lambda: _FakeSettings())
 
     backend = TapDBBackend()
 
@@ -674,12 +767,8 @@ def test_backend_reads_runtime_settings_allowed_regions(monkeypatch) -> None:
             instance_factory=SimpleNamespace(),
         )
 
-    monkeypatch.setattr(
-        backend_module, "get_tapdb_bundle", fake_get_tapdb_bundle
-    )
-    monkeypatch.setattr(
-        "daylib_ursa.config.get_settings", lambda: _FakeSettings()
-    )
+    monkeypatch.setattr(backend_module, "get_tapdb_bundle", fake_get_tapdb_bundle)
+    monkeypatch.setattr("daylib_ursa.config.get_settings", lambda: _FakeSettings())
 
     backend = TapDBBackend()
 
@@ -699,6 +788,7 @@ def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch)
             "client_id": "local",
             "database_name": "ursa",
             "schema_name": "tapdb_ursa_dev",
+            "sslrootcert": "/tmp/rds-ca-bundle.pem",
             "physical_database": "tapdb_ursa_dev",
             "config_path": "/tmp/ursa.yaml",
             "aws_region": "us-west-2",
@@ -743,6 +833,70 @@ def test_get_tapdb_bundle_scopes_instance_factory_to_runtime_domain(monkeypatch)
 
     assert captured["connection_kwargs"]["domain_code"] == "Z"
     assert captured["connection_kwargs"]["schema_name"] == "tapdb_ursa_dev"
+    assert captured["connection_kwargs"]["db_hostaddr"] is None
+    assert captured["template_config_path"] == "/tmp/ursa.yaml"
+    assert captured["instance_factory_domain_code"] == "Z"
+    assert bundle.connection is not None
+
+
+def test_get_tapdb_bundle_passes_explicit_hostaddr(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(tapdb_runtime, "ensure_tapdb_version", lambda: "7.0.5")
+    monkeypatch.setattr(
+        tapdb_runtime,
+        "_resolve_runtime_env",
+        lambda **_kwargs: {
+            "client_id": "ursa",
+            "database_name": "ursa-unidbtst",
+            "schema_name": "tapdb_ursa_unidbtst_local",
+            "physical_database": "tapdb_unidbtst_local",
+            "config_path": "/tmp/ursa.yaml",
+            "aws_region": "us-west-2",
+            "domain_code": "Z",
+            "owner_repo_name": "ursa",
+        },
+    )
+    monkeypatch.setattr(
+        tapdb_runtime, "_require_config_path", lambda _runtime_env: "/tmp/ursa.yaml"
+    )
+    monkeypatch.setattr(
+        tapdb_runtime,
+        "_get_tapdb_db_config",
+        lambda *_args, **_kwargs: {
+            "host": "dayhoff-test.cluster-example.us-west-2.rds.amazonaws.com",
+            "hostaddr": "127.0.0.1",
+            "port": "15432",
+            "user": "ursa",
+            "password": "secret",
+            "database": "tapdb_unidbtst_local",
+            "engine_type": "aurora",
+        },
+    )
+
+    class _FakeConnection:
+        def __init__(self, **kwargs):
+            captured["connection_kwargs"] = kwargs
+
+    class _FakeTemplateManager:
+        def __init__(self, config_path):
+            captured["template_config_path"] = str(config_path)
+
+    class _FakeInstanceFactory:
+        def __init__(self, template_manager, *, domain_code=None):
+            captured["instance_factory_domain_code"] = domain_code
+
+    monkeypatch.setattr(tapdb_runtime, "TAPDBConnection", _FakeConnection)
+    monkeypatch.setattr(tapdb_runtime, "TemplateManager", _FakeTemplateManager)
+    monkeypatch.setattr(tapdb_runtime, "InstanceFactory", _FakeInstanceFactory)
+
+    bundle = tapdb_runtime.get_tapdb_bundle(target="aurora")
+
+    assert captured["connection_kwargs"]["db_hostaddr"] == "127.0.0.1"
+    assert captured["connection_kwargs"]["db_hostname"] == (
+        "dayhoff-test.cluster-example.us-west-2.rds.amazonaws.com:15432"
+    )
+    assert captured["connection_kwargs"]["schema_name"] == "tapdb_ursa_unidbtst_local"
     assert captured["template_config_path"] == "/tmp/ursa.yaml"
     assert captured["instance_factory_domain_code"] == "Z"
     assert bundle.connection is not None

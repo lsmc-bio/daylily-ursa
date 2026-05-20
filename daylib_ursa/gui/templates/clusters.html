@@ -592,6 +592,42 @@
                             </div>
                         </div>
 
+                        {% set job_queue = cluster.job_queue %}
+                        <section class="cluster-job-queue mt-md">
+                            <div class="d-flex justify-between align-center flex-wrap gap-sm mb-sm">
+                                <h4 class="text-sm text-muted" style="margin: 0;">Running Jobs</h4>
+                                {% if job_queue and job_queue.fetched_at %}
+                                <span class="badge badge-outline">cached {{ job_queue.fetched_at[:19] }}</span>
+                                {% endif %}
+                            </div>
+                            {% if job_queue and job_queue.error %}
+                            <div class="alert alert-danger">{{ job_queue.error }}</div>
+                            {% elif job_queue %}
+                            <div class="grid grid-4 gap-sm mb-sm">
+                                <div><span class="text-muted text-xs">Total</span><div class="stat-value">{{ job_queue.total_jobs }}</div></div>
+                                <div><span class="text-muted text-xs">Running</span><div class="stat-value">{{ job_queue.running_jobs }}</div></div>
+                                <div><span class="text-muted text-xs">Pending</span><div class="stat-value">{{ job_queue.pending_jobs }}</div></div>
+                                <div><span class="text-muted text-xs">CPUs</span><div class="stat-value">{{ job_queue.total_cpus }}</div></div>
+                            </div>
+                            {% if job_queue.jobs %}
+                            <div class="table-container">
+                                <table>
+                                    <thead><tr><th>Job</th><th>State</th><th>Partition</th><th>CPUs</th><th>Nodes</th><th>Time</th><th>Name</th></tr></thead>
+                                    <tbody>
+                                        {% for job in job_queue.jobs %}
+                                        <tr><td class="mono">{{ job.job_id }}</td><td>{{ job.state }}</td><td>{{ job.partition }}</td><td>{{ job.cpus }}</td><td>{{ job.nodes }}</td><td>{{ job.time_used }}</td><td>{{ job.name }}</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <div class="text-muted text-sm">No scheduler jobs reported.</div>
+                            {% endif %}
+                            {% else %}
+                            <div class="text-muted text-sm">Job queue has not been loaded for this cluster.</div>
+                            {% endif %}
+                        </section>
+
                         <details
                             class="cluster-diagnostics"
                             data-cluster-diagnostics
@@ -1062,6 +1098,72 @@ function headNodeHtml(cluster) {
     `;
 }
 
+function jobQueueHtml(queue) {
+    if (!queue) {
+        return `
+            <section class="cluster-job-queue mt-md">
+                <div class="d-flex justify-between align-center flex-wrap gap-sm mb-sm">
+                    <h4 class="text-sm text-muted" style="margin: 0;">Running Jobs</h4>
+                </div>
+                <div class="text-muted text-sm">Job queue has not been loaded for this cluster.</div>
+            </section>
+        `;
+    }
+    const fetchedAt = String(queue.fetched_at || '').slice(0, 19);
+    const fetchedBadge = fetchedAt
+        ? `<span class="badge badge-outline">cached ${escapeHtml(fetchedAt)}</span>`
+        : '';
+    if (queue.error) {
+        return `
+            <section class="cluster-job-queue mt-md">
+                <div class="d-flex justify-between align-center flex-wrap gap-sm mb-sm">
+                    <h4 class="text-sm text-muted" style="margin: 0;">Running Jobs</h4>
+                    ${fetchedBadge}
+                </div>
+                <div class="alert alert-danger">${escapeHtml(queue.error)}</div>
+            </section>
+        `;
+    }
+    const rows = Array.isArray(queue.jobs) && queue.jobs.length
+        ? queue.jobs.map((job) => `
+            <tr>
+                <td class="mono">${escapeHtml(job.job_id || '')}</td>
+                <td>${escapeHtml(job.state || '')}</td>
+                <td>${escapeHtml(job.partition || '')}</td>
+                <td>${escapeHtml(String(job.cpus ?? 0))}</td>
+                <td>${escapeHtml(String(job.nodes ?? 0))}</td>
+                <td>${escapeHtml(job.time_used || '')}</td>
+                <td>${escapeHtml(job.name || '')}</td>
+            </tr>
+        `).join('')
+        : '';
+    const table = rows
+        ? `
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>Job</th><th>State</th><th>Partition</th><th>CPUs</th><th>Nodes</th><th>Time</th><th>Name</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `
+        : '<div class="text-muted text-sm">No scheduler jobs reported.</div>';
+    return `
+        <section class="cluster-job-queue mt-md">
+            <div class="d-flex justify-between align-center flex-wrap gap-sm mb-sm">
+                <h4 class="text-sm text-muted" style="margin: 0;">Running Jobs</h4>
+                ${fetchedBadge}
+            </div>
+            <div class="grid grid-4 gap-sm mb-sm">
+                <div><span class="text-muted text-xs">Total</span><div class="stat-value">${escapeHtml(String(queue.total_jobs ?? 0))}</div></div>
+                <div><span class="text-muted text-xs">Running</span><div class="stat-value">${escapeHtml(String(queue.running_jobs ?? 0))}</div></div>
+                <div><span class="text-muted text-xs">Pending</span><div class="stat-value">${escapeHtml(String(queue.pending_jobs ?? 0))}</div></div>
+                <div><span class="text-muted text-xs">CPUs</span><div class="stat-value">${escapeHtml(String(queue.total_cpus ?? 0))}</div></div>
+            </div>
+            ${table}
+        </section>
+    `;
+}
+
 function renderClusterCard(cluster) {
     const clusterName = String(cluster?.cluster_name || '').trim();
     const region = String(cluster?.region || '').trim();
@@ -1118,6 +1220,7 @@ function renderClusterCard(cluster) {
                         <div>${escapeHtml(String(cluster?.last_updated_time || '—').slice(0, 19) || '—')}</div>
                     </div>
                 </div>
+                ${jobQueueHtml(cluster?.job_queue || null)}
 
                 <details
                     class="cluster-diagnostics"
@@ -1235,7 +1338,7 @@ async function loadClusterRegion(region, refresh = false) {
             const card = placeholder.firstElementChild;
             grid.appendChild(card);
             try {
-                const detail = await UrsaPortal.apiRequest(`/api/v1/clusters/${encodeURIComponent(clusterName)}?region=${encodeURIComponent(clusterRegion)}`);
+                const detail = await UrsaPortal.apiRequest(`/api/v1/clusters/${encodeURIComponent(clusterName)}?region=${encodeURIComponent(clusterRegion)}&fetch_ssh_status=true&refresh=false`);
                 if (String(detail.compute_fleet_status || '').toUpperCase() === 'RUNNING') {
                     clusterInventoryState.running += 1;
                 }
@@ -1258,7 +1361,12 @@ async function loadClusterInventory(refresh = false) {
     const regions = Array.from(document.querySelectorAll('[data-cluster-region-grid]'))
         .map((node) => node.dataset.region || '')
         .filter(Boolean);
-    await Promise.all(regions.map((region) => loadClusterRegion(region, refresh)));
+    if (refresh && regions.length) {
+        await loadClusterRegion(regions[0], true);
+        await Promise.all(regions.slice(1).map((region) => loadClusterRegion(region, false)));
+        return;
+    }
+    await Promise.all(regions.map((region) => loadClusterRegion(region, false)));
 }
 
 async function runHeadnodeProbe(button, probeType, refresh = false) {

@@ -579,10 +579,69 @@ class DummyClusterInfo:
         self.region = region
         self.cluster_status = cluster_status
         self.error_message = None
+        self.job_queue = SimpleNamespace(
+            total_jobs=2,
+            running_jobs=1,
+            pending_jobs=1,
+            configuring_jobs=0,
+            other_jobs=0,
+            total_cpus=12,
+            fetched_at="2026-03-25T00:33:00Z",
+            error=None,
+            jobs=[
+                SimpleNamespace(
+                    job_id="42",
+                    partition="compute",
+                    cpus=8,
+                    state="RUNNING",
+                    state_short="R",
+                    nodelist="compute-1",
+                    min_memory="4G",
+                    time_used="0:12",
+                    nodes=1,
+                    name="analysis",
+                    to_dict=lambda: {
+                        "job_id": "42",
+                        "partition": "compute",
+                        "cpus": 8,
+                        "state": "RUNNING",
+                        "state_short": "R",
+                        "nodelist": "compute-1",
+                        "min_memory": "4G",
+                        "time_used": "0:12",
+                        "nodes": 1,
+                        "name": "analysis",
+                    },
+                )
+            ],
+            to_dict=lambda: {
+                "total_jobs": 2,
+                "running_jobs": 1,
+                "pending_jobs": 1,
+                "configuring_jobs": 0,
+                "other_jobs": 0,
+                "total_cpus": 12,
+                "fetched_at": "2026-03-25T00:33:00Z",
+                "error": None,
+                "jobs": [
+                    {
+                        "job_id": "42",
+                        "partition": "compute",
+                        "cpus": 8,
+                        "state": "RUNNING",
+                        "state_short": "R",
+                        "nodelist": "compute-1",
+                        "min_memory": "4G",
+                        "time_used": "0:12",
+                        "nodes": 1,
+                        "name": "analysis",
+                    }
+                ],
+            },
+        )
 
     def to_dict(self, include_sensitive: bool = True):
-        _ = include_sensitive
-        return {
+        payload = {
             "cluster_name": self.cluster_name,
             "region": self.region,
             "cluster_status": self.cluster_status,
@@ -597,7 +656,7 @@ class DummyClusterInfo:
                 "state": "running",
                 "instance_id": "i-0123456789abcdef0",
             },
-            "daylily_ec_pinned_version": "2.3.3",
+            "daylily_ec_pinned_version": "4.0.9",
             "aws_console_url": (
                 f"https://{self.region}.console.aws.amazon.com/ec2/home?region={self.region}"
                 "#InstanceDetails:instanceId=i-0123456789abcdef0"
@@ -613,8 +672,8 @@ class DummyClusterInfo:
                     "ttl_seconds": 86400,
                     "cached": True,
                     "data": {
-                        "daylily_ec_pinned_version": "2.3.3",
-                        "remote_daylily_ec_version": "2.3.3",
+                        "daylily_ec_pinned_version": "4.0.9",
+                        "remote_daylily_ec_version": "4.0.9",
                         "remote_git_hash": "abc123",
                         "day_clone_available": True,
                         "day_clone_help": "Usage: day-clone [OPTIONS]\n  --help",
@@ -652,6 +711,9 @@ class DummyClusterInfo:
                 },
             },
         }
+        if include_sensitive:
+            payload["job_queue"] = self.job_queue.to_dict()
+        return payload
 
 
 class DummyClusterService:
@@ -671,7 +733,8 @@ class DummyClusterService:
         _ = (force_refresh, fetch_ssh_status)
         return list(self._clusters)
 
-    def list_clusters_in_region(self, region: str):
+    def list_clusters_in_region(self, region: str, force_refresh: bool = False):
+        _ = force_refresh
         return [cluster.cluster_name for cluster in self._clusters if cluster.region == region]
 
     def get_region_for_cluster(self, cluster_name: str):
@@ -687,13 +750,21 @@ class DummyClusterService:
                 return cluster
         return DummyClusterInfo(cluster_name, self.get_region_for_cluster(cluster_name))
 
-    def describe_cluster(self, cluster_name: str, region: str):
+    def describe_cluster(
+        self,
+        cluster_name: str,
+        region: str,
+        *,
+        force_refresh: bool = False,
+    ):
+        _ = force_refresh
         for cluster in self._clusters:
             if cluster.cluster_name == cluster_name and cluster.region == region:
                 return cluster
         return DummyClusterInfo(cluster_name, region)
 
-    def fetch_headnode_status(self, cluster):
+    def fetch_headnode_status(self, cluster, *, force_refresh: bool = False):
+        _ = force_refresh
         return cluster
 
     def fetch_headnode_static_probe(self, *, cluster_name: str, region: str, refresh: bool = False):
@@ -707,8 +778,8 @@ class DummyClusterService:
             "ttl_seconds": 86400,
             "cached": not refresh,
             "data": {
-                "daylily_ec_pinned_version": "2.3.3",
-                "remote_daylily_ec_version": "2.3.3",
+                "daylily_ec_pinned_version": "4.0.9",
+                "remote_daylily_ec_version": "4.0.9",
                 "remote_git_hash": "abc123",
                 "day_clone_available": True,
                 "day_clone_help": "Usage: day-clone [OPTIONS]",
@@ -1169,7 +1240,7 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_aws_check.json()["return_code"] == 0
     assert "PASS iam.policy" in cluster_aws_check.json()["gap_analysis"]
     assert cluster_aws_check.json()["report"]["summary"] == {"PASS": 1, "WARN": 0, "FAIL": 0}
-    assert cluster_detail.json()["daylily_ec_pinned_version"] == "2.3.3"
+    assert cluster_detail.json()["daylily_ec_pinned_version"] == "4.0.9"
     assert cluster_static_probe.status_code == 200
     assert cluster_static_probe.json()["data"]["day_clone_available"] is True
     assert cluster_scheduler_probe.status_code == 200
@@ -1517,8 +1588,10 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert login.status_code == 303
     assert dashboard.status_code == 200
     assert "Welcome back" in dashboard.text
+    assert "Running Jobs" in dashboard.text
     assert usage_page.status_code == 200
     assert "Usage Summary" in usage_page.text
+    assert "AWS usage report failed" in usage_page.text
     assert staging_page.status_code == 200
     assert "Staging" in staging_page.text
     assert buckets_page.status_code == 200
@@ -1540,6 +1613,84 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert admin_page.status_code == 200
     assert admin_config_page.status_code == 200
     assert "Configuration" in admin_config_page.text
+
+
+def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
+    app, _resources = _create_test_app(admin=True)
+    app.state.settings.aws_profile = "lsmc"
+    service_calls: list[bool] = []
+
+    class DummyUsageReport:
+        def to_dict(self):
+            return {
+                "aws_profile": "lsmc",
+                "account_id": "123456789012",
+                "regions": ["us-west-2"],
+                "start_date": "2026-05-01",
+                "end_date": "2026-05-21",
+                "fetched_at": "2026-05-20T04:30:00Z",
+                "cache_expires_at": "2026-05-20T04:45:00Z",
+                "ttl_seconds": 900,
+                "tag_keys": ["aws-parallelcluster-project"],
+                "budgets": [
+                    {
+                        "budget_name": "da-us-west-2d-cluster-a",
+                        "project": "project-a",
+                        "cluster_name": "cluster-a",
+                        "limit_amount": 200.0,
+                        "actual_amount": 125.25,
+                        "forecast_amount": 150.0,
+                        "unit": "USD",
+                        "percent_used": 62.62,
+                        "tag_filters": {},
+                    }
+                ],
+                "costs_by_tag_service": [
+                    {
+                        "tag_key": "aws-parallelcluster-project",
+                        "tag_value": "project-a",
+                        "service": "Amazon Elastic Compute Cloud - Compute",
+                        "amount": 42.5,
+                        "unit": "USD",
+                    }
+                ],
+                "cost_totals_by_tag_key": {"aws-parallelcluster-project": 42.5},
+                "resource_inventory": [
+                    {
+                        "tag_key": "aws-parallelcluster-project",
+                        "tag_value": "project-a",
+                        "service": "ec2",
+                        "region": "us-west-2",
+                        "resource_count": 1,
+                    }
+                ],
+            }
+
+    class DummyUsageService:
+        def get_report(self, *, force_refresh: bool = False):
+            service_calls.append(force_refresh)
+            return DummyUsageReport()
+
+    app.state.aws_usage_report_service = DummyUsageService()
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        client.post(
+            "/login",
+            data={"access_token": "atlas-token", "next_path": "/usage"},
+            follow_redirects=False,
+        )
+        response = client.get("/usage?refresh=true")
+
+    assert response.status_code == 200
+    assert service_calls == [True]
+    assert "DayEC Budgets" in response.text
+    assert "Tag Spend By Service" in response.text
+    assert "Tagged Resource Inventory" in response.text
+    assert "da-us-west-2d-cluster-a" in response.text
+    assert "aws-parallelcluster-project" in response.text
+    assert "Amazon Elastic Compute Cloud - Compute" in response.text
+    assert "$42.50" in response.text
+    assert "placeholder" not in response.text
 
 
 def test_cluster_create_blocks_when_partition_verification_fails() -> None:

@@ -84,20 +84,46 @@ def test_build_local_uses_tapdb_bootstrap_then_overlay(monkeypatch):
     ]
 
 
-def test_build_aurora_requires_cluster(monkeypatch):
+def test_build_aurora_uses_existing_explicit_target(monkeypatch):
+    events: list[tuple[str, object]] = []
+
     monkeypatch.setattr(db_cli, "ensure_tapdb_version", lambda: _tapdb_dependency_spec())
     monkeypatch.setattr(db_cli, "get_settings", _settings)
+    monkeypatch.setattr(
+        db_cli,
+        "run_tapdb_cli",
+        lambda **kwargs: (
+            events.append(("tapdb", kwargs["args"]))
+            or SimpleNamespace(stdout="", stderr="", returncode=0)
+        ),
+    )
+    monkeypatch.setattr(
+        db_cli,
+        "export_database_url_for_target",
+        lambda **_kwargs: (
+            events.append(("db_url", "resolved"))
+            or "postgresql+psycopg2://ursa@db.example.test:5432/ursa_prod"
+        ),
+    )
+    monkeypatch.setattr(
+        db_cli,
+        "_apply_ursa_overlay",
+        lambda *, start_step, total_steps: events.append(("overlay", (start_step, total_steps))),
+    )
 
-    with pytest.raises(db_cli.typer.Exit) as exc_info:
-        db_cli.build(
-            target="aurora",
-            cluster="",
-            region="us-west-2",
-            profile="lsmc",
-            namespace="ursa",
-        )
+    db_cli.build(
+        target="aurora",
+        cluster="",
+        region="us-west-2",
+        profile="lsmc",
+        namespace="ursa",
+    )
 
-    assert exc_info.value.exit_code == 1
+    assert events == [
+        ("tapdb", ["db", "setup"]),
+        ("db_url", "resolved"),
+        ("overlay", (3, 3)),
+    ]
 
 
 def test_reset_uses_tapdb_delete_then_bootstrap_then_overlay(monkeypatch):

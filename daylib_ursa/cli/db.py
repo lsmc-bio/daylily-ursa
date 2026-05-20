@@ -135,18 +135,8 @@ def _build_target(
             config_path=config_path,
         )
     else:
-        if not cluster.strip():
-            raise TapDBRuntimeError("--cluster is required for aurora target")
         result = run_tapdb_cli(
-            args=[
-                "bootstrap",
-                "aurora",
-                "--cluster",
-                cluster.strip(),
-                "--region",
-                region,
-                "--no-gui",
-            ],
+            args=["db", "setup"],
             target=target,
             client_id=client_id,
             profile=profile,

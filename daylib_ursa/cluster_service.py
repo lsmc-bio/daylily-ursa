@@ -1,4 +1,4 @@
-"""Cluster service backed by the daylily-ephemeral-cluster 2.3.3 contract."""
+"""Cluster service backed by the daylily-ephemeral-cluster 4.0.9 contract."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ from daylib_ursa.security import sanitize_for_log
 
 
 _CLUSTER_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{0,59}$")
+_CLUSTER_CACHE_TTL_SECONDS = 15 * 60
+_JOB_QUEUE_CACHE_TTL_SECONDS = 15 * 60
 _STATIC_PROBE_TTL_SECONDS = 24 * 60 * 60
 _DYNAMIC_PROBE_TTL_SECONDS = 5 * 60
 _global_service: Optional["ClusterService"] = None
@@ -295,7 +297,8 @@ class ClusterService:
         self,
         regions: List[str],
         aws_profile: Optional[str] = None,
-        cache_ttl_seconds: int = 300,
+        cache_ttl_seconds: int = _CLUSTER_CACHE_TTL_SECONDS,
+        job_queue_cache_ttl_seconds: int = _JOB_QUEUE_CACHE_TTL_SECONDS,
         client: DaylilyEcClient | None = None,
     ) -> None:
         if not regions:
@@ -305,9 +308,12 @@ class ClusterService:
             raise ValueError("At least one AWS region is required for ClusterService")
         self.aws_profile = aws_profile
         self.cache_ttl_seconds = cache_ttl_seconds
+        self.job_queue_cache_ttl_seconds = job_queue_cache_ttl_seconds
         self.client = client or get_daylily_ec_client(aws_profile=aws_profile)
+        self._cache_lock = threading.RLock()
         self._cache: Dict[str, Any] = {}
         self._cache_time: float = 0
+        self._job_queue_cache: Dict[tuple[str, str], tuple[float, JobQueueSummary]] = {}
         self._probe_cache: Dict[tuple[str, str, str], tuple[float, HeadnodeProbeResult]] = {}
         self._cluster_region_map: Dict[str, str] = {}
         self._delete_tokens: Dict[str, tuple[str, str]] = {}
@@ -323,25 +329,36 @@ class ClusterService:
     def get_region_for_cluster(self, cluster_name: str) -> Optional[str]:
         return self._cluster_region_map.get(cluster_name)
 
-    def list_clusters_in_region(self, region: str) -> List[str]:
-        payload = self.client.cluster_list(region=region, details=False)
-        rows = payload.get("clusters")
-        if not isinstance(rows, list):
-            raise RuntimeError("daylily-ec cluster list returned invalid clusters payload")
-        names = [
-            str(row.get("name") or row.get("clusterName") or "")
-            for row in rows
-            if isinstance(row, dict) and (row.get("name") or row.get("clusterName"))
-        ]
-        for name in names:
-            self._cluster_region_map[name] = region
-        return names
+    def list_clusters_in_region(self, region: str, force_refresh: bool = False) -> List[str]:
+        clusters = self.get_clusters_by_region(force_refresh=force_refresh).get(region, [])
+        return [cluster.cluster_name for cluster in clusters if cluster.cluster_name]
 
-    def describe_cluster(self, cluster_name: str, region: str) -> ClusterInfo:
+    def describe_cluster(
+        self,
+        cluster_name: str,
+        region: str,
+        *,
+        force_refresh: bool = False,
+    ) -> ClusterInfo:
         self._validate_cluster_name(cluster_name)
+        if force_refresh:
+            self._job_queue_cache.pop((region, cluster_name), None)
+        if not force_refresh:
+            with self._cache_lock:
+                now = time.time()
+                if self._cache and (now - self._cache_time) < self.cache_ttl_seconds:
+                    for cached_cluster in cast(List[ClusterInfo], self._cache["clusters"]):
+                        if (
+                            cached_cluster.cluster_name == cluster_name
+                            and cached_cluster.region == region
+                        ):
+                            self._attach_cached_probes(cached_cluster)
+                            self._attach_cached_job_queue(cached_cluster)
+                            return cached_cluster
         payload = self.client.cluster_describe(cluster_name=cluster_name, region=region)
         cluster = ClusterInfo.from_dict(payload, region=region)
         self._attach_cached_probes(cluster)
+        self._attach_cached_job_queue(cluster)
         return cluster
 
     def create_delete_plan(self, cluster_name: str, region: str) -> Dict[str, Any]:
@@ -402,22 +419,33 @@ class ClusterService:
         return clusters
 
     def get_all_clusters(self, force_refresh: bool = False) -> List[ClusterInfo]:
-        now = time.time()
-        if not force_refresh and self._cache and (now - self._cache_time) < self.cache_ttl_seconds:
-            clusters = cast(List[ClusterInfo], self._cache["clusters"])
+        with self._cache_lock:
+            now = time.time()
+            if force_refresh:
+                self._job_queue_cache = {}
+            if (
+                not force_refresh
+                and self._cache
+                and (now - self._cache_time) < self.cache_ttl_seconds
+            ):
+                clusters = cast(List[ClusterInfo], self._cache["clusters"])
+                for cluster in clusters:
+                    self._attach_cached_probes(cluster)
+                    self._attach_cached_job_queue(cluster)
+                return clusters
+
+            clusters: List[ClusterInfo] = []
+            for region in self.regions:
+                clusters.extend(self._scan_region(region))
             for cluster in clusters:
                 self._attach_cached_probes(cluster)
+                self._attach_cached_job_queue(cluster)
+            self._cache = {"clusters": clusters}
+            self._cache_time = now
+            self._cluster_region_map = {
+                cluster.cluster_name: cluster.region for cluster in clusters if cluster.cluster_name
+            }
             return clusters
-
-        clusters: List[ClusterInfo] = []
-        for region in self.regions:
-            clusters.extend(self._scan_region(region))
-        self._cache = {"clusters": clusters}
-        self._cache_time = now
-        self._cluster_region_map = {
-            cluster.cluster_name: cluster.region for cluster in clusters if cluster.cluster_name
-        }
-        return clusters
 
     def get_clusters_by_region(self, force_refresh: bool = False) -> Dict[str, List[ClusterInfo]]:
         grouped = {region: [] for region in self.regions}
@@ -478,7 +506,31 @@ class ClusterService:
                 summary.other_jobs += 1
         return summary
 
-    def fetch_headnode_status(self, cluster: ClusterInfo) -> ClusterInfo:
+    def _attach_cached_job_queue(self, cluster: ClusterInfo) -> None:
+        cached = self._job_queue_cache.get((cluster.region, cluster.cluster_name))
+        if not cached:
+            return
+        expires_at, summary = cached
+        if expires_at <= time.time():
+            return
+        cluster.job_queue = summary
+
+    def _store_job_queue(self, cluster: ClusterInfo, summary: JobQueueSummary) -> None:
+        self._job_queue_cache[(cluster.region, cluster.cluster_name)] = (
+            time.time() + self.job_queue_cache_ttl_seconds,
+            summary,
+        )
+
+    def fetch_headnode_status(
+        self,
+        cluster: ClusterInfo,
+        *,
+        force_refresh: bool = False,
+    ) -> ClusterInfo:
+        if not force_refresh:
+            self._attach_cached_job_queue(cluster)
+            if cluster.job_queue is not None:
+                return cluster
         result = self.client.run(
             [
                 "headnode",
@@ -491,12 +543,16 @@ class ClusterService:
             + (["--profile", self.aws_profile] if self.aws_profile else [])
         )
         if result.returncode != 0:
-            cluster.job_queue = JobQueueSummary(
+            summary = JobQueueSummary(
                 fetched_at=datetime.now(timezone.utc).isoformat(),
                 error=result.stderr.strip() or result.stdout.strip() or "headnode jobs failed",
             )
+            cluster.job_queue = summary
+            self._store_job_queue(cluster, summary)
             return cluster
-        cluster.job_queue = self._parse_squeue_output(result.stdout)
+        summary = self._parse_squeue_output(result.stdout)
+        cluster.job_queue = summary
+        self._store_job_queue(cluster, summary)
         return cluster
 
     def get_all_clusters_with_status(
@@ -509,13 +565,15 @@ class ClusterService:
         clusters = self.get_all_clusters(force_refresh=force_refresh)
         for cluster in clusters:
             if fetch_ssh_status:
-                self.fetch_headnode_status(cluster)
+                self.fetch_headnode_status(cluster, force_refresh=force_refresh)
             self._attach_cached_probes(cluster)
         return clusters
 
     def clear_cache(self) -> None:
-        self._cache = {}
-        self._cache_time = 0
+        with self._cache_lock:
+            self._cache = {}
+            self._cache_time = 0
+            self._job_queue_cache = {}
 
     def _attach_cached_probes(self, cluster: ClusterInfo) -> None:
         probes: Dict[str, Dict[str, Any]] = {}

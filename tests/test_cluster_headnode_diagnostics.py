@@ -12,8 +12,12 @@ from daylib_ursa.ephemeral_cluster.runner import REQUIRED_DAYLILY_EC_VERSION
 class FakeDaylilyEcClient:
     def __init__(self, *, instance_id: str | None = "i-0123456789abcdef0") -> None:
         self.instance_id = instance_id
+        self.cluster_list_calls = 0
+        self.cluster_describe_calls = 0
+        self.run_calls = 0
 
     def cluster_describe(self, *, cluster_name: str, region: str):
+        self.cluster_describe_calls += 1
         head_node = {
             "instanceType": "c7i.large",
             "state": "running",
@@ -29,6 +33,7 @@ class FakeDaylilyEcClient:
         }
 
     def cluster_list(self, *, region: str, details: bool = True):
+        self.cluster_list_calls += 1
         return {
             "clusters": [
                 {
@@ -42,6 +47,18 @@ class FakeDaylilyEcClient:
                 }
             ]
         }
+
+    def run(self, _args):
+        self.run_calls += 1
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "JOBID PARTITION CPUS ST NODELIST USER STATE MIN_MEMORY TIME NODES NAME\n"
+                "42 compute 8 R compute-1 ubuntu RUNNING 4G 0:12 1 analysis\n"
+                "43 compute 4 PD pending ubuntu PENDING 4G 0:00 1 waiting\n"
+            ),
+            stderr="",
+        )
 
 
 def _service(*, instance_id: str | None = "i-0123456789abcdef0") -> ClusterService:
@@ -65,6 +82,46 @@ def test_cluster_payload_includes_pinned_version_console_url_and_cached_probe() 
     )
 
 
+def test_cluster_list_and_detail_share_900_second_cache() -> None:
+    fake_client = FakeDaylilyEcClient()
+    service = ClusterService(regions=["us-west-2"], aws_profile="lsmc", client=fake_client)
+
+    names = service.list_clusters_in_region("us-west-2")
+    cluster = service.describe_cluster("cluster-1", "us-west-2")
+    cached_again = service.get_all_clusters()
+
+    assert service.cache_ttl_seconds == 900
+    assert names == ["cluster-1"]
+    assert cluster.cluster_name == "cluster-1"
+    assert cached_again[0].cluster_name == "cluster-1"
+    assert fake_client.cluster_list_calls == 1
+
+    service.describe_cluster("cluster-1", "us-west-2", force_refresh=True)
+
+    assert fake_client.cluster_describe_calls == 2
+
+
+def test_headnode_job_queue_uses_900_second_cache() -> None:
+    fake_client = FakeDaylilyEcClient()
+    service = ClusterService(regions=["us-west-2"], aws_profile="lsmc", client=fake_client)
+    cluster = service.get_all_clusters()[0]
+
+    first = service.fetch_headnode_status(cluster)
+    second = service.fetch_headnode_status(cluster)
+
+    assert service.job_queue_cache_ttl_seconds == 900
+    assert fake_client.run_calls == 1
+    assert first.job_queue is not None
+    assert first.job_queue.running_jobs == 1
+    assert first.job_queue.pending_jobs == 1
+    assert second.job_queue is not None
+    assert second.job_queue.total_cpus == 12
+
+    service.fetch_headnode_status(cluster, force_refresh=True)
+
+    assert fake_client.run_calls == 2
+
+
 def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -76,7 +133,7 @@ def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
         return SimpleNamespace(
             stdout=(
                 "__DAYLILY_EC_VERSION_BEGIN__\n"
-                '{"app": "daylily-ec", "version": "2.3.3", "git_hash": "abc123"}\n'
+                '{"app": "daylily-ec", "version": "4.0.9", "git_hash": "abc123"}\n'
                 "__DAYLILY_EC_VERSION_END__\n"
                 "__DAY_CLONE_HELP_BEGIN__\n"
                 "Usage: day-clone [OPTIONS]\n"
@@ -98,7 +155,7 @@ def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
     assert first["cached"] is False
     assert second["cached"] is True
     assert listed[0].headnode_probes["static"]["cached"] is True
-    assert second["data"]["remote_daylily_ec_version"] == "2.3.3"
+    assert second["data"]["remote_daylily_ec_version"] == "4.0.9"
     assert second["data"]["remote_git_hash"] == "abc123"
     assert second["data"]["day_clone_available"] is True
     assert "day-clone --help" in calls[0]
