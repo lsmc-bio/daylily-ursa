@@ -4,7 +4,7 @@
   "components": {
     "daylily-ursa": {
       "repo": "lsmc-bio/daylily-ursa",
-      "current": "2.0.11.33"
+      "current": "2.0.11.34"
     },
     "daylily-ephemeral-cluster": {
       "repo": "Daylily-Informatics/daylily-ephemeral-cluster",
@@ -34,7 +34,7 @@
   "tested_combinations": [
     {
       "date": "2026-05-20",
-      "ursa": "2.0.11.33",
+      "ursa": "2.0.11.34",
       "ephemeral_cluster": "4.0.9",
       "omics_analysis": "0.7.752",
       "cognito": "2.1.5",

@@ -438,6 +438,7 @@ class ClusterCreateRequest(BaseModel):
     debug: bool = False
     cluster_config_values: dict[str, str | None] = Field(default_factory=dict)
     repo_overrides: list[str] = Field(default_factory=list)
+    dry_run: bool = False
 
     @model_validator(mode="after")
     def validate_cluster_config_values(self) -> "ClusterCreateRequest":
@@ -4420,7 +4421,7 @@ def create_app(
 
     @app.get("/api/v1/clusters/jobs", response_model=list[ClusterJobResponse])
     async def list_cluster_jobs(
-        actor: RequireAdmin,
+        actor: RequireAuth,
         resources: ResourceStore = Depends(require_resource_store),
     ) -> list[ClusterJobResponse]:
         records = resources.list_cluster_jobs(tenant_id=None if actor.is_admin else actor.tenant_id)
@@ -4429,7 +4430,7 @@ def create_app(
     @app.get("/api/v1/clusters/jobs/{job_euid}", response_model=ClusterJobResponse)
     async def get_cluster_job(
         job_euid: str,
-        actor: RequireAdmin,
+        actor: RequireAuth,
         resources: ResourceStore = Depends(require_resource_store),
     ) -> ClusterJobResponse:
         record = resources.get_cluster_job(job_euid)
@@ -4545,24 +4546,24 @@ def create_app(
 
     @app.get("/api/v1/clusters")
     async def list_clusters(
-        actor: RequireAdmin,
+        actor: RequireAuth,
         refresh: bool = Query(default=False),
         fetch_ssh_status: bool = Query(default=False),
         service: ClusterService = Depends(require_cluster_service),
     ) -> dict[str, list[dict[str, Any]]]:
-        _ = actor
+        visible_fetch_ssh_status = bool(fetch_ssh_status and actor.is_admin)
         items = await run_in_threadpool(
             lambda: service.get_all_clusters_with_status(
                 force_refresh=refresh,
-                fetch_ssh_status=fetch_ssh_status,
+                fetch_ssh_status=visible_fetch_ssh_status,
             )
         )
-        return {"items": [item.to_dict(include_sensitive=fetch_ssh_status) for item in items]}
+        return {"items": [item.to_dict(include_sensitive=visible_fetch_ssh_status) for item in items]}
 
     @app.get("/api/v1/clusters/regions/{region}/names")
     async def list_region_cluster_names(
         region: str,
-        actor: RequireAdmin,
+        actor: RequireAuth,
         refresh: bool = Query(default=False),
         service: ClusterService = Depends(require_cluster_service),
     ) -> dict[str, Any]:
@@ -4667,6 +4668,25 @@ def create_app(
                     + str(dry_run.get("summary") or f"exit code {dry_run['return_code']}")
                 ),
             )
+        if request.dry_run:
+            record = manager.record_create_dry_run(
+                cluster_name=cluster_name,
+                region_az=selection.region_az,
+                ssh_key_name=ssh_key_name,
+                s3_bucket_name=s3_bucket_name,
+                tenant_id=actor.tenant_id,
+                owner_user_id=owner_user_id,
+                sponsor_user_id=actor.user_id,
+                aws_profile=aws_profile or None,
+                contact_email=contact_email,
+                pass_on_warn=bool(request.pass_on_warn),
+                debug=bool(request.debug),
+                dry_run_result=dry_run,
+                config_path=request.config_path,
+                cluster_config_values=request.cluster_config_values,
+                repo_overrides=request.repo_overrides,
+            )
+            return _cluster_job_response(record)
         record = manager.start_create_job(
             cluster_name=cluster_name,
             region_az=selection.region_az,
@@ -4688,14 +4708,12 @@ def create_app(
     @app.get("/api/v1/clusters/{cluster_name}")
     async def get_cluster(
         cluster_name: str,
-        actor: RequireAdmin,
+        actor: RequireAuth,
         region: str | None = Query(default=None),
         refresh: bool = Query(default=False),
         fetch_ssh_status: bool = Query(default=False),
         service: ClusterService = Depends(require_cluster_service),
     ) -> dict[str, Any]:
-        _ = actor
-
         def _load_cluster_payload() -> dict[str, Any]:
             resolved_region = resolve_cluster_region(cluster_name, region=region, service=service)
             cluster = service.describe_cluster(
@@ -4703,9 +4721,10 @@ def create_app(
                 resolved_region,
                 force_refresh=refresh,
             )
-            if fetch_ssh_status:
+            visible_fetch_ssh_status = bool(fetch_ssh_status and actor.is_admin)
+            if visible_fetch_ssh_status:
                 cluster = service.fetch_headnode_status(cluster, force_refresh=refresh)
-            payload = cluster.to_dict(include_sensitive=fetch_ssh_status)
+            payload = cluster.to_dict(include_sensitive=visible_fetch_ssh_status)
             return payload
 
         payload = await run_in_threadpool(_load_cluster_payload)
@@ -4716,7 +4735,7 @@ def create_app(
     @app.post("/api/v1/clusters/{cluster_name}/headnode/static")
     async def probe_cluster_headnode_static(
         cluster_name: str,
-        actor: RequireAdmin,
+        actor: RequireAuth,
         region: str | None = Query(default=None),
         refresh: bool = Query(default=False),
         service: ClusterService = Depends(require_cluster_service),
@@ -4737,7 +4756,7 @@ def create_app(
     @app.post("/api/v1/clusters/{cluster_name}/headnode/scheduler")
     async def probe_cluster_headnode_scheduler(
         cluster_name: str,
-        actor: RequireAdmin,
+        actor: RequireAuth,
         region: str | None = Query(default=None),
         refresh: bool = Query(default=False),
         service: ClusterService = Depends(require_cluster_service),
@@ -4758,7 +4777,7 @@ def create_app(
     @app.post("/api/v1/clusters/{cluster_name}/headnode/fsx")
     async def probe_cluster_headnode_fsx(
         cluster_name: str,
-        actor: RequireAdmin,
+        actor: RequireAuth,
         region: str | None = Query(default=None),
         refresh: bool = Query(default=False),
         service: ClusterService = Depends(require_cluster_service),

@@ -526,9 +526,11 @@
                             <button class="btn btn-sm btn-outline" type="button" onclick="window.location.assign('/clusters/{{ cluster.cluster_name }}?region={{ cluster.region }}')">
                                 <i class="fas fa-eye"></i>
                             </button>
+                            {% if is_admin %}
                             <button class="btn btn-sm btn-danger" type="button" onclick="deleteCluster('{{ cluster.cluster_name }}', '{{ cluster.region }}')">
                                 <i class="fas fa-trash"></i>
                             </button>
+                            {% endif %}
                             <span class="badge badge-{{ 'success' if cluster.cluster_status == 'CREATE_COMPLETE' else 'warning' if 'IN_PROGRESS' in cluster.cluster_status else 'error' if 'FAILED' in cluster.cluster_status else 'secondary' }}">
                                 {{ cluster.cluster_status }}
                             </span>
@@ -636,7 +638,7 @@
                         >
                             <summary class="d-flex justify-between align-center gap-md">
                                 <span><i class="fas fa-terminal"></i> Headnode Diagnostics</span>
-                                <span class="badge badge-outline">Admin read-only</span>
+                                <span class="badge badge-outline">Read-only</span>
                             </summary>
                             <div class="cluster-diagnostics-actions d-flex gap-sm flex-wrap">
                                 <button class="btn btn-outline btn-sm" type="button" onclick="runHeadnodeProbe(this, 'static', false)">
@@ -1170,6 +1172,12 @@ function renderClusterCard(cluster) {
     const status = String(cluster?.cluster_status || 'UNKNOWN').trim();
     const probes = cluster?.headnode_probes || {};
     const detailUrl = `/clusters/${encodeURIComponent(clusterName)}?region=${encodeURIComponent(region)}`;
+    const canManageClusters = Boolean(window.UrsaConfig?.isAdmin);
+    const deleteActionHtml = canManageClusters
+        ? `<button class="btn btn-sm btn-danger" type="button" onclick="deleteCluster('${escapeHtml(clusterName)}', '${escapeHtml(region)}')">
+                        <i class="fas fa-trash"></i>
+                    </button>`
+        : "";
     const consoleLink = cluster?.aws_console_url
         ? `<a href="${escapeHtml(cluster.aws_console_url)}" target="_blank" rel="noopener noreferrer">AWS Console <i class="fas fa-external-link-alt"></i></a>`
         : '<span class="text-muted">No instance id</span>';
@@ -1186,9 +1194,7 @@ function renderClusterCard(cluster) {
                     <a class="btn btn-sm btn-outline" href="${escapeHtml(detailUrl)}">
                         <i class="fas fa-eye"></i>
                     </a>
-                    <button class="btn btn-sm btn-danger" type="button" onclick="deleteCluster('${escapeHtml(clusterName)}', '${escapeHtml(region)}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                    ${deleteActionHtml}
                     <span class="badge badge-${clusterStatusBadgeClass(status)}">${escapeHtml(status)}</span>
                 </div>
             </div>
@@ -1230,7 +1236,7 @@ function renderClusterCard(cluster) {
                 >
                     <summary class="d-flex justify-between align-center gap-md">
                         <span><i class="fas fa-terminal"></i> Headnode Diagnostics</span>
-                        <span class="badge badge-outline">Admin read-only</span>
+                        <span class="badge badge-outline">Read-only</span>
                     </summary>
                     <div class="cluster-diagnostics-actions d-flex gap-sm flex-wrap">
                         <button class="btn btn-outline btn-sm" type="button" onclick="runHeadnodeProbe(this, 'static', false)">

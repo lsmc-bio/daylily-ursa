@@ -1722,7 +1722,6 @@ def mount_gui(app: FastAPI) -> None:
             template_name="clusters.html",
             page_title="Clusters",
             active_page="clusters",
-            admin_only=True,
             context={
                 "clusters": [],
                 "cluster_regions": _cluster_region_sections([], jobs),
@@ -1766,7 +1765,6 @@ def mount_gui(app: FastAPI) -> None:
             template_name="cluster_detail.html",
             page_title=f"Cluster {cluster_name}",
             active_page="clusters",
-            admin_only=True,
             context={
                 "cluster": cluster.to_dict(include_sensitive=False),
                 "jobs": jobs,
@@ -1789,7 +1787,6 @@ def mount_gui(app: FastAPI) -> None:
             template_name="cluster_job_detail.html",
             page_title=f"Cluster Job {job.job_euid}",
             active_page="clusters",
-            admin_only=True,
             context={"job": job, "job_payload_json": _json_text(job)},
         )
 

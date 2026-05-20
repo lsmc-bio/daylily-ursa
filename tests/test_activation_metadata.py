@@ -107,7 +107,7 @@ def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
 
     assert payload["last_updated"] == "2026-05-20"
     assert payload["tested_combinations"][0]["date"] == "2026-05-20"
-    assert payload["components"]["daylily-ursa"]["current"] == "2.0.11.33"
+    assert payload["components"]["daylily-ursa"]["current"] == "2.0.11.34"
     assert (
         payload["components"]["daylily-ephemeral-cluster"]["repo"]
         == "Daylily-Informatics/daylily-ephemeral-cluster"
@@ -122,7 +122,7 @@ def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
     assert payload["components"]["cli-core-yo"]["current"] == "2.1.1"
     assert "zebra_day" not in payload["components"]
     assert payload["tested_combinations"][0]["ephemeral_cluster"] == "4.0.9"
-    assert payload["tested_combinations"][0]["ursa"] == "2.0.11.33"
+    assert payload["tested_combinations"][0]["ursa"] == "2.0.11.34"
     assert payload["tested_combinations"][0]["omics_analysis"] == "0.7.752"
     assert payload["tested_combinations"][0]["cognito"] == "2.1.5"
     assert payload["tested_combinations"][0]["tapdb"] == "7.0.5"

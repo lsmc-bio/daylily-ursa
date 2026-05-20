@@ -247,3 +247,39 @@ def test_run_cluster_create_job_uses_fake_tools_and_leaves_no_home_state(
     assert updated.cluster["cluster_status"] == "CREATE_COMPLETE"
     assert [event.event_type for event in updated.events] == ["runner", "preflight", "create"]
     assert not (home_dir / ".ursa" / "cluster-create").exists()
+
+
+def test_cluster_job_manager_records_create_dry_run_without_spawning_worker(monkeypatch, tmp_path: Path) -> None:
+    store = MemoryResourceStore()
+
+    def fail_popen(*_args, **_kwargs):
+        raise AssertionError("dry-run cluster create must not spawn a worker")
+
+    monkeypatch.setattr("daylib_ursa.cluster_jobs.subprocess.Popen", fail_popen)
+    manager = ClusterJobManager(
+        resource_store=store,
+        cluster_service=ClusterService(regions=["us-west-2"], client=FakeDaylilyEcClient()),
+        workspace_root=tmp_path,
+        python_executable="/usr/bin/python3",
+    )
+
+    job = manager.record_create_dry_run(
+        cluster_name="cluster-1",
+        region_az="us-west-2d",
+        ssh_key_name="omics-key",
+        s3_bucket_name="ursa-bucket",
+        tenant_id=TENANT_ID,
+        owner_user_id="user-1",
+        sponsor_user_id="user-2",
+        aws_profile="ursa",
+        contact_email="ops@example.com",
+        pass_on_warn=False,
+        debug=False,
+        dry_run_result={"return_code": 0, "summary": "Dry-run passed", "stdout": "ok", "stderr": ""},
+    )
+
+    assert job.state == "COMPLETED"
+    assert job.return_code == 0
+    assert job.request["dry_run"] is True
+    assert job.cluster == {"dry_run": True}
+    assert any(event.event_type == "create-dry-run" for event in job.events)

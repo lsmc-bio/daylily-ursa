@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import io
 import subprocess
@@ -852,15 +852,38 @@ class DummyClusterJobManager:
     def __init__(self, resource_store: MemoryResourceStore) -> None:
         self.resource_store = resource_store
         self.cluster_service = DummyClusterService()
+        self.started_jobs: list[str] = []
+        self.dry_run_jobs: list[str] = []
 
     def start_create_job(
         self, *, cluster_name: str, owner_user_id: str, sponsor_user_id: str, **_kwargs
     ):
+        self.started_jobs.append(cluster_name)
         return self.resource_store.add_cluster_job(
             cluster_name=cluster_name,
             owner_user_id=owner_user_id,
             sponsor_user_id=sponsor_user_id,
         )
+
+    def record_create_dry_run(
+        self, *, cluster_name: str, owner_user_id: str, sponsor_user_id: str, dry_run_result, **_kwargs
+    ):
+        self.dry_run_jobs.append(cluster_name)
+        job = self.resource_store.add_cluster_job(
+            cluster_name=cluster_name,
+            owner_user_id=owner_user_id,
+            sponsor_user_id=sponsor_user_id,
+        )
+        updated = replace(
+            job,
+            state="COMPLETED",
+            return_code=int(dry_run_result.get("return_code") or 0),
+            output_summary=str(dry_run_result.get("summary") or "Dry-run passed"),
+            request={"cluster_name": cluster_name, "dry_run": True},
+            cluster={"dry_run": True},
+        )
+        self.resource_store.cluster_jobs[job.job_euid] = updated
+        return updated
 
 
 class DummyAnalysisJobManager:
@@ -1251,6 +1274,40 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_delete.status_code == 200
     assert cluster_delete.json()["result"]["status"] == "DELETE_IN_PROGRESS"
     assert resources.get_cluster_job(cluster_job.json()["job_euid"]) is not None
+
+
+def test_cluster_create_dry_run_records_terminal_job_without_worker() -> None:
+    app, resources = _create_test_app(admin=True)
+    app.state.settings.aws_profile = "lsmc"
+
+    with (
+        TestClient(app, base_url=TEST_BASE_URL) as client,
+        patch(
+            "daylib_ursa.workset_api.run_cluster_partition_verification",
+            return_value=_verification_result(),
+        ),
+        patch("daylib_ursa.workset_api.run_create_dry_run_sync", _cluster_dryrun_ok),
+    ):
+        response = client.post(
+            "/api/v1/clusters",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "cluster_name": "cluster-dryrun",
+                "region_az": "us-west-2d",
+                "ssh_key_name": "omics-key",
+                "s3_bucket_name": "ursa-bucket",
+                "dry_run": True,
+            },
+        )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["state"] == "COMPLETED"
+    assert payload["cluster"] == {"dry_run": True}
+    stored = resources.get_cluster_job(payload["job_euid"])
+    assert stored is not None
+    assert stored.request["dry_run"] is True
+    assert stored.return_code == 0
 
 
 def test_gui_routes_cover_remaining_pages_and_logout() -> None:
@@ -1890,3 +1947,59 @@ def test_portal_js_exposes_sortable_table_helper() -> None:
     assert "MutationObserver" in portal_js
     assert "initSortableTables," in portal_js
     assert "portal.js" in base_html
+
+def test_non_admin_can_view_clusters_but_cannot_create_or_delete() -> None:
+    app, _resources = _create_test_app(admin=False)
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/clusters"})
+        clusters_page = client.get("/clusters")
+        cluster_list = client.get(
+            "/api/v1/clusters", headers={"Authorization": "Bearer atlas-token"}
+        )
+        region_cluster_names = client.get(
+            "/api/v1/clusters/regions/us-west-2/names",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        cluster_detail = client.get(
+            "/api/v1/clusters/cluster-1?region=us-west-2",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        cluster_jobs = client.get(
+            "/api/v1/clusters/jobs", headers={"Authorization": "Bearer atlas-token"}
+        )
+        create_cluster = client.post(
+            "/api/v1/clusters",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "cluster_name": "cluster-2",
+                "region_az": "us-west-2d",
+                "ssh_key_name": "omics-key",
+                "s3_bucket_name": "ursa-bucket",
+            },
+        )
+        delete_plan = client.post(
+            "/api/v1/clusters/cluster-1/delete-plan?region=us-west-2",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        delete_cluster = client.delete(
+            "/api/v1/clusters/cluster-1"
+            "?region=us-west-2&confirmation_token=delete:us-west-2:cluster-1"
+            "&confirm_cluster_name=cluster-1",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+
+    assert clusters_page.status_code == 200
+    assert 'href="/clusters"' in clusters_page.text
+    assert 'id="create-cluster-btn"' not in clusters_page.text
+    assert "const canManageClusters = Boolean(window.UrsaConfig?.isAdmin);" in clusters_page.text
+    assert "deleteActionHtml" in clusters_page.text
+    assert "Loading live clusters" in clusters_page.text
+    assert cluster_list.status_code == 200
+    assert region_cluster_names.status_code == 200
+    assert cluster_detail.status_code == 200
+    assert cluster_jobs.status_code == 200
+    assert create_cluster.status_code == 403
+    assert delete_plan.status_code == 403
+    assert delete_cluster.status_code == 403
+

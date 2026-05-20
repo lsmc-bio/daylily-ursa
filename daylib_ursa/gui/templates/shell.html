@@ -20,8 +20,8 @@
                 <a href="/analyses" class="{% if active_view in ['analyses', 'analysis_detail'] %}active{% endif %}">Analyses</a>
                 <a href="/artifacts" class="{% if active_view == 'artifacts' %}active{% endif %}">Artifacts</a>
                 <a href="/tokens" class="{% if active_view in ['tokens', 'token_detail'] %}active{% endif %}">User Tokens</a>
-                {% if actor.is_admin %}
                 <a href="/clusters" class="{% if active_view in ['clusters', 'cluster_detail', 'cluster_job_detail'] %}active{% endif %}">Clusters</a>
+                {% if actor.is_admin %}
                 <a href="/admin/tokens" class="{% if active_view == 'admin_tokens' %}active{% endif %}">Admin Tokens</a>
                 <a href="/admin/clients" class="{% if active_view in ['admin_clients', 'admin_client_detail'] %}active{% endif %}">Client Registrations</a>
                 {% endif %}

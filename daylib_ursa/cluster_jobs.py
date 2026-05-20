@@ -238,6 +238,110 @@ class ClusterJobManager:
             start_new_session=True,
         )
 
+    @staticmethod
+    def _request_payload(
+        *,
+        cluster_name: str,
+        region: str,
+        region_az: str,
+        ssh_key_name: str,
+        s3_bucket_name: str,
+        aws_profile: str | None,
+        contact_email: str | None,
+        pass_on_warn: bool,
+        debug: bool,
+        config_path: str | None,
+        cluster_config_values: dict[str, Any] | None,
+        repo_overrides: list[str] | None,
+        dry_run: bool,
+    ) -> dict[str, Any]:
+        return {
+            "cluster_name": cluster_name,
+            "region": region,
+            "region_az": region_az,
+            "ssh_key_name": ssh_key_name,
+            "s3_bucket_name": s3_bucket_name,
+            "aws_profile": aws_profile,
+            "contact_email": contact_email,
+            "pass_on_warn": bool(pass_on_warn),
+            "debug": bool(debug),
+            "config_path": str(config_path or "").strip() or None,
+            "cluster_config_values": dict(cluster_config_values or {}),
+            "repo_overrides": list(repo_overrides or []),
+            "dry_run": bool(dry_run),
+        }
+
+    def record_create_dry_run(
+        self,
+        *,
+        cluster_name: str,
+        region_az: str,
+        ssh_key_name: str,
+        s3_bucket_name: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        sponsor_user_id: str,
+        aws_profile: str | None,
+        contact_email: str | None,
+        pass_on_warn: bool,
+        debug: bool,
+        dry_run_result: dict[str, Any],
+        config_path: str | None = None,
+        cluster_config_values: dict[str, Any] | None = None,
+        repo_overrides: list[str] | None = None,
+    ) -> ClusterJobRecord:
+        region = region_from_region_az(region_az)
+        request_payload = self._request_payload(
+            cluster_name=cluster_name,
+            region=region,
+            region_az=region_az,
+            ssh_key_name=ssh_key_name,
+            s3_bucket_name=s3_bucket_name,
+            aws_profile=aws_profile,
+            contact_email=contact_email,
+            pass_on_warn=pass_on_warn,
+            debug=debug,
+            config_path=config_path,
+            cluster_config_values=cluster_config_values,
+            repo_overrides=repo_overrides,
+            dry_run=True,
+        )
+        job = self.resource_store.create_cluster_job(
+            cluster_name=cluster_name,
+            region=region,
+            region_az=region_az,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            sponsor_user_id=sponsor_user_id,
+            request=request_payload,
+        )
+        return_code = int(dry_run_result.get("return_code") or 0)
+        summary = str(dry_run_result.get("summary") or "Cluster create dry-run completed")
+        self.resource_store.add_cluster_job_event(
+            job_euid=job.job_euid,
+            event_type="create-dry-run",
+            status="COMPLETED" if return_code == 0 else "FAILED",
+            summary=summary,
+            details={
+                "return_code": return_code,
+                "stdout": str(dry_run_result.get("stdout") or "")[-4000:],
+                "stderr": str(dry_run_result.get("stderr") or "")[-4000:],
+            },
+            created_by=sponsor_user_id,
+        )
+        now = utc_now_iso()
+        return self.resource_store.update_cluster_job_status(
+            job_euid=job.job_euid,
+            state="COMPLETED" if return_code == 0 else "FAILED",
+            created_by=sponsor_user_id,
+            started_at=now,
+            completed_at=now,
+            return_code=return_code,
+            error=None if return_code == 0 else summary,
+            output_summary=summary,
+            cluster={"dry_run": True},
+        )
+
     def start_create_job(
         self,
         *,
@@ -257,20 +361,21 @@ class ClusterJobManager:
         repo_overrides: list[str] | None = None,
     ) -> ClusterJobRecord:
         region = region_from_region_az(region_az)
-        request_payload = {
-            "cluster_name": cluster_name,
-            "region": region,
-            "region_az": region_az,
-            "ssh_key_name": ssh_key_name,
-            "s3_bucket_name": s3_bucket_name,
-            "aws_profile": aws_profile,
-            "contact_email": contact_email,
-            "pass_on_warn": bool(pass_on_warn),
-            "debug": bool(debug),
-            "config_path": str(config_path or "").strip() or None,
-            "cluster_config_values": dict(cluster_config_values or {}),
-            "repo_overrides": list(repo_overrides or []),
-        }
+        request_payload = self._request_payload(
+            cluster_name=cluster_name,
+            region=region,
+            region_az=region_az,
+            ssh_key_name=ssh_key_name,
+            s3_bucket_name=s3_bucket_name,
+            aws_profile=aws_profile,
+            contact_email=contact_email,
+            pass_on_warn=pass_on_warn,
+            debug=debug,
+            config_path=config_path,
+            cluster_config_values=cluster_config_values,
+            repo_overrides=repo_overrides,
+            dry_run=False,
+        )
         job = self.resource_store.create_cluster_job(
             cluster_name=cluster_name,
             region=region,

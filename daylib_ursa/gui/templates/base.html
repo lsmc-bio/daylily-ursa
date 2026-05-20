@@ -47,8 +47,8 @@
                         {% if actor.is_internal %}
                         <li><a href="/graph" class="nav-link {% if active_page == 'graph' %}active{% endif %}">TapDB Graph</a></li>
                         {% endif %}
-                        {% if actor.is_admin %}
                         <li><a href="/clusters" class="nav-link {% if active_page == 'clusters' %}active{% endif %}">Clusters</a></li>
+                        {% if actor.is_admin %}
                         <li><a href="/admin" class="nav-link {% if active_page == 'admin' %}active{% endif %}">Admin</a></li>
                         {% endif %}
                         <li><a href="/usage" class="nav-link {% if active_page == 'usage' %}active{% endif %}">Usage</a></li>
@@ -133,8 +133,8 @@
                 <div>
                     <h4 class="footer-title">Operations</h4>
                     <ul class="footer-links">
-                        {% if actor.is_admin %}
                         <li><a href="/clusters">Clusters</a></li>
+                        {% if actor.is_admin %}
                         <li><a href="/admin">Admin</a></li>
                         {% endif %}
                         <li><a href="/usage">Usage</a></li>
