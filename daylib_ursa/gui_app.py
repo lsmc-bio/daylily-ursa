@@ -199,6 +199,14 @@ def mount_gui(app: FastAPI) -> None:
     gui_root = Path(__file__).resolve().parent / "gui"
     repo_root = Path(__file__).resolve().parents[1]
     templates = Jinja2Templates(directory=str(gui_root / "templates"))
+    def _format_usd(value: Any) -> str:
+        try:
+            amount = float(value or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        return f"${amount:,.2f}"
+
+    templates.env.filters["usd"] = _format_usd
     static_root = gui_root / "static"
     if static_root.is_dir():
         app.mount("/ui/static", StaticFiles(directory=str(static_root)), name="ui-static")
@@ -292,7 +300,8 @@ def mount_gui(app: FastAPI) -> None:
             "logout_url": str(getattr(settings, "external_broker_logout_url", "") or "").strip(),
             "ca_bundle": str(getattr(settings, "external_broker_ca_bundle", "") or "").strip(),
         }
-        missing = [key for key, value in values.items() if not value]
+        required = ("service_id", "login_url", "handoff_exchange_url", "callback_url", "logout_url")
+        missing = [key for key in required if not values[key]]
         if missing:
             raise HTTPException(
                 status_code=503,
@@ -1099,6 +1108,88 @@ def mount_gui(app: FastAPI) -> None:
             "parent_prefix": parent_prefix,
         }
 
+    def _cluster_dashboard_summary() -> dict[str, Any]:
+        summary = {
+            "clusters": 0,
+            "running_clusters": 0,
+            "slurm_active_jobs": 0,
+            "slurm_configuring_jobs": 0,
+            "slurm_running_jobs": 0,
+            "slurm_pending_jobs": 0,
+            "cluster_error": "",
+        }
+        try:
+            cluster_items = _cluster_service().get_all_clusters_with_status(
+                force_refresh=False, fetch_ssh_status=True
+            )
+        except Exception as exc:
+            LOGGER.exception("Failed to build dashboard cluster summary")
+            summary["cluster_error"] = str(exc)
+            return summary
+        summary["clusters"] = len(cluster_items)
+        summary["running_clusters"] = len(
+            [
+                item
+                for item in cluster_items
+                if str(getattr(item, "cluster_status", "") or "").upper() == "CREATE_COMPLETE"
+            ]
+        )
+        for item in cluster_items:
+            queue = getattr(item, "job_queue", None)
+            if queue is None:
+                continue
+            configuring = int(getattr(queue, "configuring_jobs", 0) or 0)
+            running = int(getattr(queue, "running_jobs", 0) or 0)
+            pending = int(getattr(queue, "pending_jobs", 0) or 0)
+            summary["slurm_configuring_jobs"] += configuring
+            summary["slurm_running_jobs"] += running
+            summary["slurm_pending_jobs"] += pending
+            summary["slurm_active_jobs"] += configuring + running + pending
+        return summary
+
+    def _spend_by_service_from_report(report: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if not report:
+            return []
+        rows = report.get("cost_totals_by_service")
+        if isinstance(rows, list):
+            return [
+                {
+                    "service": str(row.get("service") or "unknown"),
+                    "amount": float(row.get("amount") or 0),
+                    "unit": str(row.get("unit") or "USD"),
+                }
+                for row in rows
+                if isinstance(row, dict) and float(row.get("amount") or 0) > 0
+            ]
+        totals: dict[str, float] = {}
+        for row in report.get("costs_by_tag_service", []) or []:
+            if not isinstance(row, dict):
+                continue
+            service_name = str(row.get("service") or "unknown")
+            totals[service_name] = totals.get(service_name, 0.0) + float(row.get("amount") or 0)
+        return [
+            {"service": service_name, "amount": amount, "unit": "USD"}
+            for service_name, amount in sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+            if amount > 0
+        ]
+
+    def _dashboard_spend_context() -> dict[str, Any]:
+        try:
+            report = _aws_usage_report_service().get_report(force_refresh=False).to_dict()
+        except ValueError as exc:
+            return {"error": str(exc), "by_service": [], "total": 0.0, "window": ""}
+        except Exception as exc:
+            LOGGER.exception("Failed to build dashboard AWS spend summary")
+            return {"error": str(exc), "by_service": [], "total": 0.0, "window": ""}
+        by_service = _spend_by_service_from_report(report)
+        return {
+            "error": "",
+            "by_service": by_service[:8],
+            "total": round(sum(float(row["amount"]) for row in by_service), 2),
+            "window": f"{report.get('start_date', '')} through {report.get('end_date', '')}",
+            "fetched_at": str(report.get("fetched_at") or ""),
+        }
+
     def _dashboard_context(actor: CurrentUser) -> dict[str, Any]:
         worksets = _list_worksets(actor)
         manifests = _list_manifests(actor)
@@ -1125,20 +1216,16 @@ def mount_gui(app: FastAPI) -> None:
                 [item for item in worksets if str(item.state).upper() == "ERROR"]
             ),
         }
-        if actor.is_admin:
-            cluster_items = _cluster_service().get_all_clusters_with_status(
-                force_refresh=False, fetch_ssh_status=True
-            )
-            cluster_jobs = _resource_store().list_cluster_jobs(tenant_id=None)
-            stats["clusters"] = len(cluster_items)
-            stats["cluster_jobs"] = len(cluster_jobs)
-            stats["running_jobs"] = sum(
-                int(item.job_queue.running_jobs)
-                for item in cluster_items
-                if item.job_queue is not None
-            )
+        cluster_summary = _cluster_dashboard_summary()
+        cluster_jobs = _resource_store().list_cluster_jobs(
+            tenant_id=None if actor.is_admin else actor.tenant_id
+        )
+        stats.update(cluster_summary)
+        stats["cluster_jobs"] = len(cluster_jobs)
+        stats["running_jobs"] = stats["slurm_running_jobs"]
         return {
             "stats": stats,
+            "dashboard_spend": _dashboard_spend_context(),
             "worksets": worksets[:8],
             "recent_manifests": manifests[:5],
             "recent_analyses": analyses[:5],

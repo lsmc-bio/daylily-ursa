@@ -68,6 +68,16 @@ class FakeCostExplorerClient:
                     "Metrics": {"AmortizedCost": {"Amount": "42.50", "Unit": "USD"}},
                 }
             ]
+        elif tag_key == "aws-parallelcluster-clustername":
+            groups = [
+                {
+                    "Keys": [
+                        "aws-parallelcluster-clustername$cluster-a",
+                        "Amazon Elastic Compute Cloud - Compute",
+                    ],
+                    "Metrics": {"AmortizedCost": {"Amount": "42.50", "Unit": "USD"}},
+                }
+            ]
         return {"ResultsByTime": [{"Groups": groups}]}
 
 
@@ -89,6 +99,13 @@ class FakeTaggingClient:
                     "ResourceARN": "arn:aws:fsx:us-west-2:123456789012:file-system/fs-1",
                     "Tags": [{"Key": tag_key, "Value": "project-a"}],
                 },
+            ]
+        elif tag_key == "aws-parallelcluster-clustername":
+            mappings = [
+                {
+                    "ResourceARN": "arn:aws:ec2:us-west-2:123456789012:instance/i-1",
+                    "Tags": [{"Key": tag_key, "Value": "cluster-a"}],
+                }
             ]
         return {"ResourceTagMappingList": mappings}
 
@@ -151,25 +168,33 @@ def test_aws_usage_report_parses_budget_costs_inventory_and_caches() -> None:
     assert first == second
     assert first["ttl_seconds"] == AWS_USAGE_CACHE_TTL_SECONDS
     assert first["account_id"] == "123456789012"
-    assert first["budgets"][0]["budget_name"] == "da-us-west-2d-cluster-a"
-    assert first["budgets"][0]["project"] == "project-a"
-    assert first["budgets"][0]["cluster_name"] == "cluster-a"
-    assert first["budgets"][0]["percent_used"] == 62.62
-    assert first["costs_by_tag_service"] == [
-        {
-            "tag_key": "aws-parallelcluster-project",
-            "tag_value": "project-a",
-            "service": "Amazon Elastic Compute Cloud - Compute",
-            "amount": 42.5,
-            "unit": "USD",
-        }
-    ]
+    assert first["budgets"] == []
+    assert first["cost_basis_tag_key"] == "aws-parallelcluster-clustername"
+    assert first["total_cost_amount"] == 42.5
+    assert {
+        (row["tag_key"], row["tag_value"], row["service"], row["amount"])
+        for row in first["costs_by_tag_service"]
+    } == {
+        (
+            "aws-parallelcluster-clustername",
+            "cluster-a",
+            "Amazon Elastic Compute Cloud - Compute",
+            42.5,
+        ),
+        (
+            "aws-parallelcluster-project",
+            "project-a",
+            "Amazon Elastic Compute Cloud - Compute",
+            42.5,
+        ),
+    }
     assert {
         (row["tag_key"], row["tag_value"], row["service"], row["resource_count"])
         for row in first["resource_inventory"]
     } == {
+        ("aws-parallelcluster-clustername", "cluster-a", "ec2", 1),
         ("aws-parallelcluster-project", "project-a", "ec2", 1),
         ("aws-parallelcluster-project", "project-a", "fsx", 1),
     }
     assert session_factory.sts.calls == 1
-    assert session_factory.budgets.calls == 1
+    assert session_factory.budgets.calls == 0

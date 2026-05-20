@@ -1,10 +1,37 @@
 {% extends "base.html" %}
 
+{% block extra_head %}
+<style>
+    .usage-chart-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+    }
+    .usage-chart-panel {
+        min-height: 340px;
+    }
+    .usage-chart-frame {
+        height: 280px;
+    }
+    .usage-filter-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+    @media (max-width: 1080px) {
+        .usage-chart-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <div>
         <h1 class="page-title">Usage Summary</h1>
-        <p class="page-subtitle">Current Ursa workload, DayEC budgets, and ParallelCluster tag spend.</p>
+        <p class="page-subtitle">Current Ursa workload and ParallelCluster tag spend.</p>
     </div>
     <div class="toolbar">
         <a href="/usage?refresh=true" class="btn btn-outline"><i class="fa-solid fa-rotate"></i> Force Refresh</a>
@@ -49,29 +76,45 @@
 {% endif %}
 
 {% if usage_report %}
+<section class="grid grid-4" style="margin-bottom: 1rem;">
+    <article class="stat-card"><div><div class="stat-value">{{ usage_report.total_cost_amount | usd }}</div><div class="stat-label">Tagged Spend</div></div></article>
+    <article class="stat-card"><div><div class="stat-value">{{ usage_report.costs_by_tag_service | length }}</div><div class="stat-label">Tag-Service Rows</div></div></article>
+    <article class="stat-card"><div><div class="stat-value">{{ usage_report.cost_totals_by_service | length }}</div><div class="stat-label">Services</div></div></article>
+    <article class="stat-card"><div><div class="stat-value">{{ usage_report.resource_inventory | length }}</div><div class="stat-label">Inventory Rows</div></div></article>
+</section>
+
 <section class="card" style="margin-bottom: 1.5rem;">
     <div class="card-header">
-        <h3 class="card-title">DayEC Budgets</h3>
-    </div>
-    <div class="table-container">
-        <table>
-            <thead><tr><th>Budget</th><th>Project</th><th>Cluster</th><th>Actual</th><th>Forecast</th><th>Limit</th><th>Used</th></tr></thead>
-            <tbody>
-                {% for budget in usage_report.budgets %}
-                <tr>
-                    <td class="mono">{{ budget.budget_name }}</td>
-                    <td>{{ budget.project or "daylily-global" }}</td>
-                    <td>{{ budget.cluster_name or "all" }}</td>
-                    <td>${{ "%.2f"|format(budget.actual_amount) }}</td>
-                    <td>${{ "%.2f"|format(budget.forecast_amount) }}</td>
-                    <td>${{ "%.2f"|format(budget.limit_amount) }}</td>
-                    <td>{{ "%.1f"|format(budget.percent_used) ~ "%" if budget.percent_used is not none else "n/a" }}</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="7" class="text-muted">No DayEC budget filters found.</td></tr>
+        <h3 class="card-title">Spend Visuals</h3>
+        <div class="usage-filter-bar">
+            {% if usage_report.cost_basis_tag_key %}
+            <span class="badge badge-outline">Spend basis {{ usage_report.cost_basis_tag_key }}</span>
+            {% endif %}
+            <label class="form-label" for="usage-tag-key-filter" style="margin: 0;">Tag Key</label>
+            <select id="usage-tag-key-filter" class="form-control form-select" style="min-width: 18rem;">
+                {% for tag_key in usage_report.tag_keys %}
+                <option value="{{ tag_key }}" {% if tag_key == usage_report.cost_basis_tag_key %}selected{% endif %}>{{ tag_key }}</option>
                 {% endfor %}
-            </tbody>
-        </table>
+            </select>
+        </div>
+    </div>
+    <div class="usage-chart-grid">
+        <article class="usage-chart-panel">
+            <h4 class="text-sm text-muted">Service Spend</h4>
+            <div class="usage-chart-frame"><canvas id="usage-service-spend-chart" aria-label="Tag spend by service"></canvas></div>
+        </article>
+        <article class="usage-chart-panel">
+            <h4 class="text-sm text-muted">Selected Tag Breakdown</h4>
+            <div class="usage-chart-frame"><canvas id="usage-tag-service-chart" aria-label="Selected tag spend by service"></canvas></div>
+        </article>
+        <article class="usage-chart-panel">
+            <h4 class="text-sm text-muted">Tag Key Totals</h4>
+            <div class="usage-chart-frame"><canvas id="usage-tag-key-chart" aria-label="Tag key spend totals"></canvas></div>
+        </article>
+        <article class="usage-chart-panel">
+            <h4 class="text-sm text-muted">Tagged Resources</h4>
+            <div class="usage-chart-frame"><canvas id="usage-resource-chart" aria-label="Tagged resources by service"></canvas></div>
+        </article>
     </div>
 </section>
 
@@ -84,11 +127,11 @@
             <thead><tr><th>Tag Key</th><th>Tag Value</th><th>Service</th><th>Amount</th></tr></thead>
             <tbody>
                 {% for row in usage_report.costs_by_tag_service %}
-                <tr>
+                <tr data-cost-row data-tag-key="{{ row.tag_key }}">
                     <td class="mono">{{ row.tag_key }}</td>
                     <td class="mono">{{ row.tag_value or "<untagged>" }}</td>
                     <td>{{ row.service }}</td>
-                    <td>${{ "%.2f"|format(row.amount) }}</td>
+                    <td>{{ row.amount | usd }}</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="4" class="text-muted">No Cost Explorer rows returned for the configured tags.</td></tr>
@@ -144,4 +187,158 @@
         </table>
     </div>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+{% if usage_report %}
+<script>
+(() => {
+    const report = {{ usage_report | tojson }};
+    const costRows = Array.isArray(report.costs_by_tag_service) ? report.costs_by_tag_service : [];
+    const inventoryRows = Array.isArray(report.resource_inventory) ? report.resource_inventory : [];
+    const charts = {};
+    const colors = ['#0f766e', '#2563eb', '#ca8a04', '#dc2626', '#7c3aed', '#0891b2', '#16a34a', '#be123c', '#4b5563'];
+
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    const wholeCurrencyFormatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0,
+    });
+
+    function currency(value) {
+        return currencyFormatter.format(Number(value || 0));
+    }
+
+    function wholeCurrency(value) {
+        return wholeCurrencyFormatter.format(Number(value || 0));
+    }
+
+    function sumBy(rows, keyFn, valueFn) {
+        const totals = new Map();
+        rows.forEach((row) => {
+            const key = keyFn(row);
+            totals.set(key, (totals.get(key) || 0) + valueFn(row));
+        });
+        return Array.from(totals.entries())
+            .map(([key, amount]) => ({ key, amount }))
+            .sort((a, b) => b.amount - a.amount || String(a.key).localeCompare(String(b.key)));
+    }
+
+    function destroyChart(id) {
+        if (charts[id]) {
+            charts[id].destroy();
+            delete charts[id];
+        }
+    }
+
+    function renderBar(id, labels, values, label, options = {}) {
+        const canvas = document.getElementById(id);
+        if (!canvas || typeof Chart === 'undefined') return;
+        destroyChart(id);
+        charts[id] = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label,
+                    data: values,
+                    backgroundColor: labels.map((_, index) => colors[index % colors.length]),
+                    borderWidth: 1,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: options.indexAxis || 'x',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (context) => currency(context.raw) } },
+                },
+                scales: {
+                    x: options.currencyAxis === 'x' ? { beginAtZero: true, ticks: { callback: (value) => wholeCurrency(value) } } : { ticks: { autoSkip: false, maxRotation: 45 } },
+                    y: options.currencyAxis === 'y' ? { beginAtZero: true, ticks: { callback: (value) => wholeCurrency(value) } } : { beginAtZero: true },
+                },
+            },
+        });
+    }
+
+    function renderStackedTagChart(tagKey) {
+        const canvas = document.getElementById('usage-tag-service-chart');
+        if (!canvas || typeof Chart === 'undefined') return;
+        destroyChart('usage-tag-service-chart');
+        const rows = costRows.filter((row) => row.tag_key === tagKey);
+        const tagValues = sumBy(rows, (row) => row.tag_value || '<untagged>', (row) => Number(row.amount || 0)).slice(0, 12).map((row) => row.key);
+        const services = sumBy(rows, (row) => row.service || 'unknown', (row) => Number(row.amount || 0)).slice(0, 8).map((row) => row.key);
+        const datasets = services.map((service, index) => ({
+            label: service,
+            data: tagValues.map((tagValue) => rows
+                .filter((row) => (row.tag_value || '<untagged>') === tagValue && (row.service || 'unknown') === service)
+                .reduce((sum, row) => sum + Number(row.amount || 0), 0)),
+            backgroundColor: colors[index % colors.length],
+        }));
+        charts['usage-tag-service-chart'] = new Chart(canvas, {
+            type: 'bar',
+            data: { labels: tagValues, datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${currency(context.raw)}` } } },
+                scales: {
+                    x: { stacked: true, ticks: { autoSkip: false, maxRotation: 45 } },
+                    y: { stacked: true, beginAtZero: true, ticks: { callback: (value) => wholeCurrency(value) } },
+                },
+            },
+        });
+    }
+
+    function renderAllCharts() {
+        const serviceTotals = Array.isArray(report.cost_totals_by_service) && report.cost_totals_by_service.length
+            ? report.cost_totals_by_service.map((row) => ({ key: row.service, amount: Number(row.amount || 0) }))
+            : sumBy(costRows, (row) => row.service || 'unknown', (row) => Number(row.amount || 0));
+        renderBar(
+            'usage-service-spend-chart',
+            serviceTotals.slice(0, 12).map((row) => row.key),
+            serviceTotals.slice(0, 12).map((row) => row.amount),
+            'Spend',
+            { indexAxis: 'y', currencyAxis: 'x' },
+        );
+
+        const tagTotals = sumBy(costRows, (row) => row.tag_key || 'unknown', (row) => Number(row.amount || 0));
+        renderBar(
+            'usage-tag-key-chart',
+            tagTotals.map((row) => row.key),
+            tagTotals.map((row) => row.amount),
+            'Spend',
+            { indexAxis: 'y', currencyAxis: 'x' },
+        );
+
+        const resourceTotals = sumBy(inventoryRows, (row) => row.service || 'unknown', (row) => Number(row.resource_count || 0));
+        renderBar(
+            'usage-resource-chart',
+            resourceTotals.slice(0, 12).map((row) => row.key),
+            resourceTotals.slice(0, 12).map((row) => row.amount),
+            'Resources',
+            { indexAxis: 'y' },
+        );
+    }
+
+    function applyTagFilter(tagKey) {
+        renderStackedTagChart(tagKey);
+        document.querySelectorAll('[data-cost-row]').forEach((row) => {
+            row.hidden = tagKey && row.dataset.tagKey !== tagKey;
+        });
+    }
+
+    const tagSelect = document.getElementById('usage-tag-key-filter');
+    renderAllCharts();
+    if (tagSelect) {
+        const firstActive = report.cost_basis_tag_key || costRows.find((row) => row.tag_key)?.tag_key || tagSelect.value;
+        if (firstActive) tagSelect.value = firstActive;
+        applyTagFilter(tagSelect.value);
+        tagSelect.addEventListener('change', () => applyTagFilter(tagSelect.value));
+    }
+})();
+</script>
+{% endif %}
 {% endblock %}
