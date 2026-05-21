@@ -172,6 +172,8 @@ VALID_FIELDS = {
     "aws_profile": (str, "AWS profile name"),
     "cognito_group_role_map": (dict, "Canonical Cognito group-to-role mapping"),
     "ursa_internal_output_bucket": (str, "Ursa-managed internal S3 bucket"),
+    "aws_usage_report_dir": (str, "Explicit local directory containing AWS usage report files"),
+    "aws_usage_report_allowed_domains": (str, "Comma-separated email domains allowed to view the AWS usage report"),
     "tapdb_client_id": (str, "TapDB client identifier"),
     "tapdb_database_name": (str, "TapDB namespace / database name"),
     "tapdb_schema_name": (str, "Explicit PostgreSQL schema used by TapDB"),
@@ -296,6 +298,8 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
     for field_name in [
         "aws_profile",
         "ursa_internal_output_bucket",
+        "aws_usage_report_dir",
+        "aws_usage_report_allowed_domains",
         "tapdb_client_id",
         "tapdb_database_name",
         "tapdb_schema_name",
@@ -371,6 +375,12 @@ class UrsaConfig:
 
     ursa_internal_output_bucket: Optional[str] = None
     """Ursa-managed internal output bucket read from YAML config."""
+
+    aws_usage_report_dir: Optional[str] = None
+    """Explicit local directory containing AWS usage report files."""
+
+    aws_usage_report_allowed_domains: Optional[str] = None
+    """Comma-separated email domains allowed to view the AWS usage report."""
 
     tapdb_client_id: Optional[str] = None
     """TapDB client identifier read from YAML config."""
@@ -590,6 +600,8 @@ class UrsaConfig:
         aws_profile = os.environ.get("AWS_PROFILE") or data.get("aws_profile")
         cognito_group_role_map = data.get("cognito_group_role_map")
         ursa_internal_output_bucket = data.get("ursa_internal_output_bucket")
+        aws_usage_report_dir = data.get("aws_usage_report_dir")
+        aws_usage_report_allowed_domains = data.get("aws_usage_report_allowed_domains")
         tapdb_client_id = data.get("tapdb_client_id")
         tapdb_database_name = data.get("tapdb_database_name")
         tapdb_schema_name = data.get("tapdb_schema_name")
@@ -642,6 +654,8 @@ class UrsaConfig:
             aws_profile=aws_profile,
             cognito_group_role_map=cognito_group_role_map,
             ursa_internal_output_bucket=ursa_internal_output_bucket,
+            aws_usage_report_dir=aws_usage_report_dir,
+            aws_usage_report_allowed_domains=aws_usage_report_allowed_domains,
             tapdb_client_id=tapdb_client_id,
             tapdb_database_name=tapdb_database_name,
             tapdb_schema_name=tapdb_schema_name,

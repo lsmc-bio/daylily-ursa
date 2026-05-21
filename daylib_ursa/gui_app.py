@@ -18,7 +18,7 @@ from daylily_auth_cognito import complete_cognito_callback, start_cognito_login
 from daylily_auth_cognito.browser.session import CognitoWebAuthError
 from fastapi import FastAPI, Form, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -556,6 +556,66 @@ def mount_gui(app: FastAPI) -> None:
         except HTTPException:
             return None
 
+
+    def _aws_usage_report_domains(*, require_configured: bool = True) -> set[str]:
+        settings = getattr(app.state, "settings", None)
+        raw = str(getattr(settings, "aws_usage_report_allowed_domains", "") or "").strip()
+        if not raw:
+            if require_configured:
+                raise HTTPException(
+                    status_code=503,
+                    detail="aws_usage_report_allowed_domains is required",
+                )
+            return set()
+        domains = {part.strip().lower() for part in raw.split(",") if part.strip()}
+        if not domains and require_configured:
+            raise HTTPException(
+                status_code=503,
+                detail="aws_usage_report_allowed_domains must include at least one domain",
+            )
+        return domains
+
+    def _aws_usage_report_actor_allowed(
+        actor: CurrentUser,
+        *,
+        require_configured: bool = True,
+    ) -> bool:
+        domains = _aws_usage_report_domains(require_configured=require_configured)
+        if not domains:
+            return False
+        email = str(actor.email or "").strip().lower()
+        if "@" not in email:
+            return False
+        return email.rsplit("@", 1)[1] in domains
+
+    def _aws_usage_report_root() -> Path:
+        settings = getattr(app.state, "settings", None)
+        raw = str(getattr(settings, "aws_usage_report_dir", "") or "").strip()
+        if not raw:
+            raise HTTPException(status_code=503, detail="aws_usage_report_dir is required")
+        root = Path(raw).expanduser()
+        if not root.is_absolute():
+            raise HTTPException(
+                status_code=503,
+                detail="aws_usage_report_dir must be an absolute path",
+            )
+        if not root.is_dir():
+            raise HTTPException(
+                status_code=503,
+                detail="aws_usage_report_dir does not exist",
+            )
+        return root.resolve()
+
+    def _aws_usage_file_response(root: Path, candidate: Path) -> FileResponse:
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="AWS usage report file not found") from exc
+        if not resolved.is_file():
+            raise HTTPException(status_code=404, detail="AWS usage report file not found")
+        return FileResponse(str(resolved))
+
     def _resource_store():
         resources = getattr(app.state, "resource_store", None)
         if resources is None:
@@ -638,6 +698,10 @@ def mount_gui(app: FastAPI) -> None:
             "environment_chrome": _environment_chrome_context(),
             "git_meta": git_meta,
             "app_version": __version__,
+            "aws_usage_report_visible": _aws_usage_report_actor_allowed(
+                actor,
+                require_configured=False,
+            ),
         }
         template_context.update(context or {})
         return templates.TemplateResponse(request, template_name, template_context)
@@ -1538,6 +1602,50 @@ def mount_gui(app: FastAPI) -> None:
     @app.get("/logout")
     async def logout(request: Request):
         return await _logout_response(request)
+
+    @app.get("/aws_usage_report", include_in_schema=False)
+    async def aws_usage_report_redirect(request: Request):
+        actor = _session_actor(request)
+        if actor is None:
+            return _login_redirect_response(request)
+        if not _aws_usage_report_actor_allowed(actor):
+            raise HTTPException(
+                status_code=403,
+                detail="AWS usage report access requires an lsmc.com account",
+            )
+        return RedirectResponse(url="/aws_usage_report/", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    @app.get("/aws_usage_report/", include_in_schema=False)
+    async def aws_usage_report_index(request: Request):
+        actor = _session_actor(request)
+        if actor is None:
+            return _login_redirect_response(request)
+        if not _aws_usage_report_actor_allowed(actor):
+            raise HTTPException(
+                status_code=403,
+                detail="AWS usage report access requires an lsmc.com account",
+            )
+        root = _aws_usage_report_root()
+        index = root / "index.html"
+        if not index.is_file():
+            raise HTTPException(
+                status_code=503,
+                detail="AWS usage report index.html is missing",
+            )
+        return _aws_usage_file_response(root, index)
+
+    @app.get("/aws_usage_report/{report_path:path}", include_in_schema=False)
+    async def aws_usage_report_file(request: Request, report_path: str):
+        actor = _session_actor(request)
+        if actor is None:
+            return _login_redirect_response(request)
+        if not _aws_usage_report_actor_allowed(actor):
+            raise HTTPException(
+                status_code=403,
+                detail="AWS usage report access requires an lsmc.com account",
+            )
+        root = _aws_usage_report_root()
+        return _aws_usage_file_response(root, root / report_path)
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard_page(request: Request):

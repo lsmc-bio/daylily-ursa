@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="336" viewBox="0 0 1040 336">
+<rect width="100%" height="100%" fill="#fff"/>
+<text x="285" y="32" font-family="Arial" font-size="22" font-weight="700">Cost Explorer Blank Tag Buckets</text>
+<text x="275" y="80.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">parallelcluster:cluster-name</text>
+<rect x="285" y="62.0" width="224.3" height="26.0" rx="2" fill="#2563eb"/>
+<text x="515.3" y="80.1" font-family="Arial" font-size="12" fill="#374151">$11,071</text>
+<text x="275" y="114.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">Project</text>
+<rect x="285" y="96.0" width="710.0" height="26.0" rx="2" fill="#16a34a"/>
+<text x="1001.0" y="114.1" font-family="Arial" font-size="12" fill="#374151">$35,043</text>
+<text x="275" y="148.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">project</text>
+<rect x="285" y="130.0" width="710.0" height="26.0" rx="2" fill="#dc2626"/>
+<text x="1001.0" y="148.1" font-family="Arial" font-size="12" fill="#374151">$35,043</text>
+<text x="275" y="182.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">lsmc-project</text>
+<rect x="285" y="164.0" width="710.0" height="26.0" rx="2" fill="#ca8a04"/>
+<text x="1001.0" y="182.1" font-family="Arial" font-size="12" fill="#374151">$35,043</text>
+<text x="275" y="216.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">Name</text>
+<rect x="285" y="198.0" width="710.0" height="26.0" rx="2" fill="#7c3aed"/>
+<text x="1001.0" y="216.1" font-family="Arial" font-size="12" fill="#374151">$35,043</text>
+<text x="275" y="250.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">aws-parallelcluster-project</text>
+<rect x="285" y="232.0" width="269.9" height="26.0" rx="2" fill="#0891b2"/>
+<text x="560.9" y="250.1" font-family="Arial" font-size="12" fill="#374151">$13,321</text>
+<text x="275" y="284.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">aws-parallelcluster-clustername</text>
+<rect x="285" y="266.0" width="224.3" height="26.0" rx="2" fill="#db2777"/>
+<text x="515.3" y="284.1" font-family="Arial" font-size="12" fill="#374151">$11,071</text>
+</svg>

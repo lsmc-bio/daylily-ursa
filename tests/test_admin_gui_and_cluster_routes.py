@@ -167,15 +167,16 @@ class MemoryBackend:
 
 
 class DummyAuthProvider:
-    def __init__(self, *, admin: bool = True) -> None:
+    def __init__(self, *, admin: bool = True, email: str = "alice@lsmc.com") -> None:
         self.admin = admin
+        self.email = email
 
     def resolve_access_token(self, access_token: str) -> CurrentUser:
         if access_token != "atlas-token":
             raise AuthError("Invalid authentication token")
         return CurrentUser(
             sub=ADMIN_USER_ID,
-            email="alice@lsmc.com",
+            email=self.email,
             name="Alice Example",
             tenant_id=TENANT_ID,
             roles=[Role.ADMIN.value] if self.admin else [Role.READ_ONLY.value],
@@ -996,9 +997,9 @@ def _settings() -> Settings:
     )
 
 
-def _create_test_app(*, admin: bool = True):
+def _create_test_app(*, admin: bool = True, email: str = "alice@lsmc.com"):
     backend = MemoryBackend()
-    auth_provider = DummyAuthProvider(admin=admin)
+    auth_provider = DummyAuthProvider(admin=admin, email=email)
     user_directory = DummyUserDirectory()
     resources = MemoryResourceStore()
     cluster_service = DummyClusterService()
@@ -1978,6 +1979,60 @@ def test_cluster_partition_prechecks_cover_pass_warn_fail_and_pricing() -> None:
     assert pricing.json()["partitions"][2]["availability_zones"][0]["count"] == 0
     assert pricing.json()["partitions"][2]["availability_zones"][1]["mean"] == 12.1
 
+
+
+def test_aws_usage_report_route_and_nav_are_lsmc_domain_gated(tmp_path) -> None:
+    app, _resources = _create_test_app(admin=True)
+    report_dir = tmp_path / "aws_usage_report"
+    (report_dir / "images").mkdir(parents=True)
+    (report_dir / "index.html").write_text("<html>AWS 90-Day Retrospective Cost Analysis</html>", encoding="utf-8")
+    (report_dir / "images" / "daily_spend.svg").write_text("<svg></svg>", encoding="utf-8")
+    app.state.settings.aws_usage_report_dir = str(report_dir)
+    app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        unauthenticated = client.get("/aws_usage_report/", follow_redirects=False)
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        dashboard = client.get("/")
+        index = client.get("/aws_usage_report/")
+        asset = client.get("/aws_usage_report/images/daily_spend.svg")
+        traversal = client.get("/aws_usage_report/%2e%2e/secret.txt")
+
+    assert unauthenticated.status_code == 303
+    assert unauthenticated.headers["location"].startswith("/login")
+    assert 'href="/aws_usage_report/" class="nav-link" target="_blank" rel="noopener noreferrer"' in dashboard.text
+    assert index.status_code == 200
+    assert "AWS 90-Day Retrospective Cost Analysis" in index.text
+    assert asset.status_code == 200
+    assert traversal.status_code == 404
+
+
+def test_aws_usage_report_rejects_non_lsmc_domain_and_missing_report(tmp_path) -> None:
+    allowed_app, _resources = _create_test_app(admin=True)
+    missing_report_dir = tmp_path / "missing"
+    allowed_app.state.settings.aws_usage_report_dir = str(missing_report_dir)
+    allowed_app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
+
+    with TestClient(allowed_app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        missing = client.get("/aws_usage_report/")
+
+    blocked_app, _resources = _create_test_app(admin=True, email="alice@lsmc.bio")
+    report_dir = tmp_path / "aws_usage_report"
+    report_dir.mkdir()
+    (report_dir / "index.html").write_text("<html>report</html>", encoding="utf-8")
+    blocked_app.state.settings.aws_usage_report_dir = str(report_dir)
+    blocked_app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
+
+    with TestClient(blocked_app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        dashboard = client.get("/")
+        blocked = client.get("/aws_usage_report/")
+
+    assert missing.status_code == 503
+    assert "aws_usage_report_dir does not exist" in missing.text
+    assert 'href="/aws_usage_report/"' not in dashboard.text
+    assert blocked.status_code == 403
 
 def test_gui_admin_pages_reject_non_admin_sessions() -> None:
     app, _resources = _create_test_app(admin=False)

@@ -62,6 +62,8 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "whitelist_domains": cfg.whitelist_domains or DEFAULT_WHITELIST_DOMAINS,
         "session_secret_key": cfg.session_secret_key,
         "ursa_internal_output_bucket": cfg.ursa_internal_output_bucket,
+        "aws_usage_report_dir": getattr(cfg, "aws_usage_report_dir", ""),
+        "aws_usage_report_allowed_domains": getattr(cfg, "aws_usage_report_allowed_domains", ""),
         "tapdb_client_id": cfg.tapdb_client_id,
         "tapdb_database_name": cfg.tapdb_database_name,
         "tapdb_schema_name": getattr(cfg, "tapdb_schema_name", ""),
@@ -320,6 +322,14 @@ class Settings(BaseSettings):
     ursa_internal_output_bucket: str = Field(
         default="",
         description="Ursa-managed internal S3 bucket for analysis outputs",
+    )
+    aws_usage_report_dir: str = Field(
+        default="",
+        description="Explicit local directory containing the AWS usage report static files",
+    )
+    aws_usage_report_allowed_domains: str = Field(
+        default="",
+        description="Comma-separated email domains allowed to view the AWS usage report",
     )
     database_backend: str = Field(
         default="tapdb",
