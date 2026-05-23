@@ -2223,7 +2223,10 @@ def create_app(
     app.state.server_instance_id = secrets.token_urlsafe(16)
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=build_trusted_hosts(allow_local=allow_local_domain_access),
+        allowed_hosts=build_trusted_hosts(
+            allow_local=allow_local_domain_access,
+            configured_hosts=settings.allowed_hosts,
+        ),
     )
     app.add_middleware(
         CORSMiddleware,

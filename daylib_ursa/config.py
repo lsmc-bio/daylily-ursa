@@ -103,6 +103,7 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "external_broker_ca_bundle": getattr(cfg, "external_broker_ca_bundle", ""),
         "api_host": cfg.api_host,
         "api_port": cfg.api_port,
+        "allowed_hosts": getattr(cfg, "allowed_hosts", ""),
         "bloom_base_url": cfg.bloom_base_url,
         "bloom_verify_ssl": cfg.bloom_verify_ssl,
         "atlas_base_url": cfg.atlas_base_url,
@@ -553,6 +554,10 @@ class Settings(BaseSettings):
     api_port: int = Field(
         default=DEFAULT_API_PORT,
         description="API server port",
+    )
+    allowed_hosts: str = Field(
+        default="",
+        description="Comma-separated HTTP Host values accepted by the Ursa web server",
     )
     ursa_tapdb_mount_enabled: bool = Field(
         default=True,

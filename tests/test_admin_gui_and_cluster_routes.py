@@ -993,6 +993,7 @@ def _settings() -> Settings:
         ursa_tapdb_mount_enabled=False,
         deployment_name="inflec3",
         day_aws_region="us-west-2",
+        allowed_hosts="testserver,localhost",
         ui_show_environment_chrome=True,
     )
 

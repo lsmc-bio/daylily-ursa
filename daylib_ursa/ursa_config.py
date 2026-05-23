@@ -208,6 +208,7 @@ VALID_FIELDS = {
     "session_secret_key": (str, "Session secret key for web sessions"),
     "api_host": (str, "API bind host"),
     "api_port": (int, "API bind port"),
+    "allowed_hosts": (str, "Comma-separated HTTP Host values accepted by the Ursa web server"),
     "ursa_tapdb_mount_enabled": (bool, "Mount TapDB admin UI/API inside Ursa"),
     "ursa_tapdb_mount_path": (str, "Ursa path prefix for embedded TapDB admin UI/API"),
     "bloom_base_url": (str, "Bloom base URL"),
@@ -318,6 +319,7 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "cognito_logout_url",
         "session_secret_key",
         "api_host",
+        "allowed_hosts",
         "bloom_base_url",
         "atlas_base_url",
         "dewey_base_url",
@@ -465,6 +467,9 @@ class UrsaConfig:
 
     api_port: Optional[int] = None
     """API bind port read from YAML config."""
+
+    allowed_hosts: Optional[str] = None
+    """Comma-separated HTTP Host values accepted by the Ursa web server."""
 
     ursa_tapdb_mount_enabled: Optional[bool] = None
     """Whether to mount the embedded TapDB admin UI/API."""
@@ -630,6 +635,7 @@ class UrsaConfig:
         session_secret_key = data.get("session_secret_key")
         api_host = data.get("api_host")
         api_port = data.get("api_port")
+        allowed_hosts = data.get("allowed_hosts")
         ursa_tapdb_mount_enabled = data.get("ursa_tapdb_mount_enabled")
         ursa_tapdb_mount_path = data.get("ursa_tapdb_mount_path")
         bloom_base_url = data.get("bloom_base_url")
@@ -684,6 +690,7 @@ class UrsaConfig:
             session_secret_key=session_secret_key,
             api_host=api_host,
             api_port=api_port,
+            allowed_hosts=allowed_hosts,
             ursa_tapdb_mount_enabled=ursa_tapdb_mount_enabled,
             ursa_tapdb_mount_path=ursa_tapdb_mount_path,
             bloom_base_url=bloom_base_url,

@@ -12,6 +12,9 @@ os.environ.setdefault(
     "lsmc.com,lsmc.bio,lsmc.life,daylilyinformatics.com",
 )
 
+os.environ.setdefault("XDG_CONFIG_HOME", "/tmp/ursa-test-config")
+os.environ.setdefault("URSA_DEPLOYMENT_CODE", "test")
+
 
 @pytest.fixture(autouse=True)
 def _installed_required_dayec_for_unit_tests(monkeypatch):
