@@ -167,15 +167,16 @@ class MemoryBackend:
 
 
 class DummyAuthProvider:
-    def __init__(self, *, admin: bool = True) -> None:
+    def __init__(self, *, admin: bool = True, email: str = "alice@lsmc.com") -> None:
         self.admin = admin
+        self.email = email
 
     def resolve_access_token(self, access_token: str) -> CurrentUser:
         if access_token != "atlas-token":
             raise AuthError("Invalid authentication token")
         return CurrentUser(
             sub=ADMIN_USER_ID,
-            email="alice@lsmc.com",
+            email=self.email,
             name="Alice Example",
             tenant_id=TENANT_ID,
             roles=[Role.ADMIN.value] if self.admin else [Role.READ_ONLY.value],
@@ -992,13 +993,14 @@ def _settings() -> Settings:
         ursa_tapdb_mount_enabled=False,
         deployment_name="inflec3",
         day_aws_region="us-west-2",
+        allowed_hosts="testserver,localhost",
         ui_show_environment_chrome=True,
     )
 
 
-def _create_test_app(*, admin: bool = True):
+def _create_test_app(*, admin: bool = True, email: str = "alice@lsmc.com"):
     backend = MemoryBackend()
-    auth_provider = DummyAuthProvider(admin=admin)
+    auth_provider = DummyAuthProvider(admin=admin, email=email)
     user_directory = DummyUserDirectory()
     resources = MemoryResourceStore()
     cluster_service = DummyClusterService()
@@ -1646,9 +1648,10 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert dashboard.status_code == 200
     assert "Welcome back" in dashboard.text
     assert "Active Slurm Jobs" in dashboard.text
+    assert "Loading dashboard data" in dashboard.text
     assert usage_page.status_code == 200
     assert "Usage Summary" in usage_page.text
-    assert "AWS usage report failed" in usage_page.text
+    assert "Loading usage data" in usage_page.text
     assert staging_page.status_code == 200
     assert "Staging" in staging_page.text
     assert buckets_page.status_code == 200
@@ -1671,6 +1674,64 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert admin_config_page.status_code == 200
     assert "Configuration" in admin_config_page.text
 
+
+
+
+def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
+    app, _resources = _create_test_app(admin=True)
+    dashboard_calls = {"clusters": 0, "usage": 0}
+
+    class DummyClusterService:
+        regions = ["us-west-2"]
+
+        def get_all_clusters_with_status(self, *, force_refresh=False, fetch_ssh_status=False):
+            dashboard_calls["clusters"] += 1
+            return []
+
+    class DummyUsageReport:
+        def to_dict(self):
+            return {
+                "aws_profile": "lsmc",
+                "account_id": "123456789012",
+                "regions": ["us-west-2"],
+                "start_date": "2026-05-01",
+                "end_date": "2026-05-21",
+                "fetched_at": "2026-05-20T04:30:00Z",
+                "cache_expires_at": "2026-05-20T04:45:00Z",
+                "ttl_seconds": 900,
+                "tag_keys": [],
+                "budgets": [],
+                "costs_by_tag_service": [],
+                "cost_totals_by_service": [],
+                "cost_totals_by_tag_key": {},
+                "resource_inventory": [],
+            }
+
+    class DummyUsageService:
+        def get_report(self, *, force_refresh=False):
+            dashboard_calls["usage"] += 1
+            return DummyUsageReport()
+
+    app.state.cluster_service = DummyClusterService()
+    app.state.aws_usage_report_service = DummyUsageService()
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        first_dashboard = client.get("/api/v1/gui/dashboard")
+        second_dashboard = client.get("/api/v1/gui/dashboard")
+        first_usage = client.get("/api/v1/gui/usage")
+        second_usage = client.get("/api/v1/gui/usage")
+        refreshed_usage = client.get("/api/v1/gui/usage?refresh=true")
+
+    assert first_dashboard.status_code == 200
+    assert second_dashboard.status_code == 200
+    assert first_dashboard.json()["cache"]["cached"] is False
+    assert second_dashboard.json()["cache"]["cached"] is True
+    assert first_usage.json()["cache"]["cached"] is False
+    assert second_usage.json()["cache"]["cached"] is True
+    assert refreshed_usage.json()["cache"]["cached"] is False
+    assert dashboard_calls["clusters"] == 1
+    assert dashboard_calls["usage"] == 3
 
 def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
     app, _resources = _create_test_app(admin=True)
@@ -1736,17 +1797,18 @@ def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
             data={"access_token": "atlas-token", "next_path": "/usage"},
             follow_redirects=False,
         )
-        response = client.get("/usage?refresh=true")
+        page = client.get("/usage?refresh=true")
+        response = client.get("/api/v1/gui/usage?refresh=true")
 
+    assert page.status_code == 200
+    assert "Loading usage data" in page.text
     assert response.status_code == 200
+    payload = response.json()
     assert service_calls == [True]
-    assert "Spend Visuals" in response.text
-    assert "Tag Spend By Service" in response.text
-    assert "Tagged Resource Inventory" in response.text
-    assert "aws-parallelcluster-project" in response.text
-    assert "Amazon Elastic Compute Cloud - Compute" in response.text
-    assert "$42.50" in response.text
-    assert "placeholder" not in response.text
+    assert payload["usage_report"]["tag_keys"] == ["aws-parallelcluster-project"]
+    assert payload["usage_report"]["costs_by_tag_service"][0]["service"] == "Amazon Elastic Compute Cloud - Compute"
+    assert payload["usage_report"]["costs_by_tag_service"][0]["amount"] == 42.5
+    assert payload["cache"]["cached"] is False
 
 
 def test_cluster_create_blocks_when_partition_verification_fails() -> None:
@@ -1918,6 +1980,60 @@ def test_cluster_partition_prechecks_cover_pass_warn_fail_and_pricing() -> None:
     assert pricing.json()["partitions"][2]["availability_zones"][0]["count"] == 0
     assert pricing.json()["partitions"][2]["availability_zones"][1]["mean"] == 12.1
 
+
+
+def test_aws_usage_report_route_and_nav_are_lsmc_domain_gated(tmp_path) -> None:
+    app, _resources = _create_test_app(admin=True)
+    report_dir = tmp_path / "aws_usage_report"
+    (report_dir / "images").mkdir(parents=True)
+    (report_dir / "index.html").write_text("<html>AWS 90-Day Retrospective Cost Analysis</html>", encoding="utf-8")
+    (report_dir / "images" / "daily_spend.svg").write_text("<svg></svg>", encoding="utf-8")
+    app.state.settings.aws_usage_report_dir = str(report_dir)
+    app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        unauthenticated = client.get("/aws_usage_report/", follow_redirects=False)
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        dashboard = client.get("/")
+        index = client.get("/aws_usage_report/")
+        asset = client.get("/aws_usage_report/images/daily_spend.svg")
+        traversal = client.get("/aws_usage_report/%2e%2e/secret.txt")
+
+    assert unauthenticated.status_code == 303
+    assert unauthenticated.headers["location"].startswith("/login")
+    assert 'href="/aws_usage_report/" class="nav-link" target="_blank" rel="noopener noreferrer"' in dashboard.text
+    assert index.status_code == 200
+    assert "AWS 90-Day Retrospective Cost Analysis" in index.text
+    assert asset.status_code == 200
+    assert traversal.status_code == 404
+
+
+def test_aws_usage_report_rejects_non_lsmc_domain_and_missing_report(tmp_path) -> None:
+    allowed_app, _resources = _create_test_app(admin=True)
+    missing_report_dir = tmp_path / "missing"
+    allowed_app.state.settings.aws_usage_report_dir = str(missing_report_dir)
+    allowed_app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
+
+    with TestClient(allowed_app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        missing = client.get("/aws_usage_report/")
+
+    blocked_app, _resources = _create_test_app(admin=True, email="alice@lsmc.bio")
+    report_dir = tmp_path / "aws_usage_report"
+    report_dir.mkdir()
+    (report_dir / "index.html").write_text("<html>report</html>", encoding="utf-8")
+    blocked_app.state.settings.aws_usage_report_dir = str(report_dir)
+    blocked_app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
+
+    with TestClient(blocked_app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/"})
+        dashboard = client.get("/")
+        blocked = client.get("/aws_usage_report/")
+
+    assert missing.status_code == 503
+    assert "aws_usage_report_dir does not exist" in missing.text
+    assert 'href="/aws_usage_report/"' not in dashboard.text
+    assert blocked.status_code == 403
 
 def test_gui_admin_pages_reject_non_admin_sessions() -> None:
     app, _resources = _create_test_app(admin=False)

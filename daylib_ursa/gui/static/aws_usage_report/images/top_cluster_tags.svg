@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="520" viewBox="0 0 1040 520">
+<rect width="100%" height="100%" fill="#fff"/>
+<text x="285" y="32" font-family="Arial" font-size="22" font-weight="700">Top ParallelCluster Tag Spend</text>
+<text x="275" y="75.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">(blank)</text>
+<rect x="285" y="62.0" width="710.0" height="18.4" rx="2" fill="#2563eb"/>
+<text x="1001.0" y="75.1" font-family="Arial" font-size="12" fill="#374151">$11,071</text>
+<text x="275" y="101.5" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">agbt-heavy</text>
+<rect x="285" y="88.4" width="248.1" height="18.4" rx="2" fill="#16a34a"/>
+<text x="539.1" y="101.5" font-family="Arial" font-size="12" fill="#374151">$3,868</text>
+<text x="275" y="127.9" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">may26-d</text>
+<rect x="285" y="114.8" width="236.6" height="18.4" rx="2" fill="#dc2626"/>
+<text x="527.6" y="127.9" font-family="Arial" font-size="12" fill="#374151">$3,689</text>
+<text x="275" y="154.3" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">ifx-go</text>
+<rect x="285" y="141.1" width="167.0" height="18.4" rx="2" fill="#ca8a04"/>
+<text x="458.0" y="154.3" font-family="Arial" font-size="12" fill="#374151">$2,604</text>
+<text x="275" y="180.6" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">mk-gotime3</text>
+<rect x="285" y="167.5" width="118.7" height="18.4" rx="2" fill="#7c3aed"/>
+<text x="409.7" y="180.6" font-family="Arial" font-size="12" fill="#374151">$1,851</text>
+<text x="275" y="207.0" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">fk-260509-use</text>
+<rect x="285" y="193.9" width="117.0" height="18.4" rx="2" fill="#0891b2"/>
+<text x="408.0" y="207.0" font-family="Arial" font-size="12" fill="#374151">$1,824</text>
+<text x="275" y="233.4" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">agbt-12t-usw2d</text>
+<rect x="285" y="220.2" width="101.7" height="18.4" rx="2" fill="#db2777"/>
+<text x="392.7" y="233.4" font-family="Arial" font-size="12" fill="#374151">$1,586</text>
+<text x="275" y="259.8" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">inflextion-g24</text>
+<rect x="285" y="246.6" width="88.6" height="18.4" rx="2" fill="#4b5563"/>
+<text x="379.6" y="259.8" font-family="Arial" font-size="12" fill="#374151">$1,382</text>
+<text x="275" y="286.1" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">dra-enabled</text>
+<rect x="285" y="273.0" width="58.9" height="18.4" rx="2" fill="#ea580c"/>
+<text x="349.9" y="286.1" font-family="Arial" font-size="12" fill="#374151">$918</text>
+<text x="275" y="312.5" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">at-sanity</text>
+<rect x="285" y="299.4" width="53.3" height="18.4" rx="2" fill="#059669"/>
+<text x="344.3" y="312.5" font-family="Arial" font-size="12" fill="#374151">$831</text>
+<text x="275" y="338.9" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">dec219-cluster</text>
+<rect x="285" y="325.8" width="53.1" height="18.4" rx="2" fill="#2563eb"/>
+<text x="344.1" y="338.9" font-family="Arial" font-size="12" fill="#374151">$827</text>
+<text x="275" y="365.3" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">daylily-1773059211</text>
+<rect x="285" y="352.1" width="39.5" height="18.4" rx="2" fill="#16a34a"/>
+<text x="330.5" y="365.3" font-family="Arial" font-size="12" fill="#374151">$616</text>
+<text x="275" y="391.6" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">pilot-largecluster</text>
+<rect x="285" y="378.5" width="30.4" height="18.4" rx="2" fill="#dc2626"/>
+<text x="321.4" y="391.6" font-family="Arial" font-size="12" fill="#374151">$475</text>
+<text x="275" y="418.0" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">mk-gotime</text>
+<rect x="285" y="404.9" width="27.7" height="18.4" rx="2" fill="#ca8a04"/>
+<text x="318.7" y="418.0" font-family="Arial" font-size="12" fill="#374151">$433</text>
+<text x="275" y="444.4" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">pilot-mk</text>
+<rect x="285" y="431.2" width="25.0" height="18.4" rx="2" fill="#7c3aed"/>
+<text x="316.0" y="444.4" font-family="Arial" font-size="12" fill="#374151">$391</text>
+<text x="275" y="470.8" text-anchor="end" font-family="Arial" font-size="13" fill="#111827">daylily-1773057991</text>
+<rect x="285" y="457.6" width="24.8" height="18.4" rx="2" fill="#0891b2"/>
+<text x="315.8" y="470.8" font-family="Arial" font-size="12" fill="#374151">$387</text>
+</svg>

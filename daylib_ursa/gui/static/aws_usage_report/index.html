@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AWS 90-Day Retrospective Cost Analysis</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #17212b;
+      --muted: #5a6675;
+      --line: #d7dde5;
+      --blue: #1f5f99;
+      --teal: #1c7f72;
+      --amber: #9b6400;
+      --red: #a33a32;
+      --shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover,
+    a:focus {
+      text-decoration: underline;
+    }
+
+    .page {
+      width: min(1220px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    header {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--blue);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 34px 0 14px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 1.05rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    code {
+      background: #edf1f5;
+      border: 1px solid #dce3eb;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 0 0 18px;
+      padding: 14px;
+      background: #111827;
+      color: #f8fafc;
+      border-radius: 8px;
+      font-size: 0.88rem;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
+      font-size: inherit;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .meta div,
+    .metric,
+    .panel,
+    .plot {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .meta div {
+      padding: 12px;
+    }
+
+    .label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.77rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      display: block;
+      margin-top: 4px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .notice {
+      margin-top: 18px;
+      padding: 12px 14px;
+      border-left: 4px solid var(--amber);
+      background: #fff8e7;
+      color: #4a3511;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(140px, 1fr));
+      gap: 12px;
+      margin: 18px 0 8px;
+    }
+
+    .metric {
+      padding: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.45rem;
+      line-height: 1.1;
+    }
+
+    .metric .small {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .section {
+      margin-top: 20px;
+    }
+
+    .panel {
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    .plots {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .plot {
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .plot figcaption {
+      padding: 12px 14px;
+      color: var(--muted);
+      font-weight: 700;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .plot img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #fff;
+    }
+
+    .wide {
+      grid-column: 1 / -1;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: #344054;
+      background: #eef3f8;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    td.num,
+    th.num {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .priority {
+      color: var(--red);
+      font-weight: 700;
+    }
+
+    .good {
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .callouts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .callout {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .callout.savings {
+      border-left-color: var(--teal);
+    }
+
+    .callout.risk {
+      border-left-color: var(--red);
+    }
+
+    .callout h3 {
+      margin-top: 0;
+    }
+
+    .compact-list {
+      margin: 0 0 0 20px;
+      padding: 0;
+    }
+
+    .compact-list li {
+      margin: 6px 0;
+    }
+
+    footer {
+      margin-top: 30px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 1020px) {
+      .meta,
+      .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .plots,
+      .callouts {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .page {
+        width: min(100% - 20px, 1220px);
+        padding-top: 12px;
+      }
+
+      header,
+      .panel {
+        padding: 14px;
+      }
+
+      .meta,
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      th,
+      td {
+        padding: 8px 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <p class="eyebrow">Read-only AWS cost report</p>
+      <h1>AWS 90-Day Retrospective Cost Analysis</h1>
+      <div class="meta" aria-label="Report metadata">
+        <div>
+          <span class="label">Generated At</span>
+          <span class="value">2026-05-21T18:11:55.653503Z</span>
+        </div>
+        <div>
+          <span class="label">Markdown Date</span>
+          <span class="value">2026-05-21</span>
+        </div>
+        <div>
+          <span class="label">Window</span>
+          <span class="value">2026-02-20 to 2026-05-20</span>
+        </div>
+        <div>
+          <span class="label">AWS Profile</span>
+          <span class="value">lsmc</span>
+        </div>
+        <div>
+          <span class="label">Account</span>
+          <span class="value">108782052779</span>
+        </div>
+      </div>
+      <p class="notice">No AWS mutations were performed. Tagging, stopping, deleting, lifecycle, retention, and cleanup actions are recommendations only.</p>
+    </header>
+
+    <section class="section" aria-labelledby="summary">
+      <h2 id="summary">Executive Summary</h2>
+      <div class="metrics">
+        <div class="metric">
+          <span class="label">90-Day Spend</span>
+          <strong>$35,043.24</strong>
+          <span class="small">UnblendedCost</span>
+        </div>
+        <div class="metric">
+          <span class="label">Top Region</span>
+          <strong>$31,764.92</strong>
+          <span class="small">us-west-2, 90.6%</span>
+        </div>
+        <div class="metric">
+          <span class="label">Top 5 Services</span>
+          <strong>$33,116</strong>
+          <span class="small">94.5% of spend</span>
+        </div>
+        <div class="metric">
+          <span class="label">Live Resources</span>
+          <strong>142</strong>
+          <span class="small">focused collector</span>
+        </div>
+        <div class="metric">
+          <span class="label">Tag Gaps</span>
+          <strong>95</strong>
+          <span class="small">missing or incomplete attribution</span>
+        </div>
+        <div class="metric">
+          <span class="label">Savings Targets</span>
+          <strong>18</strong>
+          <span class="small">review candidates</span>
+        </div>
+      </div>
+      <div class="callouts">
+        <div class="callout savings">
+          <h3>Clearest savings target</h3>
+          <p>The largest live run-rate risk is two active FSx Lustre filesystems: <code>fs-01c4180aab049f24c</code> / <code>XL-pilot</code> at about $2,016 per month and <code>fs-017ab7a7cdbf44c54</code> / <code>dra-enabled</code> at about $1,680 per month.</p>
+        </div>
+        <div class="callout risk">
+          <h3>Clearest governance gap</h3>
+          <p>Cost Explorer has 100% blank historical buckets for <code>Project</code>, <code>project</code>, <code>lsmc-project</code>, <code>Name</code>, and CloudFormation stack tags. Live resource tags exist, but they are inconsistent enough to block reliable project attribution.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="plots">
+      <h2 id="plots">Overview Plots</h2>
+      <div class="plots">
+        <figure class="plot wide">
+          <figcaption>Daily AWS spend</figcaption>
+          <img src="images/daily_spend.svg" alt="Daily AWS spend line chart">
+        </figure>
+        <figure class="plot wide">
+          <figcaption>Weekly spend by top service</figcaption>
+          <img src="images/weekly_service_spend.svg" alt="Weekly stacked bar chart by top service">
+        </figure>
+        <figure class="plot">
+          <figcaption>Top services</figcaption>
+          <img src="images/top_services.svg" alt="Top services bar chart">
+        </figure>
+        <figure class="plot">
+          <figcaption>Top regions</figcaption>
+          <img src="images/top_regions.svg" alt="Top regions bar chart">
+        </figure>
+        <figure class="plot">
+          <figcaption>Top ParallelCluster tag spend</figcaption>
+          <img src="images/top_cluster_tags.svg" alt="ParallelCluster tag spend bar chart">
+        </figure>
+        <figure class="plot">
+          <figcaption>Blank tag cost buckets</figcaption>
+          <img src="images/tag_gap_costs.svg" alt="Blank tag cost buckets bar chart">
+        </figure>
+        <figure class="plot wide">
+          <figcaption>Savings candidates</figcaption>
+          <img src="images/savings_candidates.svg" alt="Savings candidates bar chart">
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="time-trend">
+      <h2 id="time-trend">Time Trend</h2>
+      <div class="panel">
+        <p>May month-to-date is the largest segment and was marked estimated by Cost Explorer. The spike is mainly EC2 compute plus FSx and S3 persistence around live and recently deleted ParallelCluster workloads.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th class="num">Spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>2026-02-20 to 2026-02-28</td><td class="num">$6,178.49</td></tr>
+              <tr><td>2026-03-01 to 2026-03-31</td><td class="num">$4,244.84</td></tr>
+              <tr><td>2026-04-01 to 2026-04-30</td><td class="num">$9,334.55</td></tr>
+              <tr><td>2026-05-01 to 2026-05-20</td><td class="num">$15,285.37</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="drivers">
+      <h2 id="drivers">Cost Drivers</h2>
+      <div class="panel">
+        <h3>Top services</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Driver</th>
+                <th class="num">90-Day Spend</th>
+                <th class="num">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Amazon EC2 Compute</td><td class="num">$15,308.47</td><td class="num">43.7%</td></tr>
+              <tr><td>Amazon FSx</td><td class="num">$9,562.84</td><td class="num">27.3%</td></tr>
+              <tr><td>Amazon S3</td><td class="num">$4,531.77</td><td class="num">12.9%</td></tr>
+              <tr><td>EC2 - Other</td><td class="num">$2,190.19</td><td class="num">6.2%</td></tr>
+              <tr><td>RDS</td><td class="num">$1,522.72</td><td class="num">4.3%</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Regions</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Region</th>
+                <th class="num">Spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>us-west-2</td><td class="num">$31,764.92</td></tr>
+              <tr><td>us-east-1</td><td class="num">$1,511.77</td></tr>
+              <tr><td>global</td><td class="num">$1,016.09</td></tr>
+              <tr><td>eu-central-1</td><td class="num">$376.49</td></tr>
+              <tr><td>ap-south-1</td><td class="num">$321.61</td></tr>
+              <tr><td>all other enabled regions combined</td><td class="num">$52.44</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Usage types</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Usage Type</th>
+                <th class="num">Spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>USW2-Storage</code></td><td class="num">$9,562.23</td></tr>
+              <tr><td><code>USW2-TimedStorage-ByteHrs</code></td><td class="num">$4,241.27</td></tr>
+              <tr><td><code>USW2-SpotUsage:m7i.metal-48xl</code></td><td class="num">$3,861.08</td></tr>
+              <tr><td><code>USW2-SpotUsage:m7i.48xlarge</code></td><td class="num">$3,200.77</td></tr>
+              <tr><td><code>USW2-SpotUsage:r7i.48xlarge</code></td><td class="num">$2,713.55</td></tr>
+              <tr><td><code>USW2-BoxUsage:r7i.2xlarge</code></td><td class="num">$1,637.02</td></tr>
+              <tr><td><code>USW2-EBS:VolumeUsage.gp3</code></td><td class="num">$909.68</td></tr>
+              <tr><td><code>Dollar</code> / AWS Support</td><td class="num">$819.07</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>ParallelCluster attribution</h3>
+        <p>The <code>parallelcluster:cluster-name</code> blank bucket is <strong>$11,071.44 / 31.6%</strong>. Its largest services were S3, EC2 Other, RDS, EC2 Compute, and Support, so this bucket is mostly non-cluster or cluster-adjacent resources without cluster tags.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><code>parallelcluster:cluster-name</code></th>
+                <th class="num">Spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>blank / not cluster-tagged</td><td class="num">$11,071.44</td></tr>
+              <tr><td><code>agbt-heavy</code></td><td class="num">$3,868.35</td></tr>
+              <tr><td><code>may26-d</code></td><td class="num">$3,688.69</td></tr>
+              <tr><td><code>ifx-go</code></td><td class="num">$2,603.90</td></tr>
+              <tr><td><code>mk-gotime3</code></td><td class="num">$1,851.03</td></tr>
+              <tr><td><code>fk-260509-use</code></td><td class="num">$1,824.33</td></tr>
+              <tr><td><code>agbt-12t-usw2d</code></td><td class="num">$1,585.74</td></tr>
+              <tr><td><code>inflextion-g24</code></td><td class="num">$1,382.12</td></tr>
+              <tr><td><code>dra-enabled</code></td><td class="num">$917.87</td></tr>
+              <tr><td><code>at-sanity</code></td><td class="num">$830.78</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="tags">
+      <h2 id="tags">Live Resource And Tag Investigation</h2>
+      <div class="panel">
+        <p>Live inventory covered the material spend regions <code>us-west-2</code>, <code>us-east-1</code>, <code>eu-central-1</code>, <code>ap-south-1</code>, global S3 buckets, and a lightweight core sweep of the remaining enabled regions. The low-spend-region sweep found no EC2, EBS, EIP, NAT, FSx, or RDS resources in the remaining regions.</p>
+        <h3>Current active ParallelClusters</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cluster</th>
+                <th>Region</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>XL-pilot</code></td><td>us-west-2</td><td><code>CREATE_COMPLETE</code></td></tr>
+              <tr><td><code>dra-enabled</code></td><td>us-west-2</td><td><code>CREATE_COMPLETE</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Focused collector tag status across 142 live resources</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tag Status</th>
+                <th class="num">Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>completely untagged</td><td class="num">41</td></tr>
+              <tr><td>missing cluster/stack</td><td class="num">31</td></tr>
+              <tr><td>missing <code>Name</code></td><td class="num">28</td></tr>
+              <tr><td>missing project</td><td class="num">16</td></tr>
+              <tr><td>other tags only</td><td class="num">8</td></tr>
+              <tr><td>fully attributed</td><td class="num">18</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Live resources to tag</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Resource</th>
+                <th>Problem</th>
+                <th>Console</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>labcore-dev-instance-1</code> RDS</td><td>completely untagged</td><td><a href="https://console.aws.amazon.com/rds/home?region=us-west-2#database:id=labcore-dev-instance-1;is-cluster=false">open</a></td></tr>
+              <tr><td><code>labcore-dev</code> RDS cluster</td><td>completely untagged</td><td><a href="https://console.aws.amazon.com/rds/home?region=us-west-2#database:id=labcore-dev;is-cluster=true">open</a></td></tr>
+              <tr><td><code>i-09f66b3f11ea42c60</code> / <code>labplatform-mvp</code></td><td><code>Name</code> only, missing project/cluster</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#InstanceDetails:instanceId=i-09f66b3f11ea42c60">open</a></td></tr>
+              <tr><td><code>i-071ccd80c69969d92</code> / <code>terrarium-dev-tailscale-router</code></td><td>missing cluster/stack</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#InstanceDetails:instanceId=i-071ccd80c69969d92">open</a></td></tr>
+              <tr><td><code>i-03a38912d7d651f1a</code> / <code>terrarium-prod-tailscale-router</code></td><td>missing cluster/stack</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#InstanceDetails:instanceId=i-03a38912d7d651f1a">open</a></td></tr>
+              <tr><td><code>vol-0c69ba6b467620e14</code></td><td>completely untagged 336 GiB EBS</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-0c69ba6b467620e14">open</a></td></tr>
+              <tr><td><code>vol-0ea36895cc2b979ac</code></td><td>completely untagged 336 GiB EBS</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-0ea36895cc2b979ac">open</a></td></tr>
+              <tr><td><code>vol-0c26833469cf6995a</code></td><td>completely untagged 234 GiB EBS attached to stopped <code>lsmc-web</code></td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-0c26833469cf6995a">open</a></td></tr>
+              <tr><td><code>dra-0e036df15b52f3f85</code></td><td>FSx DRA has only non-attribution tags</td><td><a href="https://us-west-2.console.aws.amazon.com/fsx/home?region=us-west-2#data-repository-association-details/dra-0e036df15b52f3f85">open</a></td></tr>
+              <tr><td><code>dra-006ba927d666a551f</code></td><td>FSx DRA has only non-attribution tags</td><td><a href="https://us-west-2.console.aws.amazon.com/fsx/home?region=us-west-2#data-repository-association-details/dra-006ba927d666a551f">open</a></td></tr>
+              <tr><td><code>lsmc-ssf-sequencing-data</code></td><td>S3 bucket completely untagged, no lifecycle returned</td><td><a href="https://s3.console.aws.amazon.com/s3/buckets/lsmc-ssf-sequencing-data?region=us-west-2&amp;bucketType=general">open</a></td></tr>
+              <tr><td><code>lsmc-dayoa-omics-analysis-us-west-2</code></td><td>S3 bucket completely untagged, no lifecycle returned</td><td><a href="https://s3.console.aws.amazon.com/s3/buckets/lsmc-dayoa-omics-analysis-us-west-2?region=us-west-2&amp;bucketType=general">open</a></td></tr>
+              <tr><td><code>lsmc-healthomics-results</code></td><td>S3 bucket completely untagged, no lifecycle returned</td><td><a href="https://s3.console.aws.amazon.com/s3/buckets/lsmc-healthomics-results?region=us-west-2&amp;bucketType=general">open</a></td></tr>
+              <tr><td><code>lsmc-ursa-customers-usw2</code></td><td>S3 bucket completely untagged, no lifecycle returned</td><td><a href="https://s3.console.aws.amazon.com/s3/buckets/lsmc-ursa-customers-usw2?region=us-west-2&amp;bucketType=general">open</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="savings">
+      <h2 id="savings">Zombie And Savings Candidates</h2>
+      <div class="panel">
+        <p>These are review targets, not deletion instructions. The two FSx filesystems are the largest clear savings surface. If their backing data has already been exported and no jobs are active, they should be prioritized for delete-plan review under the usual second-confirmation destructive-action policy.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Target</th>
+                <th>Evidence</th>
+                <th class="num">Estimated Monthly Run-Rate</th>
+                <th>Console</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>fs-01c4180aab049f24c</code> / <code>XL-pilot</code> FSx</td><td><code>AVAILABLE</code>, 14,400 GiB SCRATCH_2</td><td class="num priority">~$2,016</td><td><a href="https://us-west-2.console.aws.amazon.com/fsx/home?region=us-west-2#file-system-details/fs-01c4180aab049f24c">open</a></td></tr>
+              <tr><td><code>fs-017ab7a7cdbf44c54</code> / <code>dra-enabled</code> FSx</td><td><code>AVAILABLE</code>, 12,000 GiB SCRATCH_2</td><td class="num priority">~$1,680</td><td><a href="https://us-west-2.console.aws.amazon.com/fsx/home?region=us-west-2#file-system-details/fs-017ab7a7cdbf44c54">open</a></td></tr>
+              <tr><td><code>vol-067169329e7a92af1</code></td><td>unattached 421 GiB gp3 EBS</td><td class="num">~$33.68</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-067169329e7a92af1">open</a></td></tr>
+              <tr><td><code>vol-0f5e5d7eec5982fa8</code></td><td>unattached 421 GiB gp3 EBS</td><td class="num">~$33.68</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-0f5e5d7eec5982fa8">open</a></td></tr>
+              <tr><td><code>vol-0c90d4fbaada3820a</code></td><td>unattached 421 GiB gp3 EBS</td><td class="num">~$33.68</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-0c90d4fbaada3820a">open</a></td></tr>
+              <tr><td><code>vol-042a5f5daead20490</code></td><td>unattached 421 GiB gp3 EBS</td><td class="num">~$33.68</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#VolumeDetails:volumeId=vol-042a5f5daead20490">open</a></td></tr>
+              <tr><td><code>eipalloc-02ef5760f8f8700fd</code></td><td>unassociated Elastic IP</td><td class="num">~$3.60</td><td><a href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#Addresses:PublicIp=eipalloc-02ef5760f8f8700fd">open</a></td></tr>
+              <tr><td>NAT gateways</td><td>ten active NAT gateways across material regions; several missing project/cluster attribution</td><td class="num">~$32.40 each before data processing</td><td><a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/zombie_candidates.csv">inventory CSV</a></td></tr>
+              <tr><td><code>dayhoff-lsmcq7-tapdb-writer</code></td><td><code>db.r8g.2xlarge</code> Aurora writer remains available</td><td class="num">not estimated</td><td><a href="https://us-west-2.console.aws.amazon.com/rds/home?region=us-west-2#database:id=dayhoff-lsmcq7-tapdb-writer;is-cluster=false">open</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="ursa">
+      <h2 id="ursa">Ursa Production Automation Notes</h2>
+      <div class="panel">
+        <p>This report family should be turned into a scheduled producer plus read-only Ursa consumer. Cost Explorer and regional inventory scans should stay off dashboard request paths.</p>
+        <h3>Producer behavior</h3>
+        <ul class="compact-list">
+          <li>Run daily after Cost Explorer data is expected to settle.</li>
+          <li>Use explicit config only; missing config fails closed.</li>
+          <li>Write versioned artifacts to a configured S3 bucket/prefix.</li>
+          <li>Do not infer an S3 bucket from Ursa internal output buckets, cluster tags, default profile state, or service-side discovery.</li>
+          <li>Precompute console links, plot artifacts, and stale/error metadata.</li>
+        </ul>
+        <h3>Recommended artifact layout</h3>
+        <pre><code>current/summary.json
+current/resources.json
+current/savings.json
+current/report.md
+current/plots/*.svg
+runs/&lt;run_id&gt;/summary.json
+runs/&lt;run_id&gt;/resources.json
+runs/&lt;run_id&gt;/savings.json
+runs/&lt;run_id&gt;/report.md
+runs/&lt;run_id&gt;/plots/*.svg</code></pre>
+        <h3>Future Ursa config keys</h3>
+        <pre><code>cost_report_bucket: &lt;required&gt;
+cost_report_prefix: &lt;required&gt;
+cost_report_profile: &lt;required&gt;
+cost_report_region: &lt;required&gt;
+cost_report_max_age_hours: &lt;required&gt;</code></pre>
+        <h3>Route/API shape</h3>
+        <ul class="compact-list">
+          <li>Add a read-only admin page such as <code>/usage/aws-cost</code>.</li>
+          <li>Add <code>GET /api/v1/aws-cost-report/current</code>.</li>
+          <li>Return freshness state, run ID, generated timestamp, report link, plot links, top cost drivers, untagged live resources, and savings candidates.</li>
+          <li>Show explicit <code>missing</code>, <code>stale</code>, or <code>error</code> states when artifacts are absent or too old.</li>
+          <li>Keep this separate from the existing Ursa spot-pricing monitor; that monitor captures partition spot-price availability, not actual Cost Explorer spend.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="evidence">
+      <h2 id="evidence">Evidence And Artifacts</h2>
+      <div class="panel">
+        <p>Cost Explorer evidence is preserved as raw response JSON under <code>docs/aws_3month_retrospective_cost_analysis_assets/raw/</code>; those filenames encode the grouped query dimensions. Read-only command evidence is preserved in <a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/inventory_commands.json"><code>inventory_commands.json</code></a>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Artifact</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Source Markdown report</td><td><a href="../docs/AWS_3month_retrospective_cost_analysis.md">docs/AWS_3month_retrospective_cost_analysis.md</a></td></tr>
+              <tr><td>Summary JSON</td><td><a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/summary.json">summary.json</a></td></tr>
+              <tr><td>Live resources JSON</td><td><a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/live_resources.json">live_resources.json</a></td></tr>
+              <tr><td>Untagged live resources CSV</td><td><a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/untagged_live_resources.csv">untagged_live_resources.csv</a></td></tr>
+              <tr><td>Zombie candidates CSV</td><td><a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/zombie_candidates.csv">zombie_candidates.csv</a></td></tr>
+              <tr><td>Low-spend region sweep JSON</td><td><a href="../docs/aws_3month_retrospective_cost_analysis_assets/data/low_spend_region_sweep.json">low_spend_region_sweep.json</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Expected metadata misses</h3>
+        <ul class="compact-list">
+          <li>32 S3 buckets returned <code>NoSuchLifecycleConfiguration</code>.</li>
+          <li>21 S3 buckets returned <code>NoSuchTagSet</code>.</li>
+          <li>Those are findings, not collector failures. After filtering those expected metadata misses, there were no unresolved read failures in the focused live inventory.</li>
+        </ul>
+        <h3>Limits</h3>
+        <ul class="compact-list">
+          <li>Cost Explorer reflects historical cost and tag activation state; it cannot prove that a historical resource is still running.</li>
+          <li>Live scan is current as of 2026-05-21 and may differ from historical spend sources that have since been deleted.</li>
+          <li>Live resource coverage is deepest for the material regions and global S3. A core EC2/EBS/EIP/NAT/FSx/RDS sweep of remaining enabled regions found no resources.</li>
+          <li>Savings estimates for FSx, EBS, EIP, and NAT are approximate run-rate estimates for prioritization, not invoices.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer>
+      <p>HTML translation generated from <a href="../docs/AWS_3month_retrospective_cost_analysis.md">the Markdown report</a>. Report generation datetime: <strong>2026-05-21T18:11:55.653503Z</strong>.</p>
+    </footer>
+  </main>
+</body>
+</html>

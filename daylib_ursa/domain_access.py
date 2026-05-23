@@ -14,6 +14,16 @@ APPROVED_WEB_DOMAIN_SUFFIXES: tuple[str, ...] = (
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "testserver"})
 
 
+def _ordered_unique(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
 def _normalize_host(value: str) -> str:
     candidate = str(value or "").strip()
     if not candidate:
@@ -58,9 +68,23 @@ def is_allowed_origin(origin: str, *, allow_local: bool) -> bool:
     return parsed.scheme == "https" and is_approved_domain(host)
 
 
-def build_trusted_hosts(*, allow_local: bool) -> list[str]:  # noqa: ARG001
-    # Host filtering is now handled upstream (security groups / load balancer).
-    return ["*"]
+def build_trusted_hosts(*, allow_local: bool, configured_hosts: str) -> list[str]:
+    raw_hosts = [item.strip() for item in str(configured_hosts or "").split(",")]
+    explicit_hosts = [_normalize_host(item) for item in raw_hosts if item]
+    explicit_hosts = [item for item in explicit_hosts if item]
+    if not explicit_hosts:
+        raise RuntimeError("Ursa requires explicit allowed_hosts; wildcard host filtering is disabled")
+
+    hosts = list(explicit_hosts)
+    if allow_local:
+        hosts.extend([
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "[::1]",
+            "testserver",
+        ])
+    return _ordered_unique(hosts)
 
 
 def build_allowed_origin_regex(*, allow_local: bool) -> str:

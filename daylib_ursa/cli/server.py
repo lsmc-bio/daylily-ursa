@@ -394,7 +394,10 @@ def start(
     for key in list(env):
         if key.startswith("TAPDB_"):
             env.pop(key, None)
-    env["MERIDIAN_DOMAIN_CODE"] = "Z"
+    tapdb_domain_code = str(getattr(settings, "tapdb_domain_code", "") or "").strip().upper()
+    if not tapdb_domain_code:
+        raise RuntimeError("Ursa tapdb_domain_code is required before server start")
+    env["MERIDIAN_DOMAIN_CODE"] = tapdb_domain_code
     env["TAPDB_OWNER_REPO"] = "ursa"
     if str(getattr(settings, "tapdb_config_path", "") or "").strip():
         env["TAPDB_CONFIG_PATH"] = str(settings.tapdb_config_path).strip()

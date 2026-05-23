@@ -52,6 +52,9 @@
                         <li><a href="/admin" class="nav-link {% if active_page == 'admin' %}active{% endif %}">Admin</a></li>
                         {% endif %}
                         <li><a href="/usage" class="nav-link {% if active_page == 'usage' %}active{% endif %}">Usage</a></li>
+                        {% if aws_usage_report_visible %}
+                        <li><a href="/aws_usage_report/" class="nav-link" target="_blank" rel="noopener noreferrer">AWS Usage</a></li>
+                        {% endif %}
                     </ul>
 
                     <div class="nav-user">

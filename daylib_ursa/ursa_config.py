@@ -172,6 +172,8 @@ VALID_FIELDS = {
     "aws_profile": (str, "AWS profile name"),
     "cognito_group_role_map": (dict, "Canonical Cognito group-to-role mapping"),
     "ursa_internal_output_bucket": (str, "Ursa-managed internal S3 bucket"),
+    "aws_usage_report_dir": (str, "Explicit local directory containing AWS usage report files"),
+    "aws_usage_report_allowed_domains": (str, "Comma-separated email domains allowed to view the AWS usage report"),
     "tapdb_client_id": (str, "TapDB client identifier"),
     "tapdb_database_name": (str, "TapDB namespace / database name"),
     "tapdb_schema_name": (str, "Explicit PostgreSQL schema used by TapDB"),
@@ -206,6 +208,7 @@ VALID_FIELDS = {
     "session_secret_key": (str, "Session secret key for web sessions"),
     "api_host": (str, "API bind host"),
     "api_port": (int, "API bind port"),
+    "allowed_hosts": (str, "Comma-separated HTTP Host values accepted by the Ursa web server"),
     "ursa_tapdb_mount_enabled": (bool, "Mount TapDB admin UI/API inside Ursa"),
     "ursa_tapdb_mount_path": (str, "Ursa path prefix for embedded TapDB admin UI/API"),
     "bloom_base_url": (str, "Bloom base URL"),
@@ -296,6 +299,8 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
     for field_name in [
         "aws_profile",
         "ursa_internal_output_bucket",
+        "aws_usage_report_dir",
+        "aws_usage_report_allowed_domains",
         "tapdb_client_id",
         "tapdb_database_name",
         "tapdb_schema_name",
@@ -314,6 +319,7 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "cognito_logout_url",
         "session_secret_key",
         "api_host",
+        "allowed_hosts",
         "bloom_base_url",
         "atlas_base_url",
         "dewey_base_url",
@@ -371,6 +377,12 @@ class UrsaConfig:
 
     ursa_internal_output_bucket: Optional[str] = None
     """Ursa-managed internal output bucket read from YAML config."""
+
+    aws_usage_report_dir: Optional[str] = None
+    """Explicit local directory containing AWS usage report files."""
+
+    aws_usage_report_allowed_domains: Optional[str] = None
+    """Comma-separated email domains allowed to view the AWS usage report."""
 
     tapdb_client_id: Optional[str] = None
     """TapDB client identifier read from YAML config."""
@@ -455,6 +467,9 @@ class UrsaConfig:
 
     api_port: Optional[int] = None
     """API bind port read from YAML config."""
+
+    allowed_hosts: Optional[str] = None
+    """Comma-separated HTTP Host values accepted by the Ursa web server."""
 
     ursa_tapdb_mount_enabled: Optional[bool] = None
     """Whether to mount the embedded TapDB admin UI/API."""
@@ -590,6 +605,8 @@ class UrsaConfig:
         aws_profile = os.environ.get("AWS_PROFILE") or data.get("aws_profile")
         cognito_group_role_map = data.get("cognito_group_role_map")
         ursa_internal_output_bucket = data.get("ursa_internal_output_bucket")
+        aws_usage_report_dir = data.get("aws_usage_report_dir")
+        aws_usage_report_allowed_domains = data.get("aws_usage_report_allowed_domains")
         tapdb_client_id = data.get("tapdb_client_id")
         tapdb_database_name = data.get("tapdb_database_name")
         tapdb_schema_name = data.get("tapdb_schema_name")
@@ -618,6 +635,7 @@ class UrsaConfig:
         session_secret_key = data.get("session_secret_key")
         api_host = data.get("api_host")
         api_port = data.get("api_port")
+        allowed_hosts = data.get("allowed_hosts")
         ursa_tapdb_mount_enabled = data.get("ursa_tapdb_mount_enabled")
         ursa_tapdb_mount_path = data.get("ursa_tapdb_mount_path")
         bloom_base_url = data.get("bloom_base_url")
@@ -642,6 +660,8 @@ class UrsaConfig:
             aws_profile=aws_profile,
             cognito_group_role_map=cognito_group_role_map,
             ursa_internal_output_bucket=ursa_internal_output_bucket,
+            aws_usage_report_dir=aws_usage_report_dir,
+            aws_usage_report_allowed_domains=aws_usage_report_allowed_domains,
             tapdb_client_id=tapdb_client_id,
             tapdb_database_name=tapdb_database_name,
             tapdb_schema_name=tapdb_schema_name,
@@ -670,6 +690,7 @@ class UrsaConfig:
             session_secret_key=session_secret_key,
             api_host=api_host,
             api_port=api_port,
+            allowed_hosts=allowed_hosts,
             ursa_tapdb_mount_enabled=ursa_tapdb_mount_enabled,
             ursa_tapdb_mount_path=ursa_tapdb_mount_path,
             bloom_base_url=bloom_base_url,
