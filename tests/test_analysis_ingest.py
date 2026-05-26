@@ -214,7 +214,9 @@ def _settings() -> Settings:
         aws_profile="",
         cors_origins="*",
         session_secret_key="test-session-secret",
-        ursa_internal_api_key="ursa-test-key",
+        ursa_observability_service_token="ursa-observability-token",
+        ursa_write_service_token="ursa-write-token",
+        ursa_tapdb_admin_service_token="ursa-tapdb-admin-token",
         bloom_base_url="https://bloom.example",
         atlas_base_url="https://atlas.example",
         cognito_domain="ursa.auth.us-west-2.amazoncognito.com",
@@ -222,6 +224,8 @@ def _settings() -> Settings:
         cognito_callback_url="https://localhost:8913/auth/callback",
         cognito_logout_url="https://localhost:8913/login",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
+        allowed_hosts="testserver,localhost",
         ursa_tapdb_mount_enabled=False,
     )
 
@@ -270,7 +274,7 @@ def test_ingest_analysis_resolves_mixed_input_references():
         response = client.post(
             "/api/v1/analyses/ingest",
             headers={
-                "X-API-Key": "ursa-test-key",
+                "X-API-Key": "ursa-write-token",
                 "Idempotency-Key": "idem-1",
             },
             json={
@@ -302,7 +306,7 @@ def test_ingest_analysis_requires_idempotency_key(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/analyses/ingest",
-            headers={"X-API-Key": "ursa-test-key"},
+            headers={"X-API-Key": "ursa-write-token"},
             json={
                 "run_euid": "RUN-1",
                 "flowcell_id": "FLOW-1",
@@ -323,7 +327,7 @@ def test_ingest_analysis_requires_dewey_client():
         response = client.post(
             "/api/v1/analyses/ingest",
             headers={
-                "X-API-Key": "ursa-test-key",
+                "X-API-Key": "ursa-write-token",
                 "Idempotency-Key": "idem-2",
             },
             json={
@@ -359,7 +363,7 @@ def test_analysis_list_get_and_status_routes() -> None:
         )
         status_update = client.post(
             "/api/v1/analyses/AN-1/status",
-            headers={"X-API-Key": "ursa-test-key"},
+            headers={"X-API-Key": "ursa-write-token"},
             json={
                 "state": "REVIEW_PENDING",
                 "result_status": "RUNNING",

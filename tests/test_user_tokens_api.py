@@ -161,7 +161,9 @@ class DummyS3Client:
 def _settings() -> Settings:
     return Settings(
         cors_origins="*",
-        ursa_internal_api_key="ursa-test-key",
+        ursa_observability_service_token="ursa-observability-token",
+        ursa_write_service_token="ursa-write-token",
+        ursa_tapdb_admin_service_token="ursa-tapdb-admin-token",
         bloom_base_url="https://bloom.example",
         atlas_base_url="https://atlas.example",
         cognito_domain="auth.example.test",
@@ -169,6 +171,8 @@ def _settings() -> Settings:
         cognito_callback_url="https://testserver/auth/callback",
         cognito_logout_url="https://testserver/auth/logout",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
+        allowed_hosts="testserver,localhost",
         ursa_tapdb_mount_enabled=False,
     )
 
@@ -296,7 +300,7 @@ def test_user_routes_reject_shared_api_key_and_accept_ursa_bearer_tokens() -> No
     )
 
     with TestClient(app) as client:
-        rejected = client.get("/api/v1/worksets", headers={"X-API-Key": "ursa-test-key"})
+        rejected = client.get("/api/v1/worksets", headers={"X-API-Key": "ursa-write-token"})
         accepted = client.get("/api/v1/worksets", headers={"Authorization": f"Bearer {plaintext}"})
 
     assert rejected.status_code == 401

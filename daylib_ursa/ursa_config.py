@@ -219,7 +219,10 @@ VALID_FIELDS = {
     "dewey_base_url": (str, "Dewey base URL"),
     "dewey_api_token": (str, "Dewey API bearer token"),
     "dewey_verify_ssl": (bool, "Verify Dewey TLS certificates"),
-    "ursa_internal_api_key": (str, "Ursa internal API key"),
+    "ursa_observability_service_token": (str, "Ursa read-only observability service token"),
+    "ursa_write_service_token": (str, "Ursa scoped write service token"),
+    "ursa_tapdb_admin_service_token": (str, "Ursa embedded TapDB admin service token"),
+    "ursa_internal_api_key": (str, "Deprecated Ursa all-surface internal API key"),
     "whitelist_domains": (str, "Allowed email domains for registration/login"),
     "deployment": (dict, "Deployment metadata for non-production UI chrome"),
     "ui_show_environment_chrome": (bool, "Toggle GUI deployment and region chrome"),
@@ -324,6 +327,9 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "atlas_base_url",
         "dewey_base_url",
         "whitelist_domains",
+        "ursa_observability_service_token",
+        "ursa_write_service_token",
+        "ursa_tapdb_admin_service_token",
         "ursa_internal_api_key",
     ]:
         if field_name in data and data[field_name] is not None:
@@ -450,6 +456,9 @@ class UrsaConfig:
     external_broker_handoff_exchange_url: Optional[str] = None
     """External login broker handoff exchange URL read from YAML config."""
 
+    external_broker_service_token: Optional[str] = None
+    """External login broker registered-service token read from YAML config."""
+
     external_broker_callback_url: Optional[str] = None
     """External login broker callback URL read from YAML config."""
 
@@ -501,8 +510,17 @@ class UrsaConfig:
     dewey_verify_ssl: Optional[bool] = None
     """Dewey TLS verification flag read from YAML config."""
 
+    ursa_observability_service_token: Optional[str] = None
+    """Scoped read-only observability service token read from YAML config."""
+
+    ursa_write_service_token: Optional[str] = None
+    """Scoped write service token read from YAML config."""
+
+    ursa_tapdb_admin_service_token: Optional[str] = None
+    """Scoped embedded TapDB admin service token read from YAML config."""
+
     ursa_internal_api_key: Optional[str] = None
-    """Ursa internal API key read from YAML config."""
+    """Deprecated Ursa all-surface internal API key read from YAML config."""
 
     whitelist_domains: Optional[str] = None
     """Allowed registration/login email domains (overridden by WHITELIST_DOMAINS env var)."""
@@ -629,6 +647,7 @@ class UrsaConfig:
         external_broker_service_id = data.get("external_broker_service_id")
         external_broker_login_url = data.get("external_broker_login_url")
         external_broker_handoff_exchange_url = data.get("external_broker_handoff_exchange_url")
+        external_broker_service_token = data.get("external_broker_service_token")
         external_broker_callback_url = data.get("external_broker_callback_url")
         external_broker_logout_url = data.get("external_broker_logout_url")
         external_broker_ca_bundle = data.get("external_broker_ca_bundle")
@@ -646,6 +665,9 @@ class UrsaConfig:
         dewey_base_url = data.get("dewey_base_url")
         dewey_api_token = data.get("dewey_api_token")
         dewey_verify_ssl = data.get("dewey_verify_ssl")
+        ursa_observability_service_token = data.get("ursa_observability_service_token")
+        ursa_write_service_token = data.get("ursa_write_service_token")
+        ursa_tapdb_admin_service_token = data.get("ursa_tapdb_admin_service_token")
         ursa_internal_api_key = data.get("ursa_internal_api_key")
         whitelist_domains = os.environ.get("WHITELIST_DOMAINS") or data.get("whitelist_domains")
         ui_show_environment_chrome = data.get("ui_show_environment_chrome")
@@ -684,6 +706,7 @@ class UrsaConfig:
             external_broker_service_id=external_broker_service_id,
             external_broker_login_url=external_broker_login_url,
             external_broker_handoff_exchange_url=external_broker_handoff_exchange_url,
+            external_broker_service_token=external_broker_service_token,
             external_broker_callback_url=external_broker_callback_url,
             external_broker_logout_url=external_broker_logout_url,
             external_broker_ca_bundle=external_broker_ca_bundle,
@@ -701,6 +724,9 @@ class UrsaConfig:
             dewey_base_url=dewey_base_url,
             dewey_api_token=dewey_api_token,
             dewey_verify_ssl=dewey_verify_ssl,
+            ursa_observability_service_token=ursa_observability_service_token,
+            ursa_write_service_token=ursa_write_service_token,
+            ursa_tapdb_admin_service_token=ursa_tapdb_admin_service_token,
             ursa_internal_api_key=ursa_internal_api_key,
             whitelist_domains=whitelist_domains,
             deployment_name=str(deployment_chrome["name"]),

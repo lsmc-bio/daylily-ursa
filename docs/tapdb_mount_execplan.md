@@ -9,7 +9,7 @@ Mounted mode:
 - loads `admin.main:app` lazily from the installed TapDB package
 - requires an explicit `tapdb_config_path`
 - forwards Ursa's TapDB config path, client ID, and namespace into the embedded app
-- gates access with `X-API-Key` matching `ursa_internal_api_key`
+- gates access with `X-API-Key` matching the scoped `ursa_tapdb_admin_service_token`
 - injects an embedded TapDB admin identity into the forwarded ASGI scope
 - does not mutate TapDB admin auth environment variables
 - fails application startup when enabled and TapDB admin import/configuration fails
@@ -20,7 +20,7 @@ Set `ursa_tapdb_mount_enabled: false` to skip importing the TapDB admin app.
 
 - `ursa_tapdb_mount_enabled`: enables or disables the mount
 - `ursa_tapdb_mount_path`: mount path, default `/admin/tapdb`
-- `ursa_internal_api_key`: API key required by the mounted gate
+- `ursa_tapdb_admin_service_token`: scoped token required by the mounted gate
 - `tapdb_config_path`: explicit TapDB config path
 - `tapdb_client_id`: TapDB client ID
 - `tapdb_database_name`: TapDB namespace/database name

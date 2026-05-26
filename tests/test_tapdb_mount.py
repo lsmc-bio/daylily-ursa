@@ -57,10 +57,14 @@ def _settings(
     return Settings(
         cors_origins="*",
         aws_profile=None,
-        ursa_internal_api_key="test-key",
+        ursa_observability_service_token="test-observability-token",
+        ursa_write_service_token="test-write-token",
+        ursa_tapdb_admin_service_token="test-tapdb-admin-token",
         bloom_base_url="https://bloom.example",
         atlas_base_url="https://atlas.example",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
+        allowed_hosts="testserver,localhost",
         cognito_domain="auth.example.com",
         cognito_app_client_id="client-1",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -89,7 +93,7 @@ def test_mounted_route_exists_and_key_can_access(monkeypatch, tmp_path):
     assert any(getattr(route, "path", None) == "/admin/tapdb" for route in app.routes)
 
     with TestClient(app) as client:
-        response = client.get("/admin/tapdb/", headers={"X-API-Key": "test-key"})
+        response = client.get("/admin/tapdb/", headers={"X-API-Key": "test-tapdb-admin-token"})
 
     assert response.status_code == 200
     assert response.json() == {"tapdb": "ok"}
@@ -112,7 +116,7 @@ def test_mounted_route_denies_missing_api_key(monkeypatch, tmp_path):
         response = client.get("/admin/tapdb/")
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid or missing API key"}
+    assert response.json() == {"detail": "Invalid or missing TapDB admin service token"}
 
 
 def test_mounted_route_denies_wrong_api_key(monkeypatch, tmp_path):
@@ -132,7 +136,7 @@ def test_mounted_route_denies_wrong_api_key(monkeypatch, tmp_path):
         response = client.get("/admin/tapdb/", headers={"X-API-Key": "wrong-key"})
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid or missing API key"}
+    assert response.json() == {"detail": "Invalid or missing TapDB admin service token"}
 
 
 def test_mounted_mode_does_not_inject_tapdb_admin_env(monkeypatch, tmp_path):
@@ -152,7 +156,7 @@ def test_mounted_mode_does_not_inject_tapdb_admin_env(monkeypatch, tmp_path):
     )
 
     with TestClient(app) as client:
-        response = client.get("/admin/tapdb/", headers={"X-API-Key": "test-key"})
+        response = client.get("/admin/tapdb/", headers={"X-API-Key": "test-tapdb-admin-token"})
 
     assert response.status_code == 200
     assert "TAPDB_ADMIN_DISABLE_AUTH" not in os.environ

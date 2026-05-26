@@ -980,7 +980,9 @@ def _settings() -> Settings:
     return Settings(
         aws_profile="",
         cors_origins="*",
-        ursa_internal_api_key="ursa-test-key",
+        ursa_observability_service_token="ursa-observability-token",
+        ursa_write_service_token="ursa-write-token",
+        ursa_tapdb_admin_service_token="ursa-tapdb-admin-token",
         session_secret_key="ursa-session-secret",
         cognito_domain="auth.example.test",
         cognito_app_client_id="client-123",

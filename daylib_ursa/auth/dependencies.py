@@ -801,7 +801,7 @@ def get_current_user(
 
 def _service_token_user(request: Request, bearer: str) -> CurrentUser | None:
     candidate = str(bearer or "").strip()
-    expected = str(getattr(request.app.state, "api_key", "") or "").strip()
+    expected = str(getattr(request.app.state, "observability_service_token", "") or "").strip()
     if not candidate or not expected or not hmac.compare_digest(candidate, expected):
         return None
     return CurrentUser(

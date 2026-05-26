@@ -7,6 +7,7 @@ Configuration is loaded once at startup and injected via dependency.
 from __future__ import annotations
 
 import json
+import hmac
 import os
 import secrets
 from functools import lru_cache
@@ -98,6 +99,7 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
             "external_broker_handoff_exchange_url",
             "",
         ),
+        "external_broker_service_token": getattr(cfg, "external_broker_service_token", ""),
         "external_broker_callback_url": getattr(cfg, "external_broker_callback_url", ""),
         "external_broker_logout_url": getattr(cfg, "external_broker_logout_url", ""),
         "external_broker_ca_bundle": getattr(cfg, "external_broker_ca_bundle", ""),
@@ -112,6 +114,17 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "dewey_base_url": cfg.dewey_base_url,
         "dewey_api_token": cfg.dewey_api_token,
         "dewey_verify_ssl": cfg.dewey_verify_ssl,
+        "ursa_observability_service_token": getattr(
+            cfg,
+            "ursa_observability_service_token",
+            "",
+        ),
+        "ursa_write_service_token": getattr(cfg, "ursa_write_service_token", ""),
+        "ursa_tapdb_admin_service_token": getattr(
+            cfg,
+            "ursa_tapdb_admin_service_token",
+            "",
+        ),
         "ursa_internal_api_key": getattr(cfg, "ursa_internal_api_key", ""),
         "deployment_name": cfg.deployment_name,
         "deployment_color": cfg.deployment_color,
@@ -501,6 +514,10 @@ class Settings(BaseSettings):
         default="",
         description="External login broker handoff exchange URL",
     )
+    external_broker_service_token: str = Field(
+        default="",
+        description="External login broker registered-service token",
+    )
     external_broker_callback_url: str = Field(
         default="",
         description="External login broker callback URL",
@@ -583,9 +600,21 @@ class Settings(BaseSettings):
         default="/admin/tapdb",
         description="Ursa path prefix used to mount TapDB admin sub-application",
     )
+    ursa_observability_service_token: str = Field(
+        default="ursa-dev-observability-token",
+        description="Scoped bearer token for read-only Ursa observability endpoints",
+    )
+    ursa_write_service_token: str = Field(
+        default="ursa-dev-write-token",
+        description="Scoped service token for Ursa analysis/write API endpoints",
+    )
+    ursa_tapdb_admin_service_token: str = Field(
+        default="ursa-dev-tapdb-admin-token",
+        description="Scoped service token for the embedded Ursa TapDB admin mount",
+    )
     ursa_internal_api_key: str = Field(
-        default="ursa-dev-internal-key",
-        description="Internal API key for Ursa beta write endpoints",
+        default="",
+        description="Deprecated legacy all-surface key; ignored by runtime auth",
     )
     bloom_base_url: str = Field(
         default=DEFAULT_BLOOM_BASE_URL,
@@ -897,6 +926,50 @@ class Settings(BaseSettings):
                 raise ValueError("dewey_api_token is required when dewey_enabled=true")
         if not str(self.ursa_internal_output_bucket or "").strip():
             raise ValueError("ursa_internal_output_bucket is required")
+        deployment = _resolve_deployment_chrome(
+            name=self.deployment_name,
+            color=self.deployment_color,
+        )
+        self.deployment_name = str(deployment["name"])
+        self.deployment_color = str(deployment["color"])
+        self.deployment_is_production = bool(deployment["is_production"])
+        scoped_token_fields = (
+            "ursa_observability_service_token",
+            "ursa_write_service_token",
+            "ursa_tapdb_admin_service_token",
+        )
+        missing_scoped_tokens = [
+            field_name
+            for field_name in scoped_token_fields
+            if not str(getattr(self, field_name) or "").strip()
+        ]
+        if missing_scoped_tokens:
+            raise ValueError(
+                "Ursa scoped internal service tokens are required: "
+                + ", ".join(sorted(missing_scoped_tokens))
+            )
+        if str(self.ursa_internal_api_key or "").strip():
+            raise ValueError(
+                "ursa_internal_api_key is deprecated; configure "
+                "ursa_observability_service_token, ursa_write_service_token, and "
+                "ursa_tapdb_admin_service_token instead"
+            )
+        if self.is_production:
+            dev_defaults = {
+                "ursa_observability_service_token": "ursa-dev-observability-token",
+                "ursa_write_service_token": "ursa-dev-write-token",
+                "ursa_tapdb_admin_service_token": "ursa-dev-tapdb-admin-token",
+            }
+            defaulted = [
+                field_name
+                for field_name, default_value in dev_defaults.items()
+                if hmac.compare_digest(str(getattr(self, field_name) or ""), default_value)
+            ]
+            if defaulted:
+                raise ValueError(
+                    "Production Ursa deployments require generated scoped service tokens: "
+                    + ", ".join(sorted(defaulted))
+                )
         if self.database_backend == "tapdb" and not str(self.tapdb_schema_name or "").strip():
             raise ValueError("tapdb_schema_name is required when database_backend=tapdb")
         for field_name in ("tapdb_local_db_port", "tapdb_local_ui_port"):
@@ -907,13 +980,6 @@ class Settings(BaseSettings):
                 raise ValueError(f"{field_name} must be an integer port") from exc
             if port < 1 or port > 65535:
                 raise ValueError(f"{field_name} must be between 1 and 65535")
-        deployment = _resolve_deployment_chrome(
-            name=self.deployment_name,
-            color=self.deployment_color,
-        )
-        self.deployment_name = str(deployment["name"])
-        self.deployment_color = str(deployment["color"])
-        self.deployment_is_production = bool(deployment["is_production"])
         return self
 
     @classmethod
@@ -943,6 +1009,9 @@ class Settings(BaseSettings):
                     "external_broker_handoff_exchange_url": _read_first_env(
                         "LSMC_AUTH_BROKER_HANDOFF_EXCHANGE_URL"
                     ),
+                    "external_broker_service_token": _read_first_env(
+                        "LSMC_AUTH_BROKER_SERVICE_TOKEN"
+                    ),
                     "external_broker_callback_url": _read_first_env(
                         "LSMC_AUTH_BROKER_CALLBACK_URL"
                     ),
@@ -951,6 +1020,13 @@ class Settings(BaseSettings):
                     ),
                     "external_broker_ca_bundle": _read_first_env(
                         "LSMC_AUTH_BROKER_CA_BUNDLE"
+                    ),
+                    "ursa_observability_service_token": _read_first_env(
+                        "URSA_OBSERVABILITY_SERVICE_TOKEN"
+                    ),
+                    "ursa_write_service_token": _read_first_env("URSA_WRITE_SERVICE_TOKEN"),
+                    "ursa_tapdb_admin_service_token": _read_first_env(
+                        "URSA_TAPDB_ADMIN_SERVICE_TOKEN"
                     ),
                 }.items()
                 if value

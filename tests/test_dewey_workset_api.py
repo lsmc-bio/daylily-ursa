@@ -61,7 +61,9 @@ class _DummyStore:
 def _settings() -> Settings:
     return Settings(
         cors_origins="*",
-        ursa_internal_api_key="ursa-test-key",
+        ursa_observability_service_token="ursa-observability-token",
+        ursa_write_service_token="ursa-write-token",
+        ursa_tapdb_admin_service_token="ursa-tapdb-admin-token",
         session_secret_key="ursa-session-secret",
         cognito_domain="auth.example.test",
         cognito_app_client_id="client-123",
@@ -71,6 +73,8 @@ def _settings() -> Settings:
         bloom_base_url="https://bloom.example",
         atlas_base_url="https://atlas.example",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
+        allowed_hosts="testserver,localhost",
         ursa_tapdb_mount_enabled=False,
     )
 
@@ -104,7 +108,7 @@ def test_add_artifact_resolves_dewey_reference():
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/analyses/AN-1/artifacts",
-            headers={"X-API-Key": "ursa-test-key"},
+            headers={"X-API-Key": "ursa-write-token"},
             json={
                 "artifact_euid": "AT-1",
                 "metadata": {"lane": "1"},
@@ -141,7 +145,7 @@ def test_add_artifact_rejects_raw_storage_uri_inputs() -> None:
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/analyses/AN-2/artifacts",
-            headers={"X-API-Key": "ursa-test-key"},
+            headers={"X-API-Key": "ursa-write-token"},
             json={
                 "artifact_type": "vcf",
                 "storage_uri": "s3://ursa-internal/RUN-2/sample.vcf.gz",
@@ -165,7 +169,7 @@ def test_add_artifact_with_reference_requires_dewey_client():
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/analyses/AN-3/artifacts",
-            headers={"X-API-Key": "ursa-test-key"},
+            headers={"X-API-Key": "ursa-write-token"},
             json={"artifact_euid": "AT-1"},
         )
     assert response.status_code == 503

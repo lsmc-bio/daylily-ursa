@@ -2028,7 +2028,11 @@ def create_app(
     )
     app.state.internal_bucket = internal_bucket
     app.state.require_api_key = True
-    app.state.api_key = settings.ursa_internal_api_key
+    app.state.observability_service_token = settings.ursa_observability_service_token
+    app.state.write_service_token = settings.ursa_write_service_token
+    # Kept as a read-only alias for existing observability tests and diagnostics;
+    # write and TapDB admin gates use their own scoped tokens below.
+    app.state.api_key = settings.ursa_observability_service_token
     app.state.observability = UrsaObservabilityStore(
         settings=settings,
         app_version=__version__,
@@ -2314,12 +2318,12 @@ def create_app(
     def require_write_api_key(
         x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
     ) -> str:
-        expected = str(app.state.api_key or "")
+        expected = str(getattr(app.state, "write_service_token", "") or "")
         provided = str(x_api_key or "")
         if not provided or not hmac.compare_digest(provided, expected):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or missing API key",
+                detail="Invalid or missing write service token",
             )
         return provided
 

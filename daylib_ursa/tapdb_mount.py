@@ -76,11 +76,11 @@ def _load_tapdb_admin_app(
 
 
 class UrsaTapdbAdminGate:
-    """ASGI guard that requires Ursa internal API key."""
+    """ASGI guard that requires Ursa's scoped TapDB admin service token."""
 
-    def __init__(self, app: ASGIApp, *, internal_api_key: str) -> None:
+    def __init__(self, app: ASGIApp, *, tapdb_admin_service_token: str) -> None:
         self._app = app
-        self._internal_api_key = str(internal_api_key or "")
+        self._tapdb_admin_service_token = str(tapdb_admin_service_token or "")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in {"http", "websocket"}:
@@ -98,7 +98,7 @@ class UrsaTapdbAdminGate:
     def _is_authenticated(self, scope: Scope) -> bool:
         connection = HTTPConnection(scope)
         provided = str(connection.headers.get("x-api-key") or "")
-        expected = str(self._internal_api_key or "")
+        expected = str(self._tapdb_admin_service_token or "")
         if not provided or not expected:
             return False
         return hmac.compare_digest(provided, expected)
@@ -107,7 +107,7 @@ class UrsaTapdbAdminGate:
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 4401})
             return
-        response = JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
+        response = JSONResponse({"detail": "Invalid or missing TapDB admin service token"}, status_code=401)
         await response(scope, receive, send)
 
 
@@ -156,7 +156,7 @@ def mount_tapdb_admin(
 
     guarded_app = UrsaTapdbAdminGate(
         tapdb_app,
-        internal_api_key=settings.ursa_internal_api_key,
+        tapdb_admin_service_token=settings.ursa_tapdb_admin_service_token,
     )
     app.mount(mount_path, guarded_app, name="ursa-tapdb-admin")
     LOGGER.info("Mounted TapDB admin at %s", mount_path)

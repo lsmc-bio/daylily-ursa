@@ -299,13 +299,23 @@ def mount_gui(app: FastAPI) -> None:
             "handoff_exchange_url": str(
                 getattr(settings, "external_broker_handoff_exchange_url", "") or ""
             ).strip(),
+            "service_token": str(
+                getattr(settings, "external_broker_service_token", "") or ""
+            ).strip(),
             "callback_url": str(
                 getattr(settings, "external_broker_callback_url", "") or ""
             ).strip(),
             "logout_url": str(getattr(settings, "external_broker_logout_url", "") or "").strip(),
             "ca_bundle": str(getattr(settings, "external_broker_ca_bundle", "") or "").strip(),
         }
-        required = ("service_id", "login_url", "handoff_exchange_url", "callback_url", "logout_url")
+        required = (
+            "service_id",
+            "service_token",
+            "login_url",
+            "handoff_exchange_url",
+            "callback_url",
+            "logout_url",
+        )
         missing = [key for key in required if not values[key]]
         if missing:
             raise HTTPException(
@@ -393,7 +403,14 @@ def mount_gui(app: FastAPI) -> None:
         broker = _external_broker_settings()
         verify: bool | str = broker["ca_bundle"] if broker["ca_bundle"] else True
         async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
-            response = await client.post(broker["handoff_exchange_url"], json={"code": code})
+            response = await client.post(
+                broker["handoff_exchange_url"],
+                json={"code": code},
+                headers={
+                    "Authorization": f"Bearer {broker['service_token']}",
+                    "X-LSMC-Service-ID": broker["service_id"],
+                },
+            )
         if response.status_code >= 400:
             raise CognitoWebAuthError(
                 "auth_error",

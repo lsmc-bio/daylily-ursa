@@ -127,7 +127,7 @@ When enabled, Ursa mounts the TapDB admin ASGI app under `/admin/tapdb`. Mounted
 
 - requires explicit TapDB env and config path
 - forwards the Ursa-selected TapDB env, client ID, and namespace into the embedded app
-- gates access with `X-API-Key` matching `ursa_internal_api_key`
+- gates access with `X-API-Key` matching the scoped `ursa_tapdb_admin_service_token`
 - injects a mounted TapDB admin identity into the forwarded ASGI scope
 - does not mutate TapDB admin auth environment variables
 - fails app startup if the mount is enabled but the TapDB admin app cannot be imported

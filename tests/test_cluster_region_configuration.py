@@ -81,7 +81,9 @@ def test_yaml_seed_from_ursa_config_includes_allowed_regions(monkeypatch) -> Non
         dewey_base_url=None,
         dewey_api_token=None,
         dewey_verify_ssl=True,
-        ursa_internal_api_key="ursa-internal-key",
+        ursa_observability_service_token="ursa-observability-token",
+        ursa_write_service_token="ursa-write-token",
+        ursa_tapdb_admin_service_token="ursa-tapdb-admin-token",
         deployment_name="inflec3",
         deployment_color="#7521ca",
         deployment_is_production=False,
@@ -94,4 +96,6 @@ def test_yaml_seed_from_ursa_config_includes_allowed_regions(monkeypatch) -> Non
     assert seeded["ursa_allowed_regions"] == "us-west-2,us-east-1"
     assert seeded["aws_profile"] == "lsmc"
     assert seeded["tapdb_config_path"] == "/tmp/ursa-tapdb.yaml"
-    assert seeded["ursa_internal_api_key"] == "ursa-internal-key"
+    assert seeded["ursa_observability_service_token"] == "ursa-observability-token"
+    assert seeded["ursa_write_service_token"] == "ursa-write-token"
+    assert seeded["ursa_tapdb_admin_service_token"] == "ursa-tapdb-admin-token"

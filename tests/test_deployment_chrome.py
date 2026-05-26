@@ -110,6 +110,7 @@ def test_get_settings_reads_shared_external_broker_env(monkeypatch):
         "LSMC_AUTH_BROKER_HANDOFF_EXCHANGE_URL",
         "https://dev.login.lsmc.com:8916/api/handoff/exchange",
     )
+    monkeypatch.setenv("LSMC_AUTH_BROKER_SERVICE_TOKEN", "ursa-service-token")
     monkeypatch.setenv(
         "LSMC_AUTH_BROKER_CALLBACK_URL",
         "https://localhost:8913/auth/lsmc/callback",
@@ -126,6 +127,7 @@ def test_get_settings_reads_shared_external_broker_env(monkeypatch):
 
     assert settings.auth_mode == "external_broker"
     assert settings.external_broker_service_id == "ursa"
+    assert settings.external_broker_service_token == "ursa-service-token"
     assert settings.external_broker_callback_url == "https://localhost:8913/auth/lsmc/callback"
 
 
@@ -288,6 +290,9 @@ def test_login_page_renders_banner_footer_and_favicon(monkeypatch):
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
         cognito_logout_url="https://localhost:8913/login",
+        ursa_observability_service_token="prod-observability-token",
+        ursa_write_service_token="prod-write-token",
+        ursa_tapdb_admin_service_token="prod-tapdb-token",
     )
     client = _test_client(_app_with_gui(settings))
 
@@ -325,6 +330,9 @@ def test_dashboard_renders_environment_chrome_and_footer_metadata(monkeypatch):
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
         cognito_logout_url="https://localhost:8913/login",
+        ursa_observability_service_token="prod-observability-token",
+        ursa_write_service_token="prod-write-token",
+        ursa_tapdb_admin_service_token="prod-tapdb-token",
     )
     client = _test_client(_app_with_gui(settings))
 
@@ -427,6 +435,9 @@ def test_prod_deployment_name_uses_stable_color_and_marks_production() -> None:
         cognito_app_client_id="client-123",
         cognito_callback_url="https://localhost:8913/auth/callback",
         cognito_logout_url="https://localhost:8913/login",
+        ursa_observability_service_token="prod-observability-token",
+        ursa_write_service_token="prod-write-token",
+        ursa_tapdb_admin_service_token="prod-tapdb-token",
     )
 
     assert settings.deployment == {
@@ -735,6 +746,7 @@ def test_external_broker_login_sets_admin_session(monkeypatch, tmp_path):
         external_broker_service_id="ursa",
         external_broker_login_url="https://dev.login.lsmc.com:8916/login",
         external_broker_handoff_exchange_url="https://dev.login.lsmc.com:8916/api/handoff/exchange",
+        external_broker_service_token="ursa-service-token",
         external_broker_callback_url="https://localhost:8913/auth/lsmc/callback",
         external_broker_logout_url="https://dev.login.lsmc.com:8916/logout",
         external_broker_ca_bundle=str(ca_bundle),
@@ -764,7 +776,13 @@ def test_external_broker_login_sets_admin_session(monkeypatch, tmp_path):
         async def __aexit__(self, *_args):
             return None
 
-        async def post(self, *_args, **_kwargs):
+        async def post(self, url, *, json, headers):
+            assert url == "https://dev.login.lsmc.com:8916/api/handoff/exchange"
+            assert json == {"code": "handoff-code"}
+            assert headers == {
+                "Authorization": "Bearer ursa-service-token",
+                "X-LSMC-Service-ID": "ursa",
+            }
             return _Response()
 
     monkeypatch.setattr("daylib_ursa.gui_app.httpx.AsyncClient", _AsyncClient)

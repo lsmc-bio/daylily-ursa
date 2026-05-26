@@ -42,10 +42,14 @@ def _settings(*, tapdb_config_path: str = "/tmp/ursa-tapdb-config.yaml") -> Sett
     return Settings(
         cors_origins="*",
         aws_profile=None,
-        ursa_internal_api_key="test-key",
+        ursa_observability_service_token="test-observability-token",
+        ursa_write_service_token="test-write-token",
+        ursa_tapdb_admin_service_token="test-tapdb-admin-token",
         bloom_base_url="https://bloom.example",
         atlas_base_url="https://atlas.example",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
+        allowed_hosts="testserver,localhost",
         cognito_domain="auth.example.com",
         cognito_app_client_id="client-1",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -100,7 +104,10 @@ def test_tapdb_dag_routes_use_observability_auth(monkeypatch) -> None:
 
     with TestClient(app) as client:
         denied = client.get("/api/dag/search")
-        allowed = client.get("/api/dag/search", headers={"Authorization": "Bearer test-key"})
+        allowed = client.get(
+            "/api/dag/search",
+            headers={"Authorization": "Bearer test-observability-token"},
+        )
 
     assert denied.status_code == 401
     assert allowed.status_code == 200
@@ -111,7 +118,10 @@ def test_obs_services_advertises_tapdb_dag_search_when_configured(monkeypatch) -
     app = _app(monkeypatch)
 
     with TestClient(app) as client:
-        response = client.get("/obs_services", headers={"Authorization": "Bearer test-key"})
+        response = client.get(
+            "/obs_services",
+            headers={"Authorization": "Bearer test-observability-token"},
+        )
 
     assert response.status_code == 200
     body = response.json()
@@ -131,8 +141,14 @@ def test_tapdb_dag_is_not_advertised_without_explicit_config(monkeypatch) -> Non
     app = _app(monkeypatch, tapdb_config_path="")
 
     with TestClient(app) as client:
-        route = client.get("/api/dag/search", headers={"Authorization": "Bearer test-key"})
-        obs = client.get("/obs_services", headers={"Authorization": "Bearer test-key"})
+        route = client.get(
+            "/api/dag/search",
+            headers={"Authorization": "Bearer test-observability-token"},
+        )
+        obs = client.get(
+            "/obs_services",
+            headers={"Authorization": "Bearer test-observability-token"},
+        )
 
     assert route.status_code == 404
     assert "/api/dag/search" not in {item["path"] for item in obs.json()["endpoints"]}

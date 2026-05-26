@@ -27,7 +27,9 @@ def _settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "aws_profile": "lsmc",
         "cors_origins": "*",
-        "ursa_internal_api_key": "ursa-test-key",
+        "ursa_observability_service_token": "ursa-observability-token",
+        "ursa_write_service_token": "ursa-write-token",
+        "ursa_tapdb_admin_service_token": "ursa-tapdb-admin-token",
         "session_secret_key": "ursa-session-secret",
         "cognito_app_client_secret": "ursa-cognito-secret",
         "bloom_base_url": "https://bloom.example",
