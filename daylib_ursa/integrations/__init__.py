@@ -1,9 +1,5 @@
 from daylib_ursa.integrations.dewey_client import DeweyClient, DeweyClientError
 from daylib_ursa.integrations.tapdb_runtime import (
-    DEFAULT_AWS_PROFILE,
-    DEFAULT_AWS_REGION,
-    DEFAULT_TAPDB_CLIENT_ID,
-    DEFAULT_TAPDB_DATABASE_NAME,
     TapDBRuntimeError,
     TapdbClientBundle,
     ensure_tapdb_version,
@@ -14,10 +10,6 @@ from daylib_ursa.integrations.tapdb_runtime import (
 )
 
 __all__ = [
-    "DEFAULT_AWS_PROFILE",
-    "DEFAULT_AWS_REGION",
-    "DEFAULT_TAPDB_CLIENT_ID",
-    "DEFAULT_TAPDB_DATABASE_NAME",
     "DeweyClient",
     "DeweyClientError",
     "TapDBRuntimeError",

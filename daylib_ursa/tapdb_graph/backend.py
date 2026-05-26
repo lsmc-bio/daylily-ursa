@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.metadata import version as package_version
 import logging
 import uuid
 from dataclasses import dataclass
@@ -15,9 +15,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from daylily_tapdb import generic_instance, generic_instance_lineage, utc_now_iso
 
 from daylib_ursa.integrations.tapdb_runtime import (
-    DEFAULT_TAPDB_CLIENT_ID,
-    DEFAULT_TAPDB_DATABASE_NAME,
-    DEFAULT_TAPDB_DOMAIN_CODE,
     TapdbClientBundle,
     ensure_tapdb_version,
     get_tapdb_bundle,
@@ -25,10 +22,7 @@ from daylib_ursa.integrations.tapdb_runtime import (
 
 _log = logging.getLogger(__name__)
 
-try:
-    _PACKAGE_VERSION = package_version("daylily-ursa")
-except PackageNotFoundError:  # pragma: no cover - editable/reduced test envs
-    _PACKAGE_VERSION = "0.0.0"
+_PACKAGE_VERSION = package_version("daylily-ursa")
 
 
 @dataclass(frozen=True)
@@ -110,31 +104,30 @@ class TapDBBackend:
         bundle: TapdbClientBundle | None = None,
     ) -> None:
         ensure_tapdb_version()
-        if app_username is None or client_id is None or namespace is None:
-            try:
-                from daylib_ursa.config import get_settings
+        settings = None
+        if bundle is None or app_username is None or client_id is None or namespace is None:
+            from daylib_ursa.config import get_settings
 
-                settings = get_settings()
-            except Exception:
-                settings = None
-        else:
-            settings = None
+            settings = get_settings()
 
         resolved_client_id = (
             client_id
             or str(getattr(settings, "tapdb_client_id", "") or "").strip()
-            or DEFAULT_TAPDB_CLIENT_ID
         )
+        if not resolved_client_id:
+            raise RuntimeError("Ursa TapDB client_id is required")
         resolved_namespace = (
             namespace
             or str(getattr(settings, "tapdb_database_name", "") or "").strip()
-            or DEFAULT_TAPDB_DATABASE_NAME
         )
+        if not resolved_namespace:
+            raise RuntimeError("Ursa TapDB database_name is required")
         resolved_app_username = (
             app_username
             or str(getattr(settings, "tapdb_client_id", "") or "").strip()
-            or resolved_client_id
         )
+        if not resolved_app_username:
+            raise RuntimeError("Ursa TapDB app_username is required")
         self.bundle = bundle or get_tapdb_bundle(
             client_id=resolved_client_id,
             namespace=resolved_namespace,
@@ -144,9 +137,9 @@ class TapDBBackend:
         self._conn = self.bundle.connection
         self._tm = self.bundle.template_manager
         self._factory = self.bundle.instance_factory
-        self._domain_code = (
-            str(getattr(self._conn, "domain_code", "") or DEFAULT_TAPDB_DOMAIN_CODE).strip().upper()
-        )
+        self._domain_code = str(getattr(self._conn, "domain_code", "") or "").strip().upper()
+        if not self._domain_code:
+            raise RuntimeError("Ursa TapDB connection domain_code is required")
 
     def session_scope(self, commit: bool = False):
         return self._conn.session_scope(commit=commit)

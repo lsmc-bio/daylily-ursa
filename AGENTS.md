@@ -47,3 +47,4 @@ source ./activate <deploy-name>
 - Treat prior-interface support as an explicit requirement, not a safe default.
 - Do not assume existing data needs transformation unless the user directly says it does.
 - Do not add transition code, alternate read/write paths, or prior-field support unless explicitly requested.
+- Fallback behavior is an antipattern in this workspace. Do not add, preserve, or rely on inferred config paths, environment-derived deployment identity, compatibility shims, alternate TapDB namespaces, generated substitute values, or silent analysis/service state. Missing config, credentials, TapDB namespace, workset metadata, or malformed input must fail hard with a clear error.

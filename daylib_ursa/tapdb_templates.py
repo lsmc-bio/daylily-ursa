@@ -13,14 +13,6 @@ from daylily_tapdb import (
     seed_templates,
     validate_template_configs,
 )
-from daylib_ursa.config import (
-    DEFAULT_TAPDB_DOMAIN_REGISTRY_PATH,
-    DEFAULT_TAPDB_PREFIX_REGISTRY_PATH,
-)
-from daylib_ursa.integrations.tapdb_runtime import (
-    DEFAULT_TAPDB_DOMAIN_CODE,
-    DEFAULT_TAPDB_OWNER_REPO,
-)
 
 _URSA_GENERIC_INSTANCE_LINEAGE_PREFIX = "EDG"
 _URSA_AUDIT_LOG_PREFIX = "ADT"
@@ -118,10 +110,10 @@ def _resolve_registry_paths(
 def claim_ursa_template_prefixes(
     templates: list[dict[str, Any]],
     *,
-    domain_code: str = DEFAULT_TAPDB_DOMAIN_CODE,
-    owner_repo_name: str = DEFAULT_TAPDB_OWNER_REPO,
-    domain_registry_path: Path = DEFAULT_TAPDB_DOMAIN_REGISTRY_PATH,
-    prefix_registry_path: Path = DEFAULT_TAPDB_PREFIX_REGISTRY_PATH,
+    domain_code: str,
+    owner_repo_name: str,
+    domain_registry_path: Path,
+    prefix_registry_path: Path,
 ) -> list[str]:
     """Claim Ursa-owned client template prefixes in the shared TapDB registry."""
     domain_payload = _load_json_object(domain_registry_path, required_key="domains")
@@ -241,6 +233,15 @@ def seed_ursa_templates(
         domain_registry_path=domain_registry_path,
         prefix_registry_path=prefix_registry_path,
     )
+    from daylib_ursa.config import get_settings
+
+    settings = get_settings()
+    domain_code = str(getattr(settings, "tapdb_domain_code", "") or "").strip().upper()
+    owner_repo_name = str(getattr(settings, "tapdb_owner_repo_name", "") or "").strip()
+    if not domain_code:
+        raise RuntimeError("Ursa tapdb_domain_code is required for template seeding")
+    if not owner_repo_name:
+        raise RuntimeError("Ursa tapdb_owner_repo_name is required for template seeding")
     core_config_dir = find_tapdb_core_config_dir()
     core_templates, core_issues = validate_template_configs([core_config_dir], strict=True)
     client_templates, client_issues = validate_template_configs(
@@ -252,8 +253,8 @@ def seed_ursa_templates(
         raise RuntimeError(f"Ursa template pack validation failed: {joined}")
     claim_ursa_template_prefixes(
         client_templates,
-        domain_code=DEFAULT_TAPDB_DOMAIN_CODE,
-        owner_repo_name=DEFAULT_TAPDB_OWNER_REPO,
+        domain_code=domain_code,
+        owner_repo_name=owner_repo_name,
         domain_registry_path=resolved_domain_registry_path,
         prefix_registry_path=resolved_prefix_registry_path,
     )
@@ -262,7 +263,7 @@ def seed_ursa_templates(
         core_templates,
         overwrite=True,
         core_config_dir=core_config_dir,
-        domain_code=DEFAULT_TAPDB_DOMAIN_CODE,
+        domain_code=domain_code,
         owner_repo_name="daylily-tapdb",
         domain_registry_path=resolved_domain_registry_path,
         prefix_registry_path=resolved_prefix_registry_path,
@@ -270,22 +271,22 @@ def seed_ursa_templates(
     _ensure_identity_prefix_config(
         session,
         entity="generic_template",
-        domain_code=DEFAULT_TAPDB_DOMAIN_CODE,
-        owner_repo_name=DEFAULT_TAPDB_OWNER_REPO,
+        domain_code=domain_code,
+        owner_repo_name=owner_repo_name,
         prefix="RGX",
     )
     _ensure_identity_prefix_config(
         session,
         entity="generic_instance_lineage",
-        domain_code=DEFAULT_TAPDB_DOMAIN_CODE,
-        owner_repo_name=DEFAULT_TAPDB_OWNER_REPO,
+        domain_code=domain_code,
+        owner_repo_name=owner_repo_name,
         prefix=_URSA_GENERIC_INSTANCE_LINEAGE_PREFIX,
     )
     _ensure_identity_prefix_config(
         session,
         entity="audit_log",
-        domain_code=DEFAULT_TAPDB_DOMAIN_CODE,
-        owner_repo_name=DEFAULT_TAPDB_OWNER_REPO,
+        domain_code=domain_code,
+        owner_repo_name=owner_repo_name,
         prefix=_URSA_AUDIT_LOG_PREFIX,
     )
     seed_templates(
@@ -293,8 +294,8 @@ def seed_ursa_templates(
         client_templates,
         overwrite=True,
         core_config_dir=core_config_dir,
-        domain_code=DEFAULT_TAPDB_DOMAIN_CODE,
-        owner_repo_name=DEFAULT_TAPDB_OWNER_REPO,
+        domain_code=domain_code,
+        owner_repo_name=owner_repo_name,
         domain_registry_path=resolved_domain_registry_path,
         prefix_registry_path=resolved_prefix_registry_path,
     )

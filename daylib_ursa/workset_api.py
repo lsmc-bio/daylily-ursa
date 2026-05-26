@@ -1708,7 +1708,9 @@ def resolve_daylily_cluster_config_path(settings: Settings) -> Path:
 def _load_cluster_partition_names(cluster_config_path: Path) -> list[str]:
     import yaml
 
-    payload = yaml.safe_load(cluster_config_path.read_text(encoding="utf-8")) or {}
+    payload = yaml.safe_load(cluster_config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Cluster config must be a YAML mapping: {cluster_config_path}")
     queues = payload.get("Scheduling", {}).get("SlurmQueues", [])
     partitions: list[str] = []
     seen: set[str] = set()
@@ -2784,8 +2786,10 @@ def create_app(
                 path = (cluster_create_workspace_root() / path).resolve()
             return path
         values = dict(cluster_config_values)
-        values.setdefault("cluster_name", cluster_name)
-        values.setdefault("s3_bucket_name", s3_bucket_name)
+        if "cluster_name" not in values or not str(values.get("cluster_name") or "").strip():
+            raise ValueError("cluster config values must include cluster_name")
+        if "s3_bucket_name" not in values or not str(values.get("s3_bucket_name") or "").strip():
+            raise ValueError("cluster config values must include s3_bucket_name")
         return write_dayec_cluster_config(
             dest=scratch_dir / "cluster.yaml",
             cluster_name=cluster_name,

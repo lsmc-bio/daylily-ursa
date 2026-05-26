@@ -494,6 +494,8 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
                 tapdb_local_ui_port=8918,
                 tapdb_domain_registry_path="/tmp/domain_code_registry.json",
                 tapdb_prefix_ownership_registry_path="/tmp/prefix_ownership_registry.json",
+                tapdb_domain_code="Z",
+                tapdb_owner_repo_name="ursa",
             )
         ),
     )
@@ -508,6 +510,8 @@ def test_resolved_default_identity_uses_settings_config_and_registry_paths(monke
             "8918",
             "/tmp/domain_code_registry.json",
             "/tmp/prefix_ownership_registry.json",
+            "Z",
+            "ursa",
         )
     finally:
         sys.modules.pop("daylib_ursa.config", None)

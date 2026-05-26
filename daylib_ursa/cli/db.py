@@ -19,10 +19,6 @@ from daylib_ursa.cli._registry_v2 import (
 from daylib_ursa.analysis_store import AnalysisStore
 from daylib_ursa.config import get_settings
 from daylib_ursa.integrations.tapdb_runtime import (
-    DEFAULT_AWS_PROFILE,
-    DEFAULT_AWS_REGION,
-    DEFAULT_TAPDB_CLIENT_ID,
-    DEFAULT_TAPDB_DATABASE_NAME,
     TapDBRuntimeError,
     ensure_local_tapdb_namespace_config,
     ensure_tapdb_version,
@@ -44,11 +40,14 @@ def _resolved_runtime_defaults(
     profile: str,
     region: str,
     namespace: str,
-) -> tuple[str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     settings = get_settings()
+    effective_client_id = str(getattr(settings, "tapdb_client_id", "") or "").strip()
+    if not effective_client_id:
+        raise TapDBRuntimeError("tapdb_client_id is required")
     effective_profile = str(profile or getattr(settings, "aws_profile", "") or "").strip()
     if not effective_profile:
-        effective_profile = DEFAULT_AWS_PROFILE
+        raise TapDBRuntimeError("AWS profile is required")
 
     effective_region = str(region or "").strip()
     if not effective_region:
@@ -56,17 +55,17 @@ def _resolved_runtime_defaults(
         if callable(resolver):
             effective_region = str(resolver() or "").strip()
     if not effective_region:
-        effective_region = DEFAULT_AWS_REGION
+        raise TapDBRuntimeError("AWS region is required")
 
     effective_namespace = str(
         namespace or getattr(settings, "tapdb_database_name", "") or ""
     ).strip()
     if not effective_namespace:
-        effective_namespace = DEFAULT_TAPDB_DATABASE_NAME
+        raise TapDBRuntimeError("tapdb_database_name is required")
 
     effective_config_path = str(getattr(settings, "tapdb_config_path", "") or "").strip()
 
-    return effective_profile, effective_region, effective_namespace, effective_config_path
+    return effective_client_id, effective_profile, effective_region, effective_namespace, effective_config_path
 
 
 def _validate_target(target: str) -> str:
@@ -84,7 +83,10 @@ def _confirm_target_label(*, namespace: str) -> str:
     ).strip()
     if not schema_name:
         raise TapDBRuntimeError("tapdb_schema_name is required for destructive confirmation.")
-    return f"{DEFAULT_TAPDB_CLIENT_ID}/{namespace}/{schema_name}@{physical_database}"
+    client_id = str(getattr(settings, "tapdb_client_id", "") or "").strip()
+    if not client_id:
+        raise TapDBRuntimeError("tapdb_client_id is required for destructive confirmation.")
+    return f"{client_id}/{namespace}/{schema_name}@{physical_database}"
 
 
 def _apply_ursa_overlay(*, start_step: int, total_steps: int) -> None:
@@ -106,14 +108,14 @@ def _build_target(
 ) -> None:
     ensure_tapdb_version()
     target = _validate_target(target)
-    profile, region, namespace, config_path = _resolved_runtime_defaults(
+    client_id, profile, region, namespace, config_path = _resolved_runtime_defaults(
         profile=profile,
         region=region,
         namespace=namespace,
     )
     if target == "local":
         ensure_local_tapdb_namespace_config(
-            client_id=DEFAULT_TAPDB_CLIENT_ID,
+            client_id=client_id,
             profile=profile,
             region=region,
             namespace=namespace,
@@ -122,7 +124,7 @@ def _build_target(
         result = run_tapdb_cli(
             args=["bootstrap", "local", "--no-gui"],
             target=target,
-            client_id=DEFAULT_TAPDB_CLIENT_ID,
+            client_id=client_id,
             profile=profile,
             region=region,
             namespace=namespace,
@@ -142,7 +144,7 @@ def _build_target(
                 "--no-gui",
             ],
             target=target,
-            client_id=DEFAULT_TAPDB_CLIENT_ID,
+            client_id=client_id,
             profile=profile,
             region=region,
             namespace=namespace,
@@ -153,7 +155,7 @@ def _build_target(
 
     db_url = export_database_url_for_target(
         target=target,
-        client_id=DEFAULT_TAPDB_CLIENT_ID,
+        client_id=client_id,
         profile=profile,
         region=region,
         namespace=namespace,
@@ -168,11 +170,9 @@ def _build_target(
 def build(
     target: str = typer.Option("local", "--target", help="TapDB target: local|aurora"),
     cluster: str = typer.Option("", "--cluster", help="Aurora cluster ID for aurora target"),
-    profile: str = typer.Option(DEFAULT_AWS_PROFILE, "--profile", help="AWS profile"),
-    region: str = typer.Option(DEFAULT_AWS_REGION, "--region", help="AWS region"),
-    namespace: str = typer.Option(
-        DEFAULT_TAPDB_DATABASE_NAME, "--namespace", help="TapDB namespace"
-    ),
+    profile: str = typer.Option("", "--profile", help="AWS profile"),
+    region: str = typer.Option("", "--region", help="AWS region"),
+    namespace: str = typer.Option("", "--namespace", help="TapDB namespace"),
 ) -> None:
     """Bootstrap TapDB runtime and apply the Ursa overlay.
 
@@ -198,23 +198,21 @@ def build(
 @db_app.command("seed")
 def seed(
     target: str = typer.Option("local", "--target", help="TapDB target: local|aurora"),
-    profile: str = typer.Option(DEFAULT_AWS_PROFILE, "--profile", help="AWS profile"),
-    region: str = typer.Option(DEFAULT_AWS_REGION, "--region", help="AWS region"),
-    namespace: str = typer.Option(
-        DEFAULT_TAPDB_DATABASE_NAME, "--namespace", help="TapDB namespace"
-    ),
+    profile: str = typer.Option("", "--profile", help="AWS profile"),
+    region: str = typer.Option("", "--region", help="AWS region"),
+    namespace: str = typer.Option("", "--namespace", help="TapDB namespace"),
 ) -> None:
     """Apply the Ursa TapDB template overlay only."""
     try:
         target = _validate_target(target)
-        profile, region, namespace, config_path = _resolved_runtime_defaults(
+        client_id, profile, region, namespace, config_path = _resolved_runtime_defaults(
             profile=profile,
             region=region,
             namespace=namespace,
         )
         db_url = export_database_url_for_target(
             target=target,
-            client_id=DEFAULT_TAPDB_CLIENT_ID,
+            client_id=client_id,
             profile=profile,
             region=region,
             namespace=namespace,
@@ -232,11 +230,9 @@ def reset(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
     target: str = typer.Option("local", "--target", help="TapDB target: local|aurora"),
     cluster: str = typer.Option("", "--cluster", help="Aurora cluster ID for aurora target"),
-    profile: str = typer.Option(DEFAULT_AWS_PROFILE, "--profile", help="AWS profile"),
-    region: str = typer.Option(DEFAULT_AWS_REGION, "--region", help="AWS region"),
-    namespace: str = typer.Option(
-        DEFAULT_TAPDB_DATABASE_NAME, "--namespace", help="TapDB namespace"
-    ),
+    profile: str = typer.Option("", "--profile", help="AWS profile"),
+    region: str = typer.Option("", "--region", help="AWS region"),
+    namespace: str = typer.Option("", "--namespace", help="TapDB namespace"),
 ) -> None:
     """Delete and rebuild the TapDB target, then apply the Ursa overlay."""
     if not force and not typer.confirm("This will delete the current TapDB DB target. Continue?"):
@@ -244,7 +240,7 @@ def reset(
 
     try:
         target = _validate_target(target)
-        profile, region, namespace, config_path = _resolved_runtime_defaults(
+        client_id, profile, region, namespace, config_path = _resolved_runtime_defaults(
             profile=profile,
             region=region,
             namespace=namespace,
@@ -252,7 +248,7 @@ def reset(
         run_tapdb_cli(
             args=["db", "delete", "--confirm-target", _confirm_target_label(namespace=namespace)],
             target=target,
-            client_id=DEFAULT_TAPDB_CLIENT_ID,
+            client_id=client_id,
             profile=profile,
             region=region,
             namespace=namespace,
@@ -281,11 +277,9 @@ def reset(
 def nuke(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
     target: str = typer.Option("local", "--target", help="TapDB target: local|aurora"),
-    profile: str = typer.Option(DEFAULT_AWS_PROFILE, "--profile", help="AWS profile"),
-    region: str = typer.Option(DEFAULT_AWS_REGION, "--region", help="AWS region"),
-    namespace: str = typer.Option(
-        DEFAULT_TAPDB_DATABASE_NAME, "--namespace", help="TapDB namespace"
-    ),
+    profile: str = typer.Option("", "--profile", help="AWS profile"),
+    region: str = typer.Option("", "--region", help="AWS region"),
+    namespace: str = typer.Option("", "--namespace", help="TapDB namespace"),
 ) -> None:
     """Delete the TapDB target without rebuilding."""
     if not force and not typer.confirm("This will delete the current TapDB DB target. Continue?"):
@@ -293,7 +287,7 @@ def nuke(
 
     try:
         target = _validate_target(target)
-        profile, region, namespace, config_path = _resolved_runtime_defaults(
+        client_id, profile, region, namespace, config_path = _resolved_runtime_defaults(
             profile=profile,
             region=region,
             namespace=namespace,
@@ -301,7 +295,7 @@ def nuke(
         run_tapdb_cli(
             args=["db", "delete", "--confirm-target", _confirm_target_label(namespace=namespace)],
             target=target,
-            client_id=DEFAULT_TAPDB_CLIENT_ID,
+            client_id=client_id,
             profile=profile,
             region=region,
             namespace=namespace,

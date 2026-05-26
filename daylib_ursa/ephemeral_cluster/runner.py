@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "2.3.3"
+REQUIRED_DAYLILY_EC_VERSION = "4.1.12"
 DAYLILY_EC_INSTALL_SPEC = (
     f"{DAYLILY_EC_DISTRIBUTION} @ "
-    f"git+https://github.com/lsmc-bio/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
+    f"git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
 )
 
 
@@ -122,7 +122,7 @@ def _write_aws_config_with_s3_acceleration_disabled(
     section = _aws_profile_section_name(profile)
     if not parser.has_section(section):
         parser.add_section(section)
-    existing_s3 = parser.get(section, "s3", fallback="")
+    existing_s3 = parser.get(section, "s3") if parser.has_option(section, "s3") else ""
     parser.set(section, "s3", _s3_settings_without_acceleration(existing_s3))
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("w", encoding="utf-8") as handle:
@@ -164,7 +164,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 2.3.3 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 4.1.12 contract."""
 
     def __init__(
         self,
@@ -373,7 +373,7 @@ def write_dayec_cluster_config(
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write a non-interactive cluster request through the day-ec 2.3.3 library."""
+    """Write a non-interactive cluster request through the day-ec 4.1.12 library."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.config")
