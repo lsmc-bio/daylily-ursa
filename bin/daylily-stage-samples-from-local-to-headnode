@@ -5,7 +5,7 @@ This helper reads an ``analysis_samples.tsv`` file, validates the referenced
 inputs, stages the data into the FSx-backed staging directory via the AWS CLI,
 and generates ``samples.tsv``/``units.tsv`` manifests that match the head node
 workflow.  The staging directory created on FSx follows the pattern
-``/fsx/data/staged_sample_data/remote_stage_<timestamp>/``.
+``/fsx/staging/staged_external_sequencing_data/remote_stage_<timestamp>/``.
 """
 
 from __future__ import annotations
@@ -152,11 +152,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("analysis_samples", help="Path to analysis_samples.tsv")
     parser.add_argument(
         "--stage-target",
-        default="/data/staged_sample_data",
+        default="/staging/staged_external_sequencing_data",
         help="FSx staging base directory (default: %(default)s)",
     )
     parser.add_argument(
-        "--reference-bucket",
+        "--reference-s3-uri",
         required=True,
         help="S3 URI (s3://bucket[/prefix]) mapped to the FSx data repository",
     )
@@ -203,9 +203,17 @@ def parse_s3_uri(uri: str) -> Tuple[str, str]:
 
 def normalise_stage_target(stage_target: str) -> str:
     stage_target = stage_target.strip()
-    if not stage_target.startswith("/data"):
+    if stage_target == "/data" or stage_target.startswith("/data/"):
         raise CommandError(
-            "Stage target must be an FSx path (expected to start with /data)."
+            "Stage target must use /staging; /data is not supported."
+        )
+    if stage_target == "/fsx/data" or stage_target.startswith("/fsx/data/"):
+        raise CommandError(
+            "Stage target must use /staging; /fsx/data is not supported."
+        )
+    if not (stage_target == "/staging" or stage_target.startswith("/staging/")):
+        raise CommandError(
+            "Stage target must be an FSx path (expected to start with /staging)."
         )
     return stage_target.rstrip("/")
 
@@ -300,22 +308,22 @@ def validate_subsample_pct(value: str) -> str:
     return value if 0.0 < pct < 1.0 else "na"
 
 
-def build_concordance_reference_uri(path: str, reference_bucket: str) -> str:
+def build_concordance_reference_uri(path: str, reference_s3_uri: str) -> str:
     """Translate an FSx concordance path to the backing S3 URI."""
 
     relative = path[len("/fsx/") :]
-    return f"{reference_bucket.rstrip('/')}/{relative.lstrip('/')}"
+    return f"{reference_s3_uri.rstrip('/')}/{relative.lstrip('/')}"
 
 
 def check_concordance_path(
     path: str,
     *,
-    reference_bucket: str,
+    reference_s3_uri: str,
     aws_env: Dict[str, str],
     debug: bool,
 ) -> None:
     if path.startswith("/fsx/"):
-        s3_uri = build_concordance_reference_uri(path, reference_bucket)
+        s3_uri = build_concordance_reference_uri(path, reference_s3_uri)
         check_s3_path(s3_uri, aws_env=aws_env, debug=debug)
     else:
         check_local_path(os.path.expanduser(path))
@@ -324,7 +332,7 @@ def check_concordance_path(
 def validate_sources(
     sources: Iterable[Tuple[str, bool]],
     *,
-    reference_bucket: str,
+    reference_s3_uri: str,
     aws_env: Dict[str, str],
     debug: bool,
 ) -> None:
@@ -337,7 +345,7 @@ def validate_sources(
         if is_concordance:
             check_concordance_path(
                 src,
-                reference_bucket=reference_bucket,
+                reference_s3_uri=reference_s3_uri,
                 aws_env=aws_env,
                 debug=debug,
             )
@@ -539,7 +547,7 @@ def stage_concordance(
     aws_env: Dict[str, str],
     debug: bool,
 ) -> str:
-    if source.lower() == "na" or source.startswith("/fsx/data"):
+    if source.lower() == "na" or source.startswith("/fsx/staging"):
         return source
     if source.startswith("s3://"):
         aws_copy(source, dest_s3, aws_env=aws_env, debug=debug, recursive=True)
@@ -653,17 +661,25 @@ def normalise_units_paths(rows: Sequence[Dict[str, str]]) -> None:
         for field, value in list(row.items()):
             if not isinstance(value, str):
                 continue
-            if value.startswith("/data/"):
+            if value == "/data" or value.startswith("/data/"):
+                raise CommandError(
+                    "The /data staging namespace is not supported; use /staging."
+                )
+            if value == "/fsx/data" or value.startswith("/fsx/data/"):
+                raise CommandError(
+                    "The /fsx/data staging namespace is not supported; use /fsx/staging."
+                )
+            if value.startswith("/staging/"):
                 row[field] = f"/fsx{value}"
-            elif value == "/data":
-                row[field] = "/fsx/data"
+            elif value == "/staging":
+                row[field] = "/fsx/staging"
 
 
 def process_samples(
     analysis_samples: Path,
     stage: StagePaths,
     *,
-    reference_bucket: str,
+    reference_s3_uri: str,
     aws_env: Dict[str, str],
     debug: bool,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], List[str], List[str]]:
@@ -694,7 +710,7 @@ def process_samples(
 
     validate_sources(
         sources_to_validate,
-        reference_bucket=reference_bucket,
+        reference_s3_uri=reference_s3_uri,
         aws_env=aws_env,
         debug=debug,
     )
@@ -862,13 +878,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     aws_config = AwsConfig(profile=ensure_profile(args.profile), region=args.region)
     aws_env = build_aws_env(aws_config)
 
-    stage = build_stage_paths(args.stage_target, args.reference_bucket)
+    stage = build_stage_paths(args.stage_target, args.reference_s3_uri)
     ensure_remote_stage_writable(stage, aws_env=aws_env, debug=args.debug)
 
     samples_rows, units_rows, created_files, run_ids = process_samples(
         analysis_samples,
         stage,
-        reference_bucket=args.reference_bucket,
+        reference_s3_uri=args.reference_s3_uri,
         aws_env=aws_env,
         debug=args.debug,
     )

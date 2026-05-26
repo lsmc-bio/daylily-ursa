@@ -32,7 +32,7 @@
                 </div>
                 <div class="form-group">
                     <label for="stage_target" class="form-label">Stage Target</label>
-                    <input type="text" id="stage_target" class="form-control" value="/data/staged_sample_data">
+                    <input type="text" id="stage_target" class="form-control" value="/staging/staged_external_sequencing_data">
                 </div>
             </div>
         </div>
@@ -318,7 +318,7 @@
         input.STAGE_TARGET = (
             document.getElementById('stage_target')?.value
             || input.STAGE_TARGET
-            || '/data/staged_sample_data'
+            || '/staging/staged_external_sequencing_data'
         );
         Object.entries(data || {}).forEach(([key, value]) => {
             if (MANIFEST_COLUMNS.includes(key)) {

@@ -144,8 +144,8 @@ def test_update_instance_json_replaces_nested_properties_and_marks_dirty(monkeyp
         {
             "state": "COMPLETED",
             "stage": {
-                "stage_dir": "/data/staged_sample_data/example",
-                "stdout": "Remote FSx stage directory: /data/staged_sample_data/example\n",
+                "stage_dir": "/staging/staged_external_sequencing_data/example",
+                "stdout": "Remote FSx stage directory: /staging/staged_external_sequencing_data/example\n",
             },
         },
     )
@@ -156,7 +156,7 @@ def test_update_instance_json_replaces_nested_properties_and_marks_dirty(monkeyp
     assert instance.original_json["properties"]["stage"] == {}
     assert instance.json_addl["properties"]["state"] == "COMPLETED"
     assert instance.json_addl["properties"]["stage"]["stage_dir"] == (
-        "/data/staged_sample_data/example"
+        "/staging/staged_external_sequencing_data/example"
     )
 
 

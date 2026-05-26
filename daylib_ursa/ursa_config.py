@@ -366,8 +366,8 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
 class UrsaConfig:
     """Ursa configuration loaded from ~/.config/ursa-<deployment>/ursa-config-<deployment>.yaml.
 
-    S3 buckets are NOT configured here - they are discovered dynamically from
-    cluster tags (aws-parallelcluster-monitor-bucket) when a cluster is selected.
+    DayEC storage roles are provided explicitly in cluster create requests as
+    S3 URI values; Ursa does not infer them from monitor-bucket tags.
 
     Configuration follows deployment-scoped XDG Base Directory conventions.
     """

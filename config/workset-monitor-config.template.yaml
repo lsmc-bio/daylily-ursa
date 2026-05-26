@@ -80,7 +80,7 @@ cluster:
   contact_email: your-email@example.com
 
   # Git tag/branch for the daylily-omics-analysis repo
-  repo_tag: 0.7.752
+  repo_tag: 2.0.0
 
   # Preferred AWS availability zone for cluster creation
   preferred_availability_zone: us-west-2a
@@ -100,13 +100,13 @@ cluster:
 # -----------------------------------------------------------------------------
 pipeline:
   # Directory on the headnode where worksets will be staged
-  workdir: /fsx/data/worksets
+  workdir: /fsx/staging/worksets
 
   # Local directory for staging manifests before transfer
   local_stage_root: .
 
-  # S3 bucket URI for reference data (REQUIRED - no default)
-  reference_bucket: s3://your-daylily-bucket/
+  # Required reference S3 URI for reference-backed concordance data.
+  reference_s3_uri: s3://your-daylily-references/
 
   # SSH identity file for headnode connection
   ssh_identity_file: ~/.ssh/your-headnode-key.pem
@@ -118,9 +118,9 @@ pipeline:
   ssh_extra_args: []
 
   # Command to stage samples to the headnode
-  # Available variables: {profile}, {region}, {reference_bucket}, {analysis_samples}, {output_dir}
+  # Available variables: {profile}, {region}, {reference_s3_uri}, {analysis_samples}, {output_dir}
   # Note: --config-dir ensures generated samples.tsv/units.tsv are written to the workset state dir
-  stage_command: daylily-ec samples stage {analysis_samples} --profile {profile} --region {region} --reference-bucket {reference_bucket} --config-dir {output_dir}
+  stage_command: daylily-ec samples stage {analysis_samples} --profile {profile} --region {region} --reference-s3-uri {reference_s3_uri} --config-dir {output_dir}
 
   # Command to clone the pipeline repository
   # Available variables: {clone_args}
@@ -154,7 +154,7 @@ pipeline:
 # These can be overridden per-workset in daylily_work.yaml
 
 # Clone arguments for day-clone command
-day-clone: "--repository daylily-omics-analysis --git-tag 0.7.752 --destination daylily-omics-analysis"
+day-clone: "--repository daylily-omics-analysis --git-tag 2.0.0 --destination daylily-omics-analysis"
 
 # Run arguments appended to run_prefix
 dy-r: "--name my-analysis --samples config/samples.tsv --outdir results/my-analysis --profile slurm --jobs 192 --rerun-incomplete"

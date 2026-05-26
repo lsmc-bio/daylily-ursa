@@ -515,7 +515,9 @@ async function renderClusters() {
       <input name="cluster_name" placeholder="ursa-pilot-01" required>
       <input name="region_az" placeholder="us-west-2d" required>
       <input name="ssh_key_name" placeholder="omics-key" required>
-      <input name="s3_bucket_name" placeholder="ursa-bucket" required>
+      <input name="reference_s3_uri" placeholder="s3://lsmc-dayoa-references-usw2" required>
+      <input name="control_data_s3_uri" placeholder="s3://lsmc-dayoa-control-data-usw2" required>
+      <input name="stage_s3_uri" placeholder="s3://lsmc-ssf-sequencing-data/staged_external_data" required>
       <input name="owner_user_id" placeholder="owner user id">
       <input name="contact_email" placeholder="ops@example.com">
       <button class="button primary" type="submit">Queue Cluster Job</button>
@@ -559,7 +561,9 @@ async function renderClusters() {
         cluster_name: formData.get("cluster_name"),
         region_az: formData.get("region_az"),
         ssh_key_name: formData.get("ssh_key_name"),
-        s3_bucket_name: formData.get("s3_bucket_name"),
+        reference_s3_uri: formData.get("reference_s3_uri"),
+        control_data_s3_uri: formData.get("control_data_s3_uri"),
+        stage_s3_uri: formData.get("stage_s3_uri"),
         owner_user_id: formData.get("owner_user_id") || null,
         contact_email: formData.get("contact_email") || null,
       },

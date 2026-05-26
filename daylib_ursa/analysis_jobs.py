@@ -50,7 +50,7 @@ def _snakemake_log_reports_success(text: str) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec 4.0.9."""
+    """Launch manager for Ursa analysis jobs through daylily-ec 5.0.0."""
 
     def __init__(
         self,
@@ -90,9 +90,9 @@ class AnalysisJobManager:
     ) -> tuple[StagingJobRecord, str]:
         from daylib_ursa.staging_jobs import StagingJobManager
 
-        reference_bucket = str(request.get("reference_bucket") or "").strip()
-        if not reference_bucket:
-            raise ValueError("reference_bucket is required for analysis launch staging")
+        reference_s3_uri = str(request.get("reference_s3_uri") or "").strip()
+        if not reference_s3_uri:
+            raise ValueError("reference_s3_uri is required for analysis launch staging")
         staging_job = self.resource_store.create_staging_job(
             job_name=f"{job.job_name}:staging",
             workset_euid=job.workset_euid,
@@ -102,9 +102,9 @@ class AnalysisJobManager:
             tenant_id=job.tenant_id,
             owner_user_id=job.owner_user_id,
             request={
-                "reference_bucket": reference_bucket,
+                "reference_s3_uri": reference_s3_uri,
                 "stage_target": str(request.get("stage_target") or "").strip()
-                or "/data/staged_sample_data",
+                or "/staging/staged_external_sequencing_data",
                 "aws_profile": aws_profile,
                 "analysis_job_euid": job.job_euid,
             },

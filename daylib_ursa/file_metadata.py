@@ -30,7 +30,7 @@ from daylib_ursa.ephemeral_cluster.runner import (
 
 ANALYSIS_SAMPLES_TEMPLATE_PACKAGE = "daylily_ec.resources.payload"
 ANALYSIS_SAMPLES_TEMPLATE_RESOURCE = "etc/analysis_samples_template.tsv"
-DEFAULT_STAGE_TARGET = "/data/staged_sample_data"
+DEFAULT_STAGE_TARGET = "/staging/staged_external_sequencing_data"
 
 
 def require_daylily_ec_template_version() -> str:

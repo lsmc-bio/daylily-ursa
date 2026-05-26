@@ -50,7 +50,7 @@ class MemoryResourceStore:
             error=None,
             output_summary=None,
             request={
-                "reference_bucket": "s3://reference-bucket",
+                "reference_s3_uri": "s3://reference-bucket",
                 "stage_target": "/fsx/staged_sample_data",
             },
             stage={},
@@ -154,5 +154,5 @@ def test_staging_job_manager_runs_samples_stage_and_persists_logs(tmp_path: Path
     assert record.events[0].status == "COMPLETED"
     assert logs["stdout"].startswith("stage log\n")
     assert client.calls[0][0]["stage_target"] == "/fsx/staged_sample_data"
-    assert client.calls[0][0]["reference_bucket"] == "s3://reference-bucket"
+    assert client.calls[0][0]["reference_s3_uri"] == "s3://reference-bucket"
     assert client.calls[0][1] == tmp_path.resolve()

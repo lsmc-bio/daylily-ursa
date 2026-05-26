@@ -64,16 +64,16 @@ class StagingJobManager:
         temp_dir: Path,
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         request = dict(job.request or {})
-        reference_bucket = str(request.get("reference_bucket") or "").strip()
-        if not reference_bucket:
-            raise ValueError("reference_bucket is required for staging")
+        reference_s3_uri = str(request.get("reference_s3_uri") or "").strip()
+        if not reference_s3_uri:
+            raise ValueError("reference_s3_uri is required for staging")
         manifest_path = temp_dir / "analysis_samples.tsv"
         manifest_path.write_text(_manifest_content(manifest), encoding="utf-8", newline="\n")
         stage_target = str(request.get("stage_target") or "").strip()
         aws_profile = str(request.get("aws_profile") or self.client.aws_profile or "").strip()
         result = self.client.stage_samples(
             analysis_samples=manifest_path,
-            reference_bucket=reference_bucket,
+            reference_s3_uri=reference_s3_uri,
             config_dir=temp_dir,
             region=job.region,
             stage_target=stage_target or None,

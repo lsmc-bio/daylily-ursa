@@ -429,7 +429,9 @@ class ClusterCreateRequest(BaseModel):
     region: str | None = None
     region_az: str
     ssh_key_name: str
-    s3_bucket_name: str
+    reference_s3_uri: str
+    control_data_s3_uri: str
+    stage_s3_uri: str
     owner_user_id: str | None = None
     aws_profile: str | None = None
     config_path: str | None = None
@@ -454,7 +456,9 @@ class ClusterAwsCheckAllRequest(BaseModel):
     region_az: str
     cluster_name: str | None = None
     ssh_key_name: str | None = None
-    s3_bucket_name: str | None = None
+    reference_s3_uri: str | None = None
+    control_data_s3_uri: str | None = None
+    stage_s3_uri: str | None = None
     aws_profile: str | None = None
     config_path: str | None = None
     contact_email: str | None = None
@@ -731,7 +735,7 @@ class AnalysisJobCreateRequest(BaseModel):
     manifest_euid: str
     cluster_name: str
     region: str
-    reference_bucket: str | None = None
+    reference_s3_uri: str | None = None
     analysis_command_id: str
     optional_features: list[str] = Field(default_factory=list)
     destination: str | None = None
@@ -755,9 +759,9 @@ class AnalysisJobCreateRequest(BaseModel):
                 raise ValueError(f"{field_name} is required")
         if (
             not str(self.staging_job_euid or "").strip()
-            and not str(self.reference_bucket or "").strip()
+            and not str(self.reference_s3_uri or "").strip()
         ):
-            raise ValueError("reference_bucket is required when staging_job_euid is omitted")
+            raise ValueError("reference_s3_uri is required when staging_job_euid is omitted")
         return self
 
 
@@ -806,7 +810,7 @@ class StagingJobCreateRequest(BaseModel):
     manifest_euid: str
     cluster_name: str
     region: str
-    reference_bucket: str
+    reference_s3_uri: str
     stage_target: str | None = None
     aws_profile: str | None = None
     debug: bool = False
@@ -819,7 +823,7 @@ class StagingJobCreateRequest(BaseModel):
             "manifest_euid",
             "cluster_name",
             "region",
-            "reference_bucket",
+            "reference_s3_uri",
         ):
             if not str(getattr(self, field_name) or "").strip():
                 raise ValueError(f"{field_name} is required")
@@ -2780,7 +2784,9 @@ def create_app(
         scratch_dir: Path,
         cluster_name: str,
         ssh_key_name: str,
-        s3_bucket_name: str,
+        reference_s3_uri: str,
+        control_data_s3_uri: str,
+        stage_s3_uri: str,
         contact_email: str | None,
         config_path: str | None,
         cluster_config_values: dict[str, str],
@@ -2795,7 +2801,9 @@ def create_app(
         explicit_fields = {
             "cluster_name": cluster_name,
             "ssh_key_name": ssh_key_name,
-            "s3_bucket_name": s3_bucket_name,
+            "reference_s3_uri": reference_s3_uri,
+            "control_data_s3_uri": control_data_s3_uri,
+            "stage_s3_uri": stage_s3_uri,
         }
         for key, expected in explicit_fields.items():
             candidate = str(values.pop(key, "") or "").strip()
@@ -2807,7 +2815,9 @@ def create_app(
             dest=scratch_dir / "cluster.yaml",
             cluster_name=cluster_name,
             ssh_key_name=ssh_key_name,
-            s3_bucket_name=s3_bucket_name,
+            reference_s3_uri=reference_s3_uri,
+            control_data_s3_uri=control_data_s3_uri,
+            stage_s3_uri=stage_s3_uri,
             contact_email=contact_email,
             config_values=values,
         )
@@ -2818,7 +2828,9 @@ def create_app(
         cluster_name: str,
         region_az: str,
         ssh_key_name: str,
-        s3_bucket_name: str,
+        reference_s3_uri: str,
+        control_data_s3_uri: str,
+        stage_s3_uri: str,
         aws_profile: str | None,
         contact_email: str | None,
     ) -> dict[str, Any]:
@@ -2827,7 +2839,9 @@ def create_app(
                 scratch_dir=Path(temp_dir),
                 cluster_name=cluster_name,
                 ssh_key_name=ssh_key_name,
-                s3_bucket_name=s3_bucket_name,
+                reference_s3_uri=reference_s3_uri,
+                control_data_s3_uri=control_data_s3_uri,
+                stage_s3_uri=stage_s3_uri,
                 contact_email=contact_email,
                 config_path=request.config_path,
                 cluster_config_values=request.cluster_config_values,
@@ -2865,12 +2879,20 @@ def create_app(
                 config_path = Path(explicit_config).expanduser()
                 if not config_path.is_absolute():
                     config_path = (cluster_create_workspace_root() / config_path).resolve()
-            elif request.cluster_name and request.ssh_key_name and request.s3_bucket_name:
+            elif (
+                request.cluster_name
+                and request.ssh_key_name
+                and request.reference_s3_uri
+                and request.control_data_s3_uri
+                and request.stage_s3_uri
+            ):
                 config_path = write_cluster_request_config(
                     scratch_dir=scratch_dir,
                     cluster_name=str(request.cluster_name).strip(),
                     ssh_key_name=str(request.ssh_key_name).strip(),
-                    s3_bucket_name=str(request.s3_bucket_name).strip(),
+                    reference_s3_uri=str(request.reference_s3_uri).strip(),
+                    control_data_s3_uri=str(request.control_data_s3_uri).strip(),
+                    stage_s3_uri=str(request.stage_s3_uri).strip(),
                     contact_email=str(request.contact_email or "").strip() or None,
                     config_path=None,
                     cluster_config_values=request.cluster_config_values,
@@ -3764,8 +3786,8 @@ def create_app(
         if manifest.workset_euid != workset.workset_euid:
             raise HTTPException(status_code=400, detail="Manifest does not belong to workset")
         request_payload = {
-            "reference_bucket": request.reference_bucket,
-            "stage_target": request.stage_target or "/data/staged_sample_data",
+            "reference_s3_uri": request.reference_s3_uri,
+            "stage_target": request.stage_target or "/staging/staged_external_sequencing_data",
             "aws_profile": request.aws_profile,
             "debug": bool(request.debug),
             "metadata": dict(request.metadata or {}),
@@ -3932,14 +3954,14 @@ def create_app(
             "analysis_command_id": request.analysis_command_id,
             "optional_features": list(request.optional_features),
             "destination": request.destination,
-            "reference_bucket": request.reference_bucket,
+            "reference_s3_uri": request.reference_s3_uri,
             "session_name": request.session_name,
             "project": request.project,
             "aws_profile": request.aws_profile,
             "dry_run": bool(request.dry_run),
             "stage_target": request.stage_target
             or (staging_job.request.get("stage_target") if staging_job else None)
-            or "/data/staged_sample_data",
+            or "/staging/staged_external_sequencing_data",
             "staging_job_euid": staging_job_euid or None,
             "command": command,
         }
@@ -4611,13 +4633,25 @@ def create_app(
         cluster_name = str(request.cluster_name or "").strip()
         region_az = str(request.region_az or "").strip()
         ssh_key_name = str(request.ssh_key_name or "").strip()
-        s3_bucket_name = str(request.s3_bucket_name or "").strip()
+        reference_s3_uri = str(request.reference_s3_uri or "").strip()
+        control_data_s3_uri = str(request.control_data_s3_uri or "").strip()
+        stage_s3_uri = str(request.stage_s3_uri or "").strip()
         aws_profile = str(request.aws_profile or app.state.settings.aws_profile or "").strip()
         contact_email = str(request.contact_email or "").strip() or actor.email
-        if not cluster_name or not region_az or not ssh_key_name or not s3_bucket_name:
+        if (
+            not cluster_name
+            or not region_az
+            or not ssh_key_name
+            or not reference_s3_uri
+            or not control_data_s3_uri
+            or not stage_s3_uri
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="cluster_name, region_az, ssh_key_name, and s3_bucket_name are required",
+                detail=(
+                    "cluster_name, region_az, ssh_key_name, reference_s3_uri, "
+                    "control_data_s3_uri, and stage_s3_uri are required"
+                ),
             )
         try:
             selection = resolve_cluster_partition_selection(
@@ -4658,7 +4692,9 @@ def create_app(
                 cluster_name=cluster_name,
                 region_az=selection.region_az,
                 ssh_key_name=ssh_key_name,
-                s3_bucket_name=s3_bucket_name,
+                reference_s3_uri=reference_s3_uri,
+                control_data_s3_uri=control_data_s3_uri,
+                stage_s3_uri=stage_s3_uri,
                 aws_profile=aws_profile or None,
                 contact_email=contact_email,
             )
@@ -4680,7 +4716,9 @@ def create_app(
                 cluster_name=cluster_name,
                 region_az=selection.region_az,
                 ssh_key_name=ssh_key_name,
-                s3_bucket_name=s3_bucket_name,
+                reference_s3_uri=reference_s3_uri,
+                control_data_s3_uri=control_data_s3_uri,
+                stage_s3_uri=stage_s3_uri,
                 tenant_id=actor.tenant_id,
                 owner_user_id=owner_user_id,
                 sponsor_user_id=actor.user_id,
@@ -4695,11 +4733,13 @@ def create_app(
             )
             return _cluster_job_response(record)
         record = manager.start_create_job(
-            cluster_name=cluster_name,
-            region_az=selection.region_az,
-            ssh_key_name=ssh_key_name,
-            s3_bucket_name=s3_bucket_name,
-            tenant_id=actor.tenant_id,
+                cluster_name=cluster_name,
+                region_az=selection.region_az,
+                ssh_key_name=ssh_key_name,
+                reference_s3_uri=reference_s3_uri,
+                control_data_s3_uri=control_data_s3_uri,
+                stage_s3_uri=stage_s3_uri,
+                tenant_id=actor.tenant_id,
             owner_user_id=owner_user_id,
             sponsor_user_id=actor.user_id,
             aws_profile=aws_profile or None,

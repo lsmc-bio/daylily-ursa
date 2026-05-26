@@ -25,7 +25,7 @@ Ursa does not own:
 
 The current package and runtime contracts are intentionally pinned:
 
-- `daylily-ephemeral-cluster @ git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@4.0.9`
+- `daylily-ephemeral-cluster @ git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@5.0.0`
 - `daylily-tapdb>=7.0.5,<8.0.0`
 - `daylily-auth-cognito==2.1.5`
 - `cli-core-yo==2.1.1`
@@ -115,9 +115,9 @@ Core API surface:
 - `/api/v1/buckets` manages linked S3 buckets and object browsing/upload helper routes.
 - `/api/v1/user-tokens` and `/api/v1/admin/user-tokens` manage Ursa user tokens.
 
-Manifest creation rejects caller-supplied generated manifest metadata. Ursa derives `analysis_samples_manifest` from `editor_analysis_inputs` or S3 input references, using the installed Daylily-Informatics `daylily-ephemeral-cluster` `4.0.9` template.
+Manifest creation rejects caller-supplied generated manifest metadata. Ursa derives `analysis_samples_manifest` from `editor_analysis_inputs` or S3 input references, using the installed Daylily-Informatics `daylily-ephemeral-cluster` `5.0.0` template.
 
-Staging jobs run against an existing manifest and capture the remote FSx stage directory plus stdout/stderr. Analysis jobs may either stage from a `reference_bucket` or reuse a completed `staging_job_euid` whose tenant, workset, manifest, state, and `stage_dir` match the request.
+Staging jobs run against an existing manifest and capture the remote FSx stage directory plus stdout/stderr. Analysis jobs may either stage from a `reference_s3_uri` or reuse a completed `staging_job_euid` whose tenant, workset, manifest, state, and `stage_dir` match the request.
 
 Atlas result return is allowed only after approval. Ursa sends opaque EUIDs and Dewey artifact EUIDs to Atlas and persists the Atlas response on the analysis record.
 

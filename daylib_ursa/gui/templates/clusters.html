@@ -206,11 +206,16 @@
                     <input class="form-input mt-xs" id="cc-ssh-key" type="text" placeholder="omics-keypair">
                 </div>
                 <div>
-                    <label class="form-label">S3 Bucket Name</label>
-                    <select class="form-select" id="cc-s3-bucket-select" onchange="syncManualField('cc-s3-bucket-select', 'cc-s3-bucket')">
-                        <option value="">Select bucket (or type below)</option>
-                    </select>
-                    <input class="form-input mt-xs" id="cc-s3-bucket" type="text" placeholder="omics-analysis-bucket">
+                    <label class="form-label">Reference S3 URI</label>
+                    <input class="form-input" id="cc-reference-s3-uri" type="text" placeholder="s3://lsmc-dayoa-references-usw2">
+                </div>
+                <div>
+                    <label class="form-label">Control Data S3 URI</label>
+                    <input class="form-input" id="cc-control-data-s3-uri" type="text" placeholder="s3://lsmc-dayoa-control-data-usw2">
+                </div>
+                <div>
+                    <label class="form-label">Stage S3 URI</label>
+                    <input class="form-input" id="cc-stage-s3-uri" type="text" placeholder="s3://lsmc-ssf-sequencing-data/staged_external_data">
                 </div>
                 <div>
                     <label class="form-label">Config Path (Optional)</label>
@@ -859,9 +864,13 @@ function collectClusterConfigValues() {
         }
     });
     const clusterName = clusterInputValue('cc-cluster-name');
-    const s3BucketName = clusterInputValue('cc-s3-bucket');
     if (clusterName) values.cluster_name = clusterName;
-    if (s3BucketName) values.s3_bucket_name = s3BucketName;
+    const referenceS3Uri = clusterInputValue('cc-reference-s3-uri');
+    const controlDataS3Uri = clusterInputValue('cc-control-data-s3-uri');
+    const stageS3Uri = clusterInputValue('cc-stage-s3-uri');
+    if (referenceS3Uri) values.reference_s3_uri = referenceS3Uri;
+    if (controlDataS3Uri) values.control_data_s3_uri = controlDataS3Uri;
+    if (stageS3Uri) values.stage_s3_uri = stageS3Uri;
     return values;
 }
 
@@ -878,7 +887,9 @@ function collectClusterCreatePayload() {
         region: selectedClusterRegion(),
         region_az: selectedClusterRegionAz(),
         ssh_key_name: clusterInputValue('cc-ssh-key'),
-        s3_bucket_name: clusterInputValue('cc-s3-bucket'),
+        reference_s3_uri: clusterInputValue('cc-reference-s3-uri'),
+        control_data_s3_uri: clusterInputValue('cc-control-data-s3-uri'),
+        stage_s3_uri: clusterInputValue('cc-stage-s3-uri'),
         owner_user_id: clusterInputValue('cc-owner-user-id') || null,
         aws_profile: clusterInputValue('cc-aws-profile') || null,
         config_path: clusterInputValue('cc-config-path') || null,
@@ -1488,7 +1499,6 @@ async function loadCreateOptions(showSuccess = true, showErrors = true) {
         try {
             const payload = await UrsaPortal.apiRequest(`/api/v1/clusters/create-options?region=${encodeURIComponent(region)}`);
             setSelectOptions('cc-ssh-key-select', 'Select keypair (or type below)', payload.keypairs || []);
-            setSelectOptions('cc-s3-bucket-select', 'Select bucket (or type below)', payload.buckets || []);
             setSelectOptions(
                 'cc-region-az',
                 'Select availability zone',
@@ -1939,8 +1949,8 @@ async function createCluster() {
     await withClusterButtonBusy('cc-submit-btn', 'Starting cluster create job...', async () => {
         try {
             const payload = collectClusterCreatePayload();
-            if (!payload.region || !payload.region_az || !payload.cluster_name || !payload.ssh_key_name || !payload.s3_bucket_name) {
-                showToast('error', 'Region, availability zone, cluster name, SSH key, and S3 bucket are required');
+            if (!payload.region || !payload.region_az || !payload.cluster_name || !payload.ssh_key_name || !payload.reference_s3_uri || !payload.control_data_s3_uri || !payload.stage_s3_uri) {
+                showToast('error', 'Region, availability zone, cluster name, SSH key, reference S3 URI, control-data S3 URI, and stage S3 URI are required');
                 return;
             }
             const verification = await runPartitionVerification({ region: payload.region, regionAz: payload.region_az }, false);
