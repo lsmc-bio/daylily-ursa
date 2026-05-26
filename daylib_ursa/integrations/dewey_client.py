@@ -182,3 +182,47 @@ class DeweyClient:
             metadata=metadata,
             idempotency_key=idempotency_key,
         )
+
+    def register_analysis_results(
+        self,
+        *,
+        payload: dict[str, Any],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict) or not payload:
+            raise DeweyClientError("analysis result registration payload is required")
+        clean_key = str(idempotency_key or "").strip()
+        if not clean_key:
+            raise DeweyClientError("idempotency_key is required")
+        url = (
+            f"{_require_https_url(self.base_url, field_name='Dewey base URL')}"
+            "/api/v1/analysis-results/register"
+        )
+        client, close_client = self._http_client()
+        try:
+            response = client.post(
+                url,
+                json=payload,
+                headers=self._headers(idempotency_key=clean_key),
+            )
+        except httpx.HTTPError as exc:
+            raise DeweyClientError(f"Dewey analysis-result registration failed: {exc}") from exc
+        finally:
+            if close_client:
+                client.close()
+        if response.status_code >= 400:
+            raise DeweyClientError(
+                "Dewey analysis-result registration returned "
+                f"{response.status_code}: {response.text}"
+            )
+        body = response.json()
+        if not isinstance(body, dict):
+            raise DeweyClientError(
+                "Dewey analysis-result registration response was not a JSON object"
+            )
+        receipt = body.get("receipt")
+        if not isinstance(receipt, dict) or not str(receipt.get("artifact_set_euid") or "").strip():
+            raise DeweyClientError(
+                "Dewey analysis-result registration response missing receipt artifact_set_euid"
+            )
+        return body

@@ -16,7 +16,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Any, Literal, Sequence
+from typing import Annotated, Any, Literal, Sequence, cast
 from urllib.parse import urlparse
 
 import boto3
@@ -334,6 +334,40 @@ class ArtifactResolveRequest(BaseModel):
         if has_artifact == has_set:
             raise ValueError("Exactly one of artifact_euid or artifact_set_euid is required")
         return self
+
+
+class DeweyRunAnalysisTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dewey_receipt_euid: str
+    run_artifact_set_euid: str
+    platform: Literal["ILMN", "ONT", "ULTIMA", "HYBRID_ILMN_ONT"]
+    command_id: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    sidecar_artifact_euid: str | None = None
+    sidecar_version_id: str | None = None
+    run_context_refs: dict[str, Any] = Field(default_factory=dict)
+    sample_read_refs: list[dict[str, Any]] = Field(default_factory=list)
+    sample_identifiers: list[dict[str, Any]] = Field(default_factory=list)
+    auto_launch: bool = False
+
+    @model_validator(mode="after")
+    def validate_required_refs(self) -> "DeweyRunAnalysisTriggerRequest":
+        for field_name in ("dewey_receipt_euid", "run_artifact_set_euid", "command_id"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        return self
+
+
+class DeweyRunAnalysisTriggerResponse(BaseModel):
+    trigger_euid: str
+    status: str
+    idempotency_key: str
+    command_id: str
+    command_preview: dict[str, Any]
+    request: dict[str, Any]
+    created_at: str
+    updated_at: str
 
 
 class LinkedBucketCreateRequest(BaseModel):
@@ -2108,6 +2142,8 @@ def create_app(
         if resource_store is not None and hasattr(cluster_service, "client")
         else None
     )
+    app.state.dewey_run_triggers = {}
+    app.state.dewey_run_trigger_idempotency = {}
     app.state.observability_cleanup = []
 
     def _anomaly_repository():
@@ -2330,6 +2366,19 @@ def create_app(
                 detail="Invalid or missing write service token",
             )
         return provided
+
+    def require_idempotency_key(
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> str:
+        clean_key = str(idempotency_key or "").strip()
+        if not clean_key:
+            raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
+        return clean_key
+
+    def _canonical_trigger_fingerprint(payload: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
 
     def require_resource_store() -> ResourceStore:
         resource_backend = getattr(app.state, "resource_store", None)
@@ -3566,6 +3615,79 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post(
+        "/api/v1/dewey/run-analysis-triggers",
+        response_model=DeweyRunAnalysisTriggerResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_dewey_run_analysis_trigger(
+        request: DeweyRunAnalysisTriggerRequest,
+        _api_key: str = Depends(require_write_api_key),
+        idempotency_key: str = Depends(require_idempotency_key),
+    ) -> DeweyRunAnalysisTriggerResponse:
+        _ = _api_key
+        request_payload = request.model_dump(mode="json", exclude_none=True)
+        fingerprint = _canonical_trigger_fingerprint(request_payload)
+        idempotency_lookup = str(idempotency_key)
+        trigger_idempotency = cast(
+            dict[str, dict[str, Any]],
+            app.state.dewey_run_trigger_idempotency,
+        )
+        trigger_records = cast(dict[str, dict[str, Any]], app.state.dewey_run_triggers)
+        existing = trigger_idempotency.get(idempotency_lookup)
+        if existing is not None:
+            if existing["fingerprint"] != fingerprint:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key reuse with different request payload",
+                )
+            return DeweyRunAnalysisTriggerResponse(**cast(dict[str, Any], existing["response"]))
+        try:
+            command = analysis_command_payload(request.command_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        trigger_euid = f"UTRG-{fingerprint[:16].upper()}"
+        response = {
+            "trigger_euid": trigger_euid,
+            "status": "QUEUED",
+            "idempotency_key": idempotency_lookup,
+            "command_id": request.command_id,
+            "command_preview": {
+                "valid": True,
+                "command_id": request.command_id,
+                "catalog_command": command,
+                "params": dict(request.params),
+            },
+            "request": request_payload,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        trigger_records[trigger_euid] = response
+        trigger_idempotency[idempotency_lookup] = {
+            "fingerprint": fingerprint,
+            "response": response,
+        }
+        return DeweyRunAnalysisTriggerResponse(**response)
+
+    @app.get(
+        "/api/v1/dewey/run-analysis-triggers/{trigger_euid}",
+        response_model=DeweyRunAnalysisTriggerResponse,
+    )
+    async def get_dewey_run_analysis_trigger(
+        trigger_euid: str,
+        _api_key: str = Depends(require_write_api_key),
+    ) -> DeweyRunAnalysisTriggerResponse:
+        _ = _api_key
+        trigger_records = cast(dict[str, dict[str, Any]], app.state.dewey_run_triggers)
+        record = trigger_records.get(str(trigger_euid or "").strip())
+        if record is None:
+            raise HTTPException(status_code=404, detail="Dewey run-analysis trigger not found")
+        return DeweyRunAnalysisTriggerResponse(**record)
+
+    @app.post(
         "/api/v1/worksets", response_model=WorksetResponse, status_code=status.HTTP_201_CREATED
     )
     async def create_workset(
@@ -4587,7 +4709,9 @@ def create_app(
                 fetch_ssh_status=visible_fetch_ssh_status,
             )
         )
-        return {"items": [item.to_dict(include_sensitive=visible_fetch_ssh_status) for item in items]}
+        return {
+            "items": [item.to_dict(include_sensitive=visible_fetch_ssh_status) for item in items]
+        }
 
     @app.get("/api/v1/clusters/regions/{region}/names")
     async def list_region_cluster_names(
@@ -4733,13 +4857,13 @@ def create_app(
             )
             return _cluster_job_response(record)
         record = manager.start_create_job(
-                cluster_name=cluster_name,
-                region_az=selection.region_az,
-                ssh_key_name=ssh_key_name,
-                reference_s3_uri=reference_s3_uri,
-                control_data_s3_uri=control_data_s3_uri,
-                stage_s3_uri=stage_s3_uri,
-                tenant_id=actor.tenant_id,
+            cluster_name=cluster_name,
+            region_az=selection.region_az,
+            ssh_key_name=ssh_key_name,
+            reference_s3_uri=reference_s3_uri,
+            control_data_s3_uri=control_data_s3_uri,
+            stage_s3_uri=stage_s3_uri,
+            tenant_id=actor.tenant_id,
             owner_user_id=owner_user_id,
             sponsor_user_id=actor.user_id,
             aws_profile=aws_profile or None,
