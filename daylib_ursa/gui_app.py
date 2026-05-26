@@ -5,10 +5,8 @@ import json
 import logging
 import secrets
 import subprocess
-import threading
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -38,6 +36,7 @@ from daylib_ursa.auth import (
 from daylib_ursa.aws_usage import AwsUsageReportService
 from daylib_ursa.cluster_jobs import region_from_region_az
 from daylib_ursa.config import _require_bare_cognito_domain
+from daylib_ursa.gui_cache import GuiPayloadCache
 from daylib_ursa.analysis_commands import command_catalog_payload
 from daylib_ursa.manifest_editor_options import manifest_editor_static_payload
 from daylib_ursa.observability import (
@@ -1352,20 +1351,44 @@ def mount_gui(app: FastAPI) -> None:
         }
 
 
-    def _gui_payload_cache_state() -> tuple[dict[tuple[str, str, str], tuple[float, dict[str, Any]]], threading.RLock]:
+    def _gui_payload_cache() -> GuiPayloadCache:
+        settings = getattr(app.state, "settings", None)
+        ttl_seconds = int(getattr(settings, "ursa_gui_cache_ttl_seconds", _GUI_PAYLOAD_CACHE_TTL_SECONDS))
         cache = getattr(app.state, "gui_payload_cache", None)
-        if cache is None:
-            cache = {}
+        if not isinstance(cache, GuiPayloadCache) or cache.ttl_seconds != ttl_seconds:
+            cache = GuiPayloadCache(ttl_seconds=ttl_seconds)
             app.state.gui_payload_cache = cache
-        lock = getattr(app.state, "gui_payload_cache_lock", None)
-        if lock is None:
-            lock = threading.RLock()
-            app.state.gui_payload_cache_lock = lock
-        return cache, lock
+        return cache
 
-    def _gui_payload_cache_key(name: str, actor: CurrentUser) -> tuple[str, str, str]:
+    def _gui_payload_cache_key(name: str, actor: CurrentUser) -> str:
         visibility_scope = "admin" if actor.is_admin else str(actor.tenant_id)
-        return (name, visibility_scope, str(actor.sub))
+        return f"{name}:{visibility_scope}:{actor.sub}"
+
+    def _gui_payload_cache_status(
+        name: str,
+        key: str,
+        *,
+        served_from_cache: bool | None = None,
+    ) -> dict[str, Any]:
+        status_payload = _gui_payload_cache().status(key)
+        expires_at = status_payload.get("expires_at_epoch")
+        now = time.time()
+        status_payload["name"] = name
+        status_payload["cached"] = (
+            bool(served_from_cache)
+            if served_from_cache is not None
+            else status_payload.get("state") == "ready"
+        )
+        status_payload["expires_in_seconds"] = (
+            max(0, int(float(expires_at) - now)) if expires_at is not None else 0
+        )
+        return status_payload
+
+    def _build_gui_payload(name: str, builder: Any) -> dict[str, Any]:
+        payload = jsonable_encoder(builder())
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{name} GUI payload must be a JSON object")
+        return payload
 
     def _cached_gui_payload(
         name: str,
@@ -1374,35 +1397,68 @@ def mount_gui(app: FastAPI) -> None:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        cache, lock = _gui_payload_cache_state()
         key = _gui_payload_cache_key(name, actor)
-        now = time.time()
-        with lock:
-            cached = cache.get(key)
-            if not force_refresh and cached is not None:
-                expires_at, payload = cached
-                if now < expires_at:
-                    result = copy.deepcopy(payload)
-                    result["cache"] = {
-                        "cached": True,
-                        "ttl_seconds": _GUI_PAYLOAD_CACHE_TTL_SECONDS,
-                        "expires_in_seconds": max(0, int(expires_at - now)),
-                    }
-                    return result
-                cache.pop(key, None)
-        payload = jsonable_encoder(builder())
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"{name} GUI payload must be a JSON object")
-        expires_at = now + _GUI_PAYLOAD_CACHE_TTL_SECONDS
-        payload["cache"] = {
-            "cached": False,
-            "ttl_seconds": _GUI_PAYLOAD_CACHE_TTL_SECONDS,
-            "expires_in_seconds": _GUI_PAYLOAD_CACHE_TTL_SECONDS,
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        cache = _gui_payload_cache()
+        before = cache.status(key)
+        served_from_cache = (
+            not force_refresh
+            and before.get("state") == "ready"
+            and not bool(before.get("stale"))
+        )
+        payload = cache.get(
+            key,
+            lambda: _build_gui_payload(name, builder),
+            force_refresh=force_refresh,
+        )
+        result = copy.deepcopy(payload)
+        result["cache"] = _gui_payload_cache_status(
+            name,
+            key,
+            served_from_cache=served_from_cache,
+        )
+        return result
+
+    def _trigger_gui_payload_refresh(name: str, actor: CurrentUser, builder: Any) -> dict[str, Any]:
+        key = _gui_payload_cache_key(name, actor)
+        return {
+            "cache": _gui_payload_cache().trigger_refresh(
+                key,
+                lambda: _build_gui_payload(name, builder),
+            )
         }
-        with lock:
-            cache[key] = (expires_at, copy.deepcopy(payload))
-        return copy.deepcopy(payload)
+
+    def _prewarm_global_gui_caches() -> dict[str, Any]:
+        clusters = _cluster_service().get_all_clusters_with_status(
+            force_refresh=False,
+            fetch_ssh_status=False,
+        )
+        jobs = _resource_store().list_cluster_jobs(tenant_id=None)
+        usage_report = _aws_usage_report_service().get_report(force_refresh=False).to_dict()
+        return {
+            "clusters": len(clusters),
+            "cluster_jobs": len(jobs),
+            "usage_report_fetched_at": str(usage_report.get("fetched_at") or ""),
+        }
+
+    @app.on_event("startup")
+    async def _start_gui_cache_background_refresh() -> None:
+        settings = getattr(app.state, "settings", None)
+        if not bool(getattr(settings, "ursa_gui_cache_enabled", True)):
+            return
+        if not bool(getattr(settings, "ursa_gui_cache_background_refresh_enabled", True)):
+            return
+        _gui_payload_cache().start_periodic(
+            key="global:cluster-and-usage",
+            builder=_prewarm_global_gui_caches,
+            interval_seconds=int(getattr(settings, "ursa_gui_cache_refresh_interval_seconds", 600)),
+            thread_name="ursa-gui-cache-global",
+        )
+
+    @app.on_event("shutdown")
+    async def _stop_gui_cache_background_refresh() -> None:
+        cache = getattr(app.state, "gui_payload_cache", None)
+        if isinstance(cache, GuiPayloadCache):
+            cache.stop()
 
     @app.get("/api/v1/gui/dashboard")
     async def dashboard_gui_payload(request: Request):
@@ -1410,6 +1466,13 @@ def mount_gui(app: FastAPI) -> None:
         if actor is None:
             raise HTTPException(status_code=401, detail="Authentication is required")
         return _cached_gui_payload("dashboard", actor, lambda: _dashboard_context(actor))
+
+    @app.post("/api/v1/gui/dashboard/refresh")
+    async def dashboard_gui_refresh(request: Request):
+        actor = _session_actor(request)
+        if actor is None:
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        return _trigger_gui_payload_refresh("dashboard", actor, lambda: _dashboard_context(actor))
 
     @app.get("/api/v1/gui/usage")
     async def usage_gui_payload(request: Request, refresh: bool = False):
@@ -1422,6 +1485,13 @@ def mount_gui(app: FastAPI) -> None:
             lambda: _usage_context(actor, refresh=refresh),
             force_refresh=refresh,
         )
+
+    @app.post("/api/v1/gui/usage/refresh")
+    async def usage_gui_refresh(request: Request):
+        actor = _session_actor(request)
+        if actor is None:
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        return _trigger_gui_payload_refresh("usage", actor, lambda: _usage_context(actor, refresh=True))
 
 
     @app.get("/login", response_class=HTMLResponse)

@@ -1722,6 +1722,8 @@ def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
         first_usage = client.get("/api/v1/gui/usage")
         second_usage = client.get("/api/v1/gui/usage")
         refreshed_usage = client.get("/api/v1/gui/usage?refresh=true")
+        dashboard_refresh = client.post("/api/v1/gui/dashboard/refresh")
+        usage_refresh = client.post("/api/v1/gui/usage/refresh")
 
     assert first_dashboard.status_code == 200
     assert second_dashboard.status_code == 200
@@ -1730,8 +1732,12 @@ def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
     assert first_usage.json()["cache"]["cached"] is False
     assert second_usage.json()["cache"]["cached"] is True
     assert refreshed_usage.json()["cache"]["cached"] is False
-    assert dashboard_calls["clusters"] == 1
-    assert dashboard_calls["usage"] == 3
+    assert dashboard_refresh.status_code == 200
+    assert dashboard_refresh.json()["cache"]["state"] in {"ready", "refreshing"}
+    assert usage_refresh.status_code == 200
+    assert usage_refresh.json()["cache"]["state"] in {"ready", "refreshing"}
+    assert dashboard_calls["clusters"] >= 1
+    assert dashboard_calls["usage"] >= 3
 
 def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
     app, _resources = _create_test_app(admin=True)
@@ -1804,7 +1810,7 @@ def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
     assert "Loading usage data" in page.text
     assert response.status_code == 200
     payload = response.json()
-    assert service_calls == [True]
+    assert service_calls[-1] is True
     assert payload["usage_report"]["tag_keys"] == ["aws-parallelcluster-project"]
     assert payload["usage_report"]["costs_by_tag_service"][0]["service"] == "Amazon Elastic Compute Cloud - Compute"
     assert payload["usage_report"]["costs_by_tag_service"][0]["amount"] == 42.5
@@ -2117,4 +2123,3 @@ def test_non_admin_can_view_clusters_but_cannot_create_or_delete() -> None:
     assert create_cluster.status_code == 403
     assert delete_plan.status_code == 403
     assert delete_cluster.status_code == 403
-

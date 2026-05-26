@@ -48,3 +48,12 @@ source ./activate <deploy-name>
 - Do not assume existing data needs transformation unless the user directly says it does.
 - Do not add transition code, alternate read/write paths, or prior-field support unless explicitly requested.
 - Fallback behavior is an antipattern in this workspace. Do not add, preserve, or rely on inferred config paths, environment-derived deployment identity, compatibility shims, alternate TapDB namespaces, generated substitute values, or silent analysis/service state. Missing config, credentials, TapDB namespace, workset metadata, or malformed input must fail hard with a clear error.
+
+## DAYHOFF SERVICE EXPOSURE SECURITY
+
+- Ursa is an approved-network customer/collaborator Dayhoff service, not a globally public internet service.
+- Do not add global service ingress, wildcard/fallback vhosts, old callback aliases, inferred return URLs, or service-side host discovery.
+- Ursa must consume explicit broker claims and registered-service credentials; do not infer customer/network access locally.
+- `kahlo`, `bloom`, and `zebra_day` are LSMC-internal only; `login`, `atlas`, `dewey`, and `ursa` are approved-network customer/collaborator services.
+- Service-host certs use DNS-01 renewal; do not depend on HTTP-01 public reachability for Ursa service hosts.
+- Future dev, test, and stage deployments must use their own approved-source lists, credentials, certificates, cluster policies, and tenant data, separate from production.

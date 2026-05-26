@@ -404,6 +404,22 @@ class Settings(BaseSettings):
         default=None,
         description="Optional cluster YAML path passed to daylily-ec pricing snapshot",
     )
+    ursa_gui_cache_enabled: bool = Field(
+        default=True,
+        description="Enable process-local cached GUI aggregate payloads",
+    )
+    ursa_gui_cache_ttl_seconds: int = Field(
+        default=600,
+        description="TTL for process-local GUI aggregate payloads",
+    )
+    ursa_gui_cache_refresh_interval_seconds: int = Field(
+        default=600,
+        description="Background refresh cadence for slow GUI aggregate payloads",
+    )
+    ursa_gui_cache_background_refresh_enabled: bool = Field(
+        default=True,
+        description="Start background refresh tasks for slow GUI aggregate payloads",
+    )
 
     def get_allowed_regions(self) -> List[str]:
         """Get list of allowed regions from comma-separated string."""
