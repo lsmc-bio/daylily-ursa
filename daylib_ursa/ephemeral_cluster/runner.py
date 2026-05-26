@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "4.1.12"
+REQUIRED_DAYLILY_EC_VERSION = "4.1.13"
 DAYLILY_EC_INSTALL_SPEC = (
     f"{DAYLILY_EC_DISTRIBUTION} @ "
     f"git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
@@ -164,7 +164,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 4.1.12 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 4.1.13 contract."""
 
     def __init__(
         self,
@@ -373,7 +373,7 @@ def write_dayec_cluster_config(
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write a non-interactive cluster request through the day-ec 4.1.12 library."""
+    """Write a non-interactive cluster request through the day-ec 4.1.13 library."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.config")

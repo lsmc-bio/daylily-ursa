@@ -4,11 +4,11 @@
   "components": {
     "daylily-ursa": {
       "repo": "lsmc-bio/daylily-ursa",
-      "current": "3.0.3"
+      "current": "3.0.4"
     },
     "daylily-ephemeral-cluster": {
       "repo": "Daylily-Informatics/daylily-ephemeral-cluster",
-      "current": "4.1.12"
+      "current": "4.1.13"
     },
     "daylily-omics-analysis": {
       "repo": "lsmc-bio/daylily-omics-analysis",
@@ -38,15 +38,15 @@
   "tested_combinations": [
     {
       "date": "2026-05-26",
-      "ursa": "3.0.3",
-      "ephemeral_cluster": "4.1.12",
+      "ursa": "3.0.4",
+      "ephemeral_cluster": "4.1.13",
       "omics_analysis": "0.7.752",
       "cognito": "2.1.5",
       "tapdb": "7.0.3",
       "cli_core_yo": "2.1.1",
       "zebra_day": "6.0.14",
       "omics_references": "0.3.1",
-      "notes": "Pinned daylily-ephemeral-cluster 4.1.12 from Daylily-Informatics git tag, daylily-auth-cognito to 2.1.5, daylily-tapdb to 7.0.3, cli-core-yo to 2.1.1, zebra_day to GitHub tag 6.0.14, and lsmc-bio daylily-omics-analysis to GitHub release 0.7.752"
+      "notes": "Pinned daylily-ephemeral-cluster 4.1.13 from Daylily-Informatics git tag, daylily-auth-cognito to 2.1.5, daylily-tapdb to 7.0.3, cli-core-yo to 2.1.1, zebra_day to GitHub tag 6.0.14, and lsmc-bio daylily-omics-analysis to GitHub release 0.7.752"
     },
     {
       "date": "2026-03-03",
