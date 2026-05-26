@@ -65,8 +65,8 @@
 
             <div class="grid grid-2">
                 <div class="form-group">
-                    <label for="reference_bucket" class="form-label">Reference Bucket</label>
-                    <input id="reference_bucket" class="form-control" placeholder="s3://bucket/path">
+                    <label for="reference_s3_uri" class="form-label">Reference S3 URI</label>
+                    <input id="reference_s3_uri" class="form-control" placeholder="s3://bucket/path">
                 </div>
                 <div class="form-group">
                     <label for="destination" class="form-label">Destination</label>
@@ -77,7 +77,7 @@
             <div class="grid grid-2">
                 <div class="form-group">
                     <label for="stage_target" class="form-label">Stage Target</label>
-                    <input id="stage_target" class="form-control mono" value="/data/staged_sample_data" required>
+                    <input id="stage_target" class="form-control mono" value="/staging/staged_external_sequencing_data" required>
                 </div>
             </div>
 
@@ -207,7 +207,7 @@
             manifest_euid: manifestSelect?.value || '',
             cluster_name: clusterSelect?.value || '',
             region: document.getElementById('region')?.value || '',
-            reference_bucket: document.getElementById('reference_bucket')?.value || '',
+            reference_s3_uri: document.getElementById('reference_s3_uri')?.value || '',
             destination: document.getElementById('destination')?.value || '',
             analysis_command_id: document.getElementById('analysis_command_id')?.value || '',
             optional_features: features(),
@@ -280,7 +280,7 @@
                     destination: payload.destination,
                     project: payload.project,
                     dry_run: payload.dry_run,
-                    stage_dir: `${payload.stage_target || '/data/staged_sample_data'}/<staging-job>`,
+                    stage_dir: `${payload.stage_target || '/staging/staged_external_sequencing_data'}/<staging-job>`,
                 },
             },
         );

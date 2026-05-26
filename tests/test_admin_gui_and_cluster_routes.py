@@ -329,7 +329,7 @@ class MemoryResourceStore:
                         "rows": [{"RUN_ID": "RU1", "SAMPLE_ID": "S1"}],
                         "input_references": [],
                         "artifact_euids": ["AT-1"],
-                        "staging": {"stage_target": "/data/staged_sample_data"},
+                        "staging": {"stage_target": "/staging/staged_external_sequencing_data"},
                         "analysis_defaults": {},
                     }
                 },
@@ -505,7 +505,7 @@ class MemoryResourceStore:
             request={
                 "analysis_command_id": "illumina_snv_alignstats",
                 "optional_features": [],
-                "reference_bucket": "s3://references",
+                "reference_s3_uri": "s3://references",
             },
             launch={},
             events=[
@@ -540,7 +540,7 @@ class MemoryResourceStore:
 
 
 def _staging_job_record(job_euid: str, state: str) -> StagingJobRecord:
-    stage_target = "/data/staged_sample_data"
+    stage_target = "/staging/staged_external_sequencing_data"
     started_at = "2026-03-25T00:30:00Z" if state in {"STAGING", "COMPLETED", "FAILED"} else None
     completed_at = "2026-03-25T00:31:00Z" if state in {"COMPLETED", "FAILED"} else None
     return StagingJobRecord(
@@ -561,7 +561,7 @@ def _staging_job_record(job_euid: str, state: str) -> StagingJobRecord:
         error="stage failed" if state == "FAILED" else None,
         output_summary="stage completed" if state == "COMPLETED" else None,
         request={
-            "reference_bucket": "s3://omics-inputs/incoming",
+            "reference_s3_uri": "s3://omics-inputs/incoming",
             "stage_target": stage_target,
             "aws_profile": None,
             "debug": False,
@@ -657,7 +657,7 @@ class DummyClusterInfo:
                 "state": "running",
                 "instance_id": "i-0123456789abcdef0",
             },
-            "daylily_ec_pinned_version": "4.0.9",
+            "daylily_ec_pinned_version": "5.0.0",
             "aws_console_url": (
                 f"https://{self.region}.console.aws.amazon.com/ec2/home?region={self.region}"
                 "#InstanceDetails:instanceId=i-0123456789abcdef0"
@@ -673,8 +673,8 @@ class DummyClusterInfo:
                     "ttl_seconds": 86400,
                     "cached": True,
                     "data": {
-                        "daylily_ec_pinned_version": "4.0.9",
-                        "remote_daylily_ec_version": "4.0.9",
+                        "daylily_ec_pinned_version": "5.0.0",
+                        "remote_daylily_ec_version": "5.0.0",
                         "remote_git_hash": "abc123",
                         "day_clone_available": True,
                         "day_clone_help": "Usage: day-clone [OPTIONS]\n  --help",
@@ -779,8 +779,8 @@ class DummyClusterService:
             "ttl_seconds": 86400,
             "cached": not refresh,
             "data": {
-                "daylily_ec_pinned_version": "4.0.9",
-                "remote_daylily_ec_version": "4.0.9",
+                "daylily_ec_pinned_version": "5.0.0",
+                "remote_daylily_ec_version": "5.0.0",
                 "remote_git_hash": "abc123",
                 "day_clone_available": True,
                 "day_clone_help": "Usage: day-clone [OPTIONS]",
@@ -1161,7 +1161,9 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
                 "cluster_name": "cluster-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
             },
         )
         cluster_jobs = client.get(
@@ -1183,7 +1185,9 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
                 "region": "us-west-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
                 "aws_profile": "lsmc",
             },
         )
@@ -1267,7 +1271,7 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_aws_check.json()["return_code"] == 0
     assert "PASS iam.policy" in cluster_aws_check.json()["gap_analysis"]
     assert cluster_aws_check.json()["report"]["summary"] == {"PASS": 1, "WARN": 0, "FAIL": 0}
-    assert cluster_detail.json()["daylily_ec_pinned_version"] == "4.0.9"
+    assert cluster_detail.json()["daylily_ec_pinned_version"] == "5.0.0"
     assert cluster_static_probe.status_code == 200
     assert cluster_static_probe.json()["data"]["day_clone_available"] is True
     assert cluster_scheduler_probe.status_code == 200
@@ -1299,7 +1303,9 @@ def test_cluster_create_dry_run_records_terminal_job_without_worker() -> None:
                 "cluster_name": "cluster-dryrun",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
                 "dry_run": True,
             },
         )
@@ -1354,7 +1360,9 @@ def test_gui_routes_cover_remaining_pages_and_logout() -> None:
                 "cluster_name": "cluster-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
             },
         )
         worksets_page = client.get("/worksets")
@@ -1501,7 +1509,7 @@ def test_staging_gui_exposes_authenticated_forms_statuses_and_analysis_selector(
     for element_id in (
         "staging_workset_euid",
         "staging_manifest_euid",
-        "staging_reference_bucket",
+        "staging_reference_s3_uri",
         "staging_region",
         "staging_cluster_name",
         "staging_stage_target",
@@ -1510,7 +1518,7 @@ def test_staging_gui_exposes_authenticated_forms_statuses_and_analysis_selector(
     for payload_field in (
         "workset_euid",
         "manifest_euid",
-        "reference_bucket",
+        "reference_s3_uri",
         "cluster_name",
         "region",
         "stage_target",
@@ -1633,7 +1641,9 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
                 "cluster_name": "cluster-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
             },
         )
         session_me = client.get("/api/v1/me")
@@ -1840,7 +1850,9 @@ def test_cluster_create_blocks_when_partition_verification_fails() -> None:
                 "region": "us-west-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
             },
         )
 
@@ -1879,7 +1891,9 @@ def test_cluster_create_blocks_when_submit_dryrun_fails() -> None:
                 "region": "us-west-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
             },
         )
 
@@ -2098,7 +2112,9 @@ def test_non_admin_can_view_clusters_but_cannot_create_or_delete() -> None:
                 "cluster_name": "cluster-2",
                 "region_az": "us-west-2d",
                 "ssh_key_name": "omics-key",
-                "s3_bucket_name": "ursa-bucket",
+                "reference_s3_uri": "s3://refs",
+                "control_data_s3_uri": "s3://control",
+                "stage_s3_uri": "s3://stage",
             },
         )
         delete_plan = client.post(

@@ -34,12 +34,12 @@
             </div>
 
             <div class="form-group">
-                <label for="staging_reference_bucket" class="form-label">Reference Bucket</label>
-                <select id="staging_reference_bucket" class="form-control form-select" required>
+                <label for="staging_reference_s3_uri" class="form-label">Reference S3 URI</label>
+                <select id="staging_reference_s3_uri" class="form-control form-select" required>
                     <option value="">Choose bucket...</option>
                     {% for bucket in bucket_options %}
-                    <option value="{{ bucket.reference_bucket }}" data-region="{{ bucket.region }}" data-bucket-id="{{ bucket.bucket_id }}">
-                        {{ bucket.display_name or bucket.bucket_name }} ({{ bucket.reference_bucket }})
+                    <option value="{{ bucket.reference_s3_uri }}" data-region="{{ bucket.region }}" data-bucket-id="{{ bucket.bucket_id }}">
+                        {{ bucket.display_name or bucket.bucket_name }} ({{ bucket.reference_s3_uri }})
                     </option>
                     {% endfor %}
                 </select>
@@ -125,7 +125,7 @@
                         <td><span class="mono">{{ job.job_euid }}</span><br>{{ job.job_name }}</td>
                         <td class="mono">{{ job.workset_euid }}</td>
                         <td class="mono">{{ job.manifest_euid }}</td>
-                        <td class="mono">{{ job.request.reference_bucket }}</td>
+                        <td class="mono">{{ job.request.reference_s3_uri }}</td>
                         <td>{{ job.cluster_name }}<br><span class="text-muted">{{ job.region }}</span></td>
                         <td class="mono">{{ job.request.stage_target }}</td>
                         <td><span class="badge badge-secondary">{{ job.state }}</span></td>
@@ -156,7 +156,7 @@
     const pageData = UrsaPortal.parsePageData();
     const worksetSelect = document.getElementById('staging_workset_euid');
     const manifestSelect = document.getElementById('staging_manifest_euid');
-    const bucketSelect = document.getElementById('staging_reference_bucket');
+    const bucketSelect = document.getElementById('staging_reference_s3_uri');
     const regionSelect = document.getElementById('staging_region');
     const clusterInput = document.getElementById('staging_cluster_name');
     const stageTargetInput = document.getElementById('staging_stage_target');
@@ -235,7 +235,7 @@
             const stageTarget = String(stageTargetInput?.value || '').replace(/^\/+/, '').replace(/\/+$/, '');
             destinationPreview.textContent = referenceBucket && stageTarget
                 ? [
-                    `reference_bucket: ${referenceBucket}`,
+                    `reference_s3_uri: ${referenceBucket}`,
                     `remote_s3_stage: ${referenceBucket}/${stageTarget}/remote_stage_<timestamp>`,
                     `remote_fsx_root: /${stageTarget}`,
                     `region: ${regionSelect?.value || ''}`,
@@ -249,7 +249,7 @@
         const payload = {
             workset_euid: worksetSelect?.value || '',
             manifest_euid: manifestSelect?.value || '',
-            reference_bucket: bucketSelect?.value || '',
+            reference_s3_uri: bucketSelect?.value || '',
             cluster_name: clusterInput?.value || '',
             region: regionSelect?.value || '',
             stage_target: stageTargetInput?.value || '',
@@ -279,7 +279,7 @@
                 <td><span class="mono">${escapeHtml(job.job_euid || '')}</span><br>${escapeHtml(job.job_name || '')}</td>
                 <td class="mono">${escapeHtml(job.workset_euid || '')}</td>
                 <td class="mono">${escapeHtml(job.manifest_euid || '')}</td>
-                <td class="mono">${escapeHtml(job.request?.reference_bucket || '')}</td>
+                <td class="mono">${escapeHtml(job.request?.reference_s3_uri || '')}</td>
                 <td>${escapeHtml(job.cluster_name || '')}<br><span class="text-muted">${escapeHtml(job.region || '')}</span></td>
                 <td class="mono">${escapeHtml(job.request?.stage_target || '')}</td>
                 <td><span class="badge badge-secondary">${escapeHtml(job.state || '')}</span></td>

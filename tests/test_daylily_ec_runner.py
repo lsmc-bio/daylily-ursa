@@ -90,10 +90,10 @@ def test_stage_samples_builds_daylily_ec_224_argv(
     client = runner.DaylilyEcClient(aws_profile="profile-a")
     result = client.stage_samples(
         analysis_samples=tmp_path / "analysis_samples.tsv",
-        reference_bucket="s3://bucket/ref",
+        reference_s3_uri="s3://bucket/ref",
         config_dir=tmp_path,
         region="us-west-2",
-        stage_target="/data/staged_sample_data",
+        stage_target="/staging/staged_external_sequencing_data",
         debug=True,
     )
 
@@ -105,14 +105,14 @@ def test_stage_samples_builds_daylily_ec_224_argv(
         "samples",
         "stage",
         str(tmp_path / "analysis_samples.tsv"),
-        "--reference-bucket",
+        "--reference-s3-uri",
         "s3://bucket/ref",
         "--config-dir",
         str(tmp_path),
         "--region",
         "us-west-2",
         "--stage-target",
-        "/data/staged_sample_data",
+        "/staging/staged_external_sequencing_data",
         "--profile",
         "profile-a",
         "--debug",
@@ -163,7 +163,7 @@ def test_daylily_ec_subprocess_disables_inherited_s3_acceleration(
     client = runner.DaylilyEcClient(aws_profile="lsmc")
     result = client.stage_samples(
         analysis_samples=tmp_path / "analysis_samples.tsv",
-        reference_bucket="s3://bucket/ref",
+        reference_s3_uri="s3://bucket/ref",
         config_dir=tmp_path,
         region="us-west-2",
     )

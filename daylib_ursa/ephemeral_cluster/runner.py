@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "4.0.9"
+REQUIRED_DAYLILY_EC_VERSION = "5.0.0"
 DAYLILY_EC_INSTALL_SPEC = (
     f"{DAYLILY_EC_DISTRIBUTION} @ "
     f"git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
@@ -39,7 +39,9 @@ def require_daylily_ec_version() -> str:
 
 
 DAYEC_CLUSTER_CONFIG_FIELDS = (
-    "s3_bucket_name",
+    "reference_s3_uri",
+    "control_data_s3_uri",
+    "stage_s3_uri",
     "public_subnet_id",
     "private_subnet_id",
     "iam_policy_arn",
@@ -156,7 +158,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 4.0.9 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 5.0.0 contract."""
 
     def __init__(
         self,
@@ -296,7 +298,7 @@ class DaylilyEcClient:
         self,
         *,
         analysis_samples: Path,
-        reference_bucket: str,
+        reference_s3_uri: str,
         config_dir: Path,
         region: str,
         stage_target: str | None = None,
@@ -308,8 +310,8 @@ class DaylilyEcClient:
             "samples",
             "stage",
             str(analysis_samples),
-            "--reference-bucket",
-            reference_bucket,
+            "--reference-s3-uri",
+            reference_s3_uri,
             "--config-dir",
             str(config_dir),
             "--region",
@@ -361,11 +363,13 @@ def write_dayec_cluster_config(
     dest: Path,
     cluster_name: str,
     ssh_key_name: str,
-    s3_bucket_name: str,
+    reference_s3_uri: str,
+    control_data_s3_uri: str,
+    stage_s3_uri: str,
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write a non-interactive cluster request through the day-ec 4.0.9 library."""
+    """Write a non-interactive cluster request through the day-ec library."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.config")
@@ -378,7 +382,9 @@ def write_dayec_cluster_config(
     cfg = builder(
         cluster_name=cluster_name,
         ssh_key_name=ssh_key_name,
-        s3_bucket_name=s3_bucket_name,
+        reference_s3_uri=reference_s3_uri,
+        control_data_s3_uri=control_data_s3_uri,
+        stage_s3_uri=stage_s3_uri,
         contact_email=contact_email,
     )
     for key, raw_value in dict(config_values or {}).items():

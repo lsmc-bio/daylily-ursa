@@ -777,15 +777,15 @@ def mount_gui(app: FastAPI) -> None:
     def _bucket_options(actor: CurrentUser) -> list[dict[str, Any]]:
         options: list[dict[str, Any]] = []
         for bucket in _list_buckets(actor):
-            reference_bucket = _bucket_reference_uri(bucket)
-            if not reference_bucket:
+            reference_s3_uri = _bucket_reference_uri(bucket)
+            if not reference_s3_uri:
                 continue
             options.append(
                 {
                     "bucket_id": str(getattr(bucket, "bucket_id", "") or "").strip(),
                     "bucket_name": str(getattr(bucket, "bucket_name", "") or "").strip(),
                     "display_name": str(getattr(bucket, "display_name", "") or "").strip(),
-                    "reference_bucket": reference_bucket,
+                    "reference_s3_uri": reference_s3_uri,
                     "region": str(getattr(bucket, "region", "") or "").strip(),
                     "prefix_restriction": str(
                         getattr(bucket, "prefix_restriction", "") or ""
@@ -962,7 +962,7 @@ def mount_gui(app: FastAPI) -> None:
             "clusters": _cluster_options(actor),
             "allowed_regions": _allowed_regions(),
             "staging_jobs": _list_staging_jobs(actor),
-            "stage_target_default": "/data/staged_sample_data",
+            "stage_target_default": "/staging/staged_external_sequencing_data",
             "is_admin": actor.is_admin,
         }
 

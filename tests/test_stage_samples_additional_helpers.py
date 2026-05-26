@@ -43,11 +43,11 @@ def test_parse_args_uses_defaults_and_env(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("AWS_PROFILE", "profile-from-env")
     monkeypatch.setenv("AWS_REGION", "us-west-2")
 
-    args = ss.parse_args(["analysis.tsv", "--reference-bucket", "s3://ref-bucket/base", "--debug"])
+    args = ss.parse_args(["analysis.tsv", "--reference-s3-uri", "s3://ref-bucket/base", "--debug"])
 
     assert args.analysis_samples == "analysis.tsv"
-    assert args.reference_bucket == "s3://ref-bucket/base"
-    assert args.stage_target == "/data/staged_sample_data"
+    assert args.reference_s3_uri == "s3://ref-bucket/base"
+    assert args.stage_target == "/staging/staged_external_sequencing_data"
     assert args.profile == "profile-from-env"
     assert args.region == "us-west-2"
     assert args.debug is True
@@ -65,11 +65,11 @@ def test_build_stage_paths_without_prefix_uses_bucket_root(monkeypatch: pytest.M
 
     monkeypatch.setattr(ss.dt, "datetime", _FakeDatetime)
 
-    stage = ss.build_stage_paths("/data/staged_sample_data", "s3://bucket")
+    stage = ss.build_stage_paths("/staging/staged_external_sequencing_data", "s3://bucket")
 
     assert stage.remote_stage_name == "remote_stage_20260309T020304Z"
     assert (
-        stage.remote_s3_stage == "s3://bucket/data/staged_sample_data/remote_stage_20260309T020304Z"
+        stage.remote_s3_stage == "s3://bucket/staging/staged_external_sequencing_data/remote_stage_20260309T020304Z"
     )
 
 
@@ -136,7 +136,7 @@ def test_check_path_helpers_and_validate_sources_dispatch(monkeypatch: pytest.Mo
             ("/fsx/path/conc", True),
             ("~/local/file", False),
         ],
-        reference_bucket="s3://ref/base",
+        reference_s3_uri="s3://ref/base",
         aws_env={},
         debug=False,
     )
@@ -154,13 +154,13 @@ def test_check_concordance_path_routes_fsx_and_local(monkeypatch: pytest.MonkeyP
 
     ss.check_concordance_path(
         "/fsx/path/to/concordance",
-        reference_bucket="s3://ref-bucket/base",
+        reference_s3_uri="s3://ref-bucket/base",
         aws_env={},
         debug=False,
     )
     ss.check_concordance_path(
         "~/local-concordance",
-        reference_bucket="s3://ref-bucket/base",
+        reference_s3_uri="s3://ref-bucket/base",
         aws_env={},
         debug=False,
     )
@@ -181,9 +181,9 @@ def test_ensure_remote_stage_writable_uploads_and_cleans_temp(
     monkeypatch.setattr(ss, "aws_command", _fake_aws_command)
 
     stage = ss.StagePaths(
-        remote_fsx_root="/data/staged_sample_data",
+        remote_fsx_root="/staging/staged_external_sequencing_data",
         remote_stage_name="remote_stage_20260309T020304Z",
-        remote_fsx_stage="/data/staged_sample_data/remote_stage_20260309T020304Z",
+        remote_fsx_stage="/staging/staged_external_sequencing_data/remote_stage_20260309T020304Z",
         remote_s3_stage="s3://bucket/stage/remote_stage_20260309T020304Z",
     )
 
@@ -342,9 +342,9 @@ def test_stage_concordance_covers_all_source_shapes(
     )
     assert (
         ss.stage_concordance(
-            "/fsx/data/existing", "/fsx/ignored", "s3://ignored", aws_env={}, debug=False
+            "/fsx/staging/existing", "/fsx/ignored", "s3://ignored", aws_env={}, debug=False
         )
-        == "/fsx/data/existing"
+        == "/fsx/staging/existing"
     )
     assert (
         ss.stage_concordance(
@@ -412,16 +412,16 @@ def test_write_tsv_and_process_samples_vendor_and_conflict_paths(
     monkeypatch.setattr(ss, "stage_concordance", lambda *_args, **_kwargs: "/existing/conc")
 
     stage = ss.StagePaths(
-        remote_fsx_root="/data/staged_sample_data",
+        remote_fsx_root="/staging/staged_external_sequencing_data",
         remote_stage_name="remote_stage_20260309T020304Z",
-        remote_fsx_stage="/data/staged_sample_data/remote_stage_20260309T020304Z",
+        remote_fsx_stage="/staging/staged_external_sequencing_data/remote_stage_20260309T020304Z",
         remote_s3_stage="s3://bucket/stage/remote_stage_20260309T020304Z",
     )
 
     samples, units, created, run_ids = ss.process_samples(
         input_tsv,
         stage,
-        reference_bucket="s3://ref-bucket/base",
+        reference_s3_uri="s3://ref-bucket/base",
         aws_env={},
         debug=False,
     )
@@ -486,7 +486,7 @@ def test_write_tsv_and_process_samples_vendor_and_conflict_paths(
         ss.process_samples(
             conflict_tsv,
             stage,
-            reference_bucket="s3://ref-bucket/base",
+            reference_s3_uri="s3://ref-bucket/base",
             aws_env={},
             debug=False,
         )
@@ -497,15 +497,15 @@ def test_process_samples_required_columns_and_blank_header_paths(tmp_path: Path)
     no_header.write_text("", encoding="utf-8")
 
     stage = ss.StagePaths(
-        remote_fsx_root="/data/staged_sample_data",
+        remote_fsx_root="/staging/staged_external_sequencing_data",
         remote_stage_name="remote_stage_20260309T020304Z",
-        remote_fsx_stage="/data/staged_sample_data/remote_stage_20260309T020304Z",
+        remote_fsx_stage="/staging/staged_external_sequencing_data/remote_stage_20260309T020304Z",
         remote_s3_stage="s3://bucket/stage/remote_stage_20260309T020304Z",
     )
 
     with pytest.raises(ss.CommandError, match="missing a header row"):
         ss.process_samples(
-            no_header, stage, reference_bucket="s3://bucket/ref", aws_env={}, debug=False
+            no_header, stage, reference_s3_uri="s3://bucket/ref", aws_env={}, debug=False
         )
 
     missing_cols = tmp_path / "missing_cols.tsv"
@@ -515,7 +515,7 @@ def test_process_samples_required_columns_and_blank_header_paths(tmp_path: Path)
         ss.process_samples(
             missing_cols,
             stage,
-            reference_bucket="s3://bucket/ref",
+            reference_s3_uri="s3://bucket/ref",
             aws_env={},
             debug=False,
         )
@@ -526,8 +526,8 @@ def test_main_missing_input_and_success(
 ) -> None:
     missing_args = argparse.Namespace(
         analysis_samples=str(tmp_path / "missing.tsv"),
-        stage_target="/data/staged_sample_data",
-        reference_bucket="s3://bucket/ref",
+        stage_target="/staging/staged_external_sequencing_data",
+        reference_s3_uri="s3://bucket/ref",
         config_dir=None,
         profile="lsmc",
         region="us-west-2",
@@ -543,8 +543,8 @@ def test_main_missing_input_and_success(
 
     present_args = argparse.Namespace(
         analysis_samples=str(input_tsv),
-        stage_target="/data/staged_sample_data",
-        reference_bucket="s3://bucket/ref",
+        stage_target="/staging/staged_external_sequencing_data",
+        reference_s3_uri="s3://bucket/ref",
         config_dir=str(tmp_path / "cfg"),
         profile="lsmc",
         region="us-west-2",
@@ -555,9 +555,9 @@ def test_main_missing_input_and_success(
     monkeypatch.setattr(ss, "build_aws_env", lambda _cfg: {"AWS_PROFILE": "lsmc"})
 
     stage = ss.StagePaths(
-        remote_fsx_root="/data/staged_sample_data",
+        remote_fsx_root="/staging/staged_external_sequencing_data",
         remote_stage_name="remote_stage_20260309T040506Z",
-        remote_fsx_stage="/data/staged_sample_data/remote_stage_20260309T040506Z",
+        remote_fsx_stage="/staging/staged_external_sequencing_data/remote_stage_20260309T040506Z",
         remote_s3_stage="s3://bucket/stage/remote_stage_20260309T040506Z",
     )
     monkeypatch.setattr(ss, "build_stage_paths", lambda *_args, **_kwargs: stage)
@@ -567,8 +567,8 @@ def test_main_missing_input_and_success(
         "process_samples",
         lambda *_args, **_kwargs: (
             [{"SAMPLEID": "S1"}],
-            [{"RUNID": "RUN1", "ILMN_R1_PATH": "/data/r1", "ILMN_R2_PATH": "/data/r2"}],
-            ["/data/r1", "/data/r2"],
+            [{"RUNID": "RUN1", "ILMN_R1_PATH": "/staging/r1", "ILMN_R2_PATH": "/staging/r2"}],
+            ["/staging/r1", "/staging/r2"],
             ["RUN1"],
         ),
     )

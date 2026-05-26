@@ -771,6 +771,9 @@ def _settings() -> Settings:
         cognito_domain="auth.example.test",
         cognito_callback_url="https://localhost:8913/auth/callback",
         cognito_logout_url="https://localhost:8913/login",
+        deployment_name="inflec3",
+        day_aws_region="us-west-2",
+        allowed_hosts="testserver,localhost,127.0.0.1",
     )
 
 
@@ -1012,7 +1015,7 @@ def test_manifest_editor_full_daylily_ec_row_keeps_all_columns_and_cg_inputs() -
             "CG_R1_FQ": "s3://bucket/cg/CGS1_R1.fastq.gz",
             "CG_R2_FQ": "s3://bucket/cg/CGS1_R2.fastq.gz",
             "STAGE_DIRECTIVE": "stage_data",
-            "STAGE_TARGET": "/data/staged_sample_data",
+            "STAGE_TARGET": "/staging/staged_external_sequencing_data",
             "SUBSAMPLE_PCT": "na",
             "IS_POS_CTRL": "false",
             "IS_NEG_CTRL": "false",
@@ -1068,7 +1071,7 @@ def test_manifest_editor_keeps_ont_prefix_only_rows() -> None:
             "ONT_FASTQ_PREFIX": ("s3://bucket/ont/HG003/20260401_ONT_run.01/fastq_pass/barcode01/"),
             "ONT_FLOWCELL_ID": "FLO-PRO114M",
             "STAGE_DIRECTIVE": "stage_data",
-            "STAGE_TARGET": "/data/staged_sample_data",
+            "STAGE_TARGET": "/staging/staged_external_sequencing_data",
             "SUBSAMPLE_PCT": "na",
             "IS_POS_CTRL": "true",
             "IS_NEG_CTRL": "false",
@@ -1181,7 +1184,7 @@ def test_analysis_job_routes_define_launch_refresh_and_logs() -> None:
                 "manifest_euid": manifest.json()["manifest_euid"],
                 "cluster_name": "cluster-1",
                 "region": "us-west-2",
-                "reference_bucket": "s3://reference-bucket",
+                "reference_s3_uri": "s3://reference-bucket",
                 "analysis_command_id": "illumina_snv_alignstats",
                 "optional_features": ["tiddit"],
                 "destination": "at-sanity",
@@ -1249,7 +1252,7 @@ def test_staging_job_routes_define_run_and_logs() -> None:
                 "manifest_euid": manifest.json()["manifest_euid"],
                 "cluster_name": "cluster-1",
                 "region": "us-west-2",
-                "reference_bucket": "s3://reference-bucket",
+                "reference_s3_uri": "s3://reference-bucket",
                 "stage_target": "/fsx/staged_sample_data",
             },
         )
@@ -1270,7 +1273,7 @@ def test_staging_job_routes_define_run_and_logs() -> None:
 
     assert created.status_code == 201, created.text
     assert created.json()["state"] == "DEFINED"
-    assert created.json()["request"]["reference_bucket"] == "s3://reference-bucket"
+    assert created.json()["request"]["reference_s3_uri"] == "s3://reference-bucket"
     assert listed.status_code == 200, listed.text
     assert listed.json()[0]["job_euid"] == created.json()["job_euid"]
     assert detail.status_code == 200, detail.text
@@ -1314,7 +1317,7 @@ def test_staging_job_create_rejects_manifest_from_other_workset() -> None:
                 "manifest_euid": manifest.json()["manifest_euid"],
                 "cluster_name": "cluster-1",
                 "region": "us-west-2",
-                "reference_bucket": "s3://reference-bucket",
+                "reference_s3_uri": "s3://reference-bucket",
             },
         )
 
@@ -1322,7 +1325,7 @@ def test_staging_job_create_rejects_manifest_from_other_workset() -> None:
     assert created.json()["detail"] == "Manifest does not belong to workset"
 
 
-def test_analysis_job_accepts_completed_staging_job_without_reference_bucket() -> None:
+def test_analysis_job_accepts_completed_staging_job_without_reference_s3_uri() -> None:
     resources = MemoryResourceStore()
     app = _create_test_app(resource_store=resources, dewey_client=DummyDeweyClient())
 
@@ -1352,7 +1355,7 @@ def test_analysis_job_accepts_completed_staging_job_without_reference_bucket() -
                 "manifest_euid": manifest.json()["manifest_euid"],
                 "cluster_name": "cluster-1",
                 "region": "us-west-2",
-                "reference_bucket": "s3://reference-bucket",
+                "reference_s3_uri": "s3://reference-bucket",
                 "stage_target": "/fsx/staged_sample_data",
             },
         )
@@ -1378,7 +1381,7 @@ def test_analysis_job_accepts_completed_staging_job_without_reference_bucket() -
     assert run.json()["state"] == "COMPLETED"
     assert created.status_code == 201, created.text
     assert created.json()["request"]["staging_job_euid"] == staging.json()["job_euid"]
-    assert created.json()["request"]["reference_bucket"] is None
+    assert created.json()["request"]["reference_s3_uri"] is None
     assert created.json()["request"]["stage_target"] == "/fsx/staged_sample_data"
 
 
@@ -1421,7 +1424,7 @@ def test_analysis_job_rejects_completed_staging_job_manifest_mismatch() -> None:
                 "manifest_euid": first_manifest.json()["manifest_euid"],
                 "cluster_name": "cluster-1",
                 "region": "us-west-2",
-                "reference_bucket": "s3://reference-bucket",
+                "reference_s3_uri": "s3://reference-bucket",
             },
         )
         run = client.post(

@@ -45,7 +45,9 @@ def run_cluster_create_job(
     region = str(request.get("region") or job.region or "").strip()
     region_az = str(request.get("region_az") or job.region_az or "").strip()
     ssh_key_name = str(request.get("ssh_key_name") or "").strip()
-    s3_bucket_name = str(request.get("s3_bucket_name") or "").strip()
+    reference_s3_uri = str(request.get("reference_s3_uri") or "").strip()
+    control_data_s3_uri = str(request.get("control_data_s3_uri") or "").strip()
+    stage_s3_uri = str(request.get("stage_s3_uri") or "").strip()
     aws_profile = str(request.get("aws_profile") or "").strip() or None
     contact_email = str(request.get("contact_email") or "").strip() or None
     pass_on_warn = bool(request.get("pass_on_warn"))
@@ -83,7 +85,9 @@ def run_cluster_create_job(
                     dest=scratch_dir / "cluster.yaml",
                     cluster_name=cluster_name,
                     ssh_key_name=ssh_key_name,
-                    s3_bucket_name=s3_bucket_name,
+                    reference_s3_uri=reference_s3_uri,
+                    control_data_s3_uri=control_data_s3_uri,
+                    stage_s3_uri=stage_s3_uri,
                     contact_email=contact_email,
                     config_values=cluster_config_values,
                 )
@@ -245,7 +249,9 @@ class ClusterJobManager:
         region: str,
         region_az: str,
         ssh_key_name: str,
-        s3_bucket_name: str,
+        reference_s3_uri: str,
+        control_data_s3_uri: str,
+        stage_s3_uri: str,
         aws_profile: str | None,
         contact_email: str | None,
         pass_on_warn: bool,
@@ -260,7 +266,9 @@ class ClusterJobManager:
             "region": region,
             "region_az": region_az,
             "ssh_key_name": ssh_key_name,
-            "s3_bucket_name": s3_bucket_name,
+            "reference_s3_uri": reference_s3_uri,
+            "control_data_s3_uri": control_data_s3_uri,
+            "stage_s3_uri": stage_s3_uri,
             "aws_profile": aws_profile,
             "contact_email": contact_email,
             "pass_on_warn": bool(pass_on_warn),
@@ -277,7 +285,9 @@ class ClusterJobManager:
         cluster_name: str,
         region_az: str,
         ssh_key_name: str,
-        s3_bucket_name: str,
+        reference_s3_uri: str,
+        control_data_s3_uri: str,
+        stage_s3_uri: str,
         tenant_id: uuid.UUID,
         owner_user_id: str,
         sponsor_user_id: str,
@@ -296,7 +306,9 @@ class ClusterJobManager:
             region=region,
             region_az=region_az,
             ssh_key_name=ssh_key_name,
-            s3_bucket_name=s3_bucket_name,
+            reference_s3_uri=reference_s3_uri,
+            control_data_s3_uri=control_data_s3_uri,
+            stage_s3_uri=stage_s3_uri,
             aws_profile=aws_profile,
             contact_email=contact_email,
             pass_on_warn=pass_on_warn,
@@ -348,7 +360,9 @@ class ClusterJobManager:
         cluster_name: str,
         region_az: str,
         ssh_key_name: str,
-        s3_bucket_name: str,
+        reference_s3_uri: str,
+        control_data_s3_uri: str,
+        stage_s3_uri: str,
         tenant_id: uuid.UUID,
         owner_user_id: str,
         sponsor_user_id: str,
@@ -366,7 +380,9 @@ class ClusterJobManager:
             region=region,
             region_az=region_az,
             ssh_key_name=ssh_key_name,
-            s3_bucket_name=s3_bucket_name,
+            reference_s3_uri=reference_s3_uri,
+            control_data_s3_uri=control_data_s3_uri,
+            stage_s3_uri=stage_s3_uri,
             aws_profile=aws_profile,
             contact_email=contact_email,
             pass_on_warn=pass_on_warn,

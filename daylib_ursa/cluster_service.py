@@ -1,4 +1,4 @@
-"""Cluster service backed by the daylily-ephemeral-cluster 4.0.9 contract."""
+"""Cluster service backed by the daylily-ephemeral-cluster 5.0.0 contract."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def _section_between(text: str, start_marker: str, end_marker: str) -> str:
 class BudgetInfo:
     project_name: Optional[str] = None
     region: Optional[str] = None
-    reference_bucket: Optional[str] = None
+    reference_s3_uri: Optional[str] = None
     total_budget: Optional[float] = None
     used_budget: Optional[float] = None
     percent_used: Optional[float] = None
@@ -67,7 +67,7 @@ class BudgetInfo:
         return {
             "project_name": self.project_name,
             "region": self.region,
-            "reference_bucket": self.reference_bucket,
+            "reference_s3_uri": self.reference_s3_uri,
             "total_budget": self.total_budget,
             "used_budget": self.used_budget,
             "percent_used": self.percent_used,
