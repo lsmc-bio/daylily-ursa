@@ -378,6 +378,49 @@ class ClusterService:
             "dry_run_stderr": result.stderr,
         }
 
+    def export_analysis_results(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        source_path: str,
+        destination_s3_uri: str,
+        output_dir: str,
+        aws_profile: str | None = None,
+    ) -> Dict[str, Any]:
+        self._validate_cluster_name(cluster_name)
+        clean_source = str(source_path or "").strip()
+        clean_destination = str(destination_s3_uri or "").strip()
+        clean_output_dir = str(output_dir or "").strip()
+        if not clean_source:
+            raise ValueError("source_path is required")
+        if not clean_source.startswith("/fsx/analysis_results/"):
+            raise ValueError("source_path must be under /fsx/analysis_results/")
+        if not clean_destination.startswith("s3://"):
+            raise ValueError("destination_s3_uri must be an s3:// URI")
+        if not clean_output_dir:
+            raise ValueError("output_dir is required")
+        result = self.client.export_analysis_results(
+            cluster_name=cluster_name,
+            source_path=clean_source,
+            destination_s3_uri=clean_destination,
+            region=region,
+            output_dir=clean_output_dir,
+            aws_profile=aws_profile,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "export failed")
+        return {
+            "cluster_name": cluster_name,
+            "region": region,
+            "source_path": clean_source,
+            "destination_s3_uri": clean_destination,
+            "output_dir": clean_output_dir,
+            "return_code": int(result.returncode),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
     def delete_cluster(
         self,
         cluster_name: str,
@@ -428,27 +471,29 @@ class ClusterService:
                 and self._cache
                 and (now - self._cache_time) < self.cache_ttl_seconds
             ):
-                clusters = cast(List[ClusterInfo], self._cache["clusters"])
-                for cluster in clusters:
+                cached_clusters = cast(List[ClusterInfo], self._cache["clusters"])
+                for cluster in cached_clusters:
                     self._attach_cached_probes(cluster)
                     self._attach_cached_job_queue(cluster)
-                return clusters
+                return cached_clusters
 
-            clusters: List[ClusterInfo] = []
+            discovered_clusters: List[ClusterInfo] = []
             for region in self.regions:
-                clusters.extend(self._scan_region(region))
-            for cluster in clusters:
+                discovered_clusters.extend(self._scan_region(region))
+            for cluster in discovered_clusters:
                 self._attach_cached_probes(cluster)
                 self._attach_cached_job_queue(cluster)
-            self._cache = {"clusters": clusters}
+            self._cache = {"clusters": discovered_clusters}
             self._cache_time = now
             self._cluster_region_map = {
-                cluster.cluster_name: cluster.region for cluster in clusters if cluster.cluster_name
+                cluster.cluster_name: cluster.region
+                for cluster in discovered_clusters
+                if cluster.cluster_name
             }
-            return clusters
+            return discovered_clusters
 
     def get_clusters_by_region(self, force_refresh: bool = False) -> Dict[str, List[ClusterInfo]]:
-        grouped = {region: [] for region in self.regions}
+        grouped: Dict[str, List[ClusterInfo]] = {region: [] for region in self.regions}
         for cluster in self.get_all_clusters(force_refresh=force_refresh):
             grouped.setdefault(cluster.region, []).append(cluster)
         return grouped

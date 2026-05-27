@@ -35,7 +35,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -336,6 +336,89 @@ class ArtifactResolveRequest(BaseModel):
         return self
 
 
+class DeweyTriggerManifestCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    artifact_set_euid: str | None = None
+    artifact_euids: list[str] = Field(default_factory=list)
+    input_references: list[ManifestInputReferenceRequest] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_manifest_payload(self) -> "DeweyTriggerManifestCreateRequest":
+        if not str(self.name or "").strip():
+            raise ValueError("manifest.name is required")
+        analysis_manifest = dict(self.metadata or {}).get("analysis_samples_manifest")
+        has_analysis_content = isinstance(analysis_manifest, dict) and bool(
+            str(analysis_manifest.get("content") or "").strip()
+        )
+        if not has_analysis_content:
+            raise ValueError("manifest.metadata.analysis_samples_manifest.content is required")
+        return self
+
+
+class DeweyResultRegistrationContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict[str, Any]
+    idempotency_key: str
+
+    @model_validator(mode="after")
+    def validate_result_registration(self) -> "DeweyResultRegistrationContext":
+        if not isinstance(self.payload, dict) or not self.payload:
+            raise ValueError("result_registration.payload is required")
+        if not str(self.idempotency_key or "").strip():
+            raise ValueError("result_registration.idempotency_key is required")
+        return self
+
+
+class DeweyRunAnalysisExecutionContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    workset_euid: str | None = None
+    workset: WorksetCreateRequest | None = None
+    manifest_euid: str | None = None
+    manifest: DeweyTriggerManifestCreateRequest | None = None
+    cluster_name: str
+    region: str
+    reference_s3_uri: str | None = None
+    stage_target: str | None = None
+    staging_job_euid: str | None = None
+    destination: str | None = None
+    session_name: str | None = None
+    project: str | None = None
+    aws_profile: str | None = None
+    dry_run: bool = False
+    optional_features: list[str] = Field(default_factory=list)
+    job_name: str | None = None
+    result_registration: DeweyResultRegistrationContext | None = None
+
+    @model_validator(mode="after")
+    def validate_execution_context(self) -> "DeweyRunAnalysisExecutionContext":
+        for field_name in ("owner_user_id", "cluster_name", "region"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"execution_context.{field_name} is required")
+        has_workset_euid = bool(str(self.workset_euid or "").strip())
+        if has_workset_euid == (self.workset is not None):
+            raise ValueError("exactly one of execution_context.workset_euid or workset is required")
+        has_manifest_euid = bool(str(self.manifest_euid or "").strip())
+        if has_manifest_euid == (self.manifest is not None):
+            raise ValueError(
+                "exactly one of execution_context.manifest_euid or manifest is required"
+            )
+        if (
+            not str(self.staging_job_euid or "").strip()
+            and not str(self.reference_s3_uri or "").strip()
+        ):
+            raise ValueError(
+                "execution_context.reference_s3_uri is required when staging_job_euid is omitted"
+            )
+        return self
+
+
 class DeweyRunAnalysisTriggerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -350,12 +433,15 @@ class DeweyRunAnalysisTriggerRequest(BaseModel):
     sample_read_refs: list[dict[str, Any]] = Field(default_factory=list)
     sample_identifiers: list[dict[str, Any]] = Field(default_factory=list)
     auto_launch: bool = False
+    execution_context: DeweyRunAnalysisExecutionContext | None = None
 
     @model_validator(mode="after")
     def validate_required_refs(self) -> "DeweyRunAnalysisTriggerRequest":
         for field_name in ("dewey_receipt_euid", "run_artifact_set_euid", "command_id"):
             if not str(getattr(self, field_name) or "").strip():
                 raise ValueError(f"{field_name} is required")
+        if self.auto_launch and self.execution_context is None:
+            raise ValueError("execution_context is required when auto_launch is true")
         return self
 
 
@@ -368,6 +454,9 @@ class DeweyRunAnalysisTriggerResponse(BaseModel):
     request: dict[str, Any]
     created_at: str
     updated_at: str
+    analysis_job_euid: str | None = None
+    staging_job_euid: str | None = None
+    dewey_result: dict[str, Any] | None = None
 
 
 class LinkedBucketCreateRequest(BaseModel):
@@ -472,15 +561,23 @@ class ClusterCreateRequest(BaseModel):
     contact_email: str | None = None
     pass_on_warn: bool = False
     debug: bool = False
-    cluster_config_values: dict[str, str | None] = Field(default_factory=dict)
+    cluster_config_values: dict[str, str] = Field(default_factory=dict)
     repo_overrides: list[str] = Field(default_factory=list)
     dry_run: bool = False
 
-    @model_validator(mode="after")
-    def validate_cluster_config_values(self) -> "ClusterCreateRequest":
-        self.cluster_config_values = _normalize_cluster_config_values(self.cluster_config_values)
-        self.repo_overrides = _normalize_repo_overrides(self.repo_overrides)
-        return self
+    @field_validator("cluster_config_values", mode="before")
+    @classmethod
+    def normalize_cluster_config_values(cls, value: object) -> dict[str, str]:
+        if value is None or isinstance(value, dict):
+            return _normalize_cluster_config_values(cast(dict[str, str | None] | None, value))
+        raise ValueError("cluster_config_values must be a mapping")
+
+    @field_validator("repo_overrides", mode="before")
+    @classmethod
+    def normalize_repo_overrides(cls, value: object) -> list[str]:
+        if value is None or isinstance(value, list):
+            return _normalize_repo_overrides(cast(list[str], value or []))
+        raise ValueError("repo_overrides must be a list")
 
 
 class ClusterAwsCheckAllRequest(BaseModel):
@@ -496,12 +593,14 @@ class ClusterAwsCheckAllRequest(BaseModel):
     aws_profile: str | None = None
     config_path: str | None = None
     contact_email: str | None = None
-    cluster_config_values: dict[str, str | None] = Field(default_factory=dict)
+    cluster_config_values: dict[str, str] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def validate_cluster_config_values(self) -> "ClusterAwsCheckAllRequest":
-        self.cluster_config_values = _normalize_cluster_config_values(self.cluster_config_values)
-        return self
+    @field_validator("cluster_config_values", mode="before")
+    @classmethod
+    def normalize_cluster_config_values(cls, value: object) -> dict[str, str]:
+        if value is None or isinstance(value, dict):
+            return _normalize_cluster_config_values(cast(dict[str, str | None] | None, value))
+        raise ValueError("cluster_config_values must be a mapping")
 
 
 class ClusterCreateOptionsResponse(BaseModel):
@@ -582,6 +681,69 @@ class ClusterPartitionPricingRequest(BaseModel):
             raise ValueError("region is required")
         self.region = region
         return self
+
+
+class ClusterCleanupPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    idle_minutes: int = Field(default=45, ge=1)
+    export_source_path: str = "/fsx/analysis_results/ubuntu"
+    export_destination_s3_uri: str = ""
+    export_output_dir: str = ""
+
+    @model_validator(mode="after")
+    def validate_cleanup_policy(self) -> "ClusterCleanupPolicyRequest":
+        source = str(self.export_source_path or "").strip()
+        destination = str(self.export_destination_s3_uri or "").strip()
+        output_dir = str(self.export_output_dir or "").strip()
+        if source and not source.startswith("/fsx/analysis_results/"):
+            raise ValueError("export_source_path must be under /fsx/analysis_results/")
+        if self.enabled:
+            if not source:
+                raise ValueError("export_source_path is required when cleanup is enabled")
+            if not destination.startswith("s3://"):
+                raise ValueError(
+                    "export_destination_s3_uri must be an s3:// URI when cleanup is enabled"
+                )
+            if not output_dir:
+                raise ValueError("export_output_dir is required when cleanup is enabled")
+        return self
+
+
+class ClusterCleanupPolicyResponse(BaseModel):
+    enabled: bool
+    idle_minutes: int
+    export_source_path: str
+    export_destination_s3_uri: str
+    export_output_dir: str
+    updated_at: str
+    updated_by: str | None = None
+
+
+class ClusterCleanupRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    execute: bool = False
+    destructive_confirmation: str | None = None
+
+
+class ClusterCleanupCandidateResponse(BaseModel):
+    cluster_name: str
+    region: str
+    eligible: bool
+    reason: str
+    idle_minutes: int | None = None
+    export_destination_s3_uri: str | None = None
+    export_result: dict[str, Any] | None = None
+    delete_plan: dict[str, Any] | None = None
+    delete_result: dict[str, Any] | None = None
+
+
+class ClusterCleanupRunResponse(BaseModel):
+    executed: bool
+    policy: ClusterCleanupPolicyResponse
+    candidates: list[ClusterCleanupCandidateResponse]
 
 
 class ClusterPartitionPricingPointResponse(BaseModel):
@@ -2142,8 +2304,17 @@ def create_app(
         if resource_store is not None and hasattr(cluster_service, "client")
         else None
     )
-    app.state.dewey_run_triggers = {}
-    app.state.dewey_run_trigger_idempotency = {}
+    app.state.cluster_cleanup_policy = {
+        "enabled": bool(settings.ursa_cluster_auto_cleanup_enabled),
+        "idle_minutes": int(settings.ursa_cluster_auto_cleanup_idle_minutes),
+        "export_source_path": str(settings.ursa_cluster_auto_cleanup_export_source_path or ""),
+        "export_destination_s3_uri": str(
+            settings.ursa_cluster_auto_cleanup_export_destination_s3_uri or ""
+        ),
+        "export_output_dir": str(settings.ursa_cluster_auto_cleanup_export_output_dir or ""),
+        "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "updated_by": None,
+    }
     app.state.observability_cleanup = []
 
     def _anomaly_repository():
@@ -3614,6 +3785,304 @@ def create_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    def _dewey_trigger_response_from_record(record) -> DeweyRunAnalysisTriggerResponse:
+        response_payload = dict(record.response or {})
+        if not response_payload:
+            raise HTTPException(status_code=500, detail="Dewey trigger record is missing response")
+        return DeweyRunAnalysisTriggerResponse(**response_payload)
+
+    def _register_dewey_result_if_terminal(
+        *,
+        trigger_request: DeweyRunAnalysisTriggerRequest,
+        analysis_job: AnalysisJobRecord,
+        resources: ResourceStore,
+        actor_user_id: str,
+    ) -> tuple[AnalysisJobRecord, dict[str, Any] | None]:
+        if analysis_job.state not in {"COMPLETED", "FAILED"}:
+            return analysis_job, None
+        execution = trigger_request.execution_context
+        if execution is None or execution.result_registration is None:
+            return analysis_job, None
+        launch_payload = dict(analysis_job.launch or {})
+        existing = launch_payload.get("dewey_result_registration")
+        if isinstance(existing, dict) and existing:
+            return analysis_job, existing
+        payload = dict(execution.result_registration.payload)
+        payload["result_status"] = "succeeded" if analysis_job.state == "COMPLETED" else "failed"
+        payload["analysis_job_euid"] = analysis_job.job_euid
+        payload["run_artifact_set_euid"] = trigger_request.run_artifact_set_euid
+        payload["dewey_receipt_euid"] = trigger_request.dewey_receipt_euid
+        payload["platform"] = trigger_request.platform
+        payload["command_id"] = trigger_request.command_id
+        payload["sample_identifiers"] = list(trigger_request.sample_identifiers)
+        payload["lineage_refs"] = [
+            *list(payload.get("lineage_refs") or []),
+            {"ref_type": "ursa_analysis_job_euid", "value": analysis_job.job_euid},
+            {"ref_type": "ursa_workset_euid", "value": analysis_job.workset_euid},
+            {"ref_type": "ursa_manifest_euid", "value": analysis_job.manifest_euid},
+        ]
+        try:
+            result = require_dewey_client().register_analysis_results(
+                payload=payload,
+                idempotency_key=execution.result_registration.idempotency_key,
+            )
+        except DeweyClientError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        launch_payload["dewey_result_registration"] = result
+        launch_payload["dewey_result_registered_at"] = (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        updated = resources.update_analysis_job_status(
+            job_euid=analysis_job.job_euid,
+            state=analysis_job.state,
+            created_by=actor_user_id,
+            started_at=analysis_job.started_at,
+            completed_at=analysis_job.completed_at,
+            return_code=analysis_job.return_code,
+            error=analysis_job.error,
+            output_summary=analysis_job.output_summary,
+            launch=launch_payload,
+        )
+        resources.add_analysis_job_event(
+            job_euid=updated.job_euid,
+            event_type="dewey-result-registration",
+            status="COMPLETED",
+            summary="Registered terminal analysis result with Dewey",
+            details={"dewey_response": result},
+            created_by=actor_user_id,
+        )
+        return resources.get_analysis_job(updated.job_euid) or updated, result
+
+    def _register_analysis_job_dewey_result_if_terminal(
+        *,
+        analysis_job: AnalysisJobRecord,
+        resources: ResourceStore,
+        actor_user_id: str,
+    ) -> tuple[AnalysisJobRecord, dict[str, Any] | None]:
+        if analysis_job.state not in {"COMPLETED", "FAILED"}:
+            return analysis_job, None
+        request_payload = dict(analysis_job.request or {})
+        registration = request_payload.get("dewey_result_registration")
+        trigger_payload = dict(request_payload.get("dewey_trigger") or {})
+        if not isinstance(registration, dict) or not registration:
+            return analysis_job, None
+        launch_payload = dict(analysis_job.launch or {})
+        existing = launch_payload.get("dewey_result_registration")
+        if isinstance(existing, dict) and existing:
+            return analysis_job, existing
+        idempotency_key = str(registration.get("idempotency_key") or "").strip()
+        payload = dict(registration.get("payload") or {})
+        if not idempotency_key or not payload:
+            raise HTTPException(
+                status_code=409,
+                detail="Analysis job Dewey result registration payload is incomplete",
+            )
+        payload["result_status"] = "succeeded" if analysis_job.state == "COMPLETED" else "failed"
+        payload["analysis_job_euid"] = analysis_job.job_euid
+        payload["run_artifact_set_euid"] = trigger_payload.get("run_artifact_set_euid")
+        payload["dewey_receipt_euid"] = trigger_payload.get("dewey_receipt_euid")
+        payload["platform"] = trigger_payload.get("platform")
+        payload["command_id"] = request_payload.get("analysis_command_id")
+        payload["sample_identifiers"] = list(trigger_payload.get("sample_identifiers") or [])
+        payload["lineage_refs"] = [
+            *list(payload.get("lineage_refs") or []),
+            {"ref_type": "ursa_analysis_job_euid", "value": analysis_job.job_euid},
+            {"ref_type": "ursa_workset_euid", "value": analysis_job.workset_euid},
+            {"ref_type": "ursa_manifest_euid", "value": analysis_job.manifest_euid},
+        ]
+        try:
+            result = require_dewey_client().register_analysis_results(
+                payload=payload,
+                idempotency_key=idempotency_key,
+            )
+        except DeweyClientError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        launch_payload["dewey_result_registration"] = result
+        launch_payload["dewey_result_registered_at"] = (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        updated = resources.update_analysis_job_status(
+            job_euid=analysis_job.job_euid,
+            state=analysis_job.state,
+            created_by=actor_user_id,
+            started_at=analysis_job.started_at,
+            completed_at=analysis_job.completed_at,
+            return_code=analysis_job.return_code,
+            error=analysis_job.error,
+            output_summary=analysis_job.output_summary,
+            launch=launch_payload,
+        )
+        resources.add_analysis_job_event(
+            job_euid=updated.job_euid,
+            event_type="dewey-result-registration",
+            status="COMPLETED",
+            summary="Registered terminal analysis result with Dewey",
+            details={"dewey_response": result},
+            created_by=actor_user_id,
+        )
+        return resources.get_analysis_job(updated.job_euid) or updated, result
+
+    def _resolve_dewey_trigger_workset_manifest(
+        *,
+        execution: DeweyRunAnalysisExecutionContext,
+        resources: ResourceStore,
+    ) -> tuple[WorksetRecord, ManifestRecord]:
+        tenant_id = execution.tenant_id
+        if execution.workset_euid:
+            workset = resources.get_workset(execution.workset_euid)
+            if workset is None:
+                raise HTTPException(status_code=404, detail="Workset not found")
+            if workset.tenant_id != tenant_id:
+                raise HTTPException(
+                    status_code=403, detail="Workset is outside the execution tenant"
+                )
+        else:
+            assert execution.workset is not None
+            workset = resources.create_workset(
+                name=execution.workset.name,
+                tenant_id=tenant_id,
+                owner_user_id=execution.owner_user_id,
+                artifact_set_euids=list(execution.workset.artifact_set_euids),
+                metadata=dict(execution.workset.metadata or {}),
+            )
+        if execution.manifest_euid:
+            manifest = resources.get_manifest(execution.manifest_euid)
+            if manifest is None:
+                raise HTTPException(status_code=404, detail="Manifest not found")
+            if manifest.tenant_id != tenant_id:
+                raise HTTPException(
+                    status_code=403, detail="Manifest is outside the execution tenant"
+                )
+            if manifest.workset_euid != workset.workset_euid:
+                raise HTTPException(status_code=400, detail="Manifest does not belong to workset")
+        else:
+            assert execution.manifest is not None
+            manifest = resources.create_manifest(
+                workset_euid=workset.workset_euid,
+                name=execution.manifest.name,
+                artifact_set_euid=execution.manifest.artifact_set_euid,
+                artifact_euids=list(execution.manifest.artifact_euids),
+                input_references=[
+                    item.model_dump(mode="json") for item in execution.manifest.input_references
+                ],
+                metadata=dict(execution.manifest.metadata or {}),
+            )
+        return workset, manifest
+
+    def _assert_cluster_has_no_active_trigger_job(
+        *,
+        resources: ResourceStore,
+        cluster_name: str,
+        region: str,
+    ) -> None:
+        for job in resources.list_analysis_jobs(tenant_id=None):
+            if (
+                job.cluster_name == cluster_name
+                and job.region == region
+                and job.state in {"STAGING", "LAUNCHING", "RUNNING"}
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Cluster already has an active analysis job: {job.job_euid} ({job.state})"
+                    ),
+                )
+
+    def _create_analysis_job_for_dewey_trigger(
+        *,
+        trigger_request: DeweyRunAnalysisTriggerRequest,
+        resources: ResourceStore,
+    ) -> tuple[AnalysisJobRecord, str | None]:
+        execution = trigger_request.execution_context
+        if execution is None:
+            raise HTTPException(status_code=400, detail="execution_context is required")
+        _assert_cluster_has_no_active_trigger_job(
+            resources=resources,
+            cluster_name=execution.cluster_name,
+            region=execution.region,
+        )
+        workset, manifest = _resolve_dewey_trigger_workset_manifest(
+            execution=execution,
+            resources=resources,
+        )
+        staging_job_euid = str(execution.staging_job_euid or "").strip() or None
+        if staging_job_euid:
+            staging_job = resources.get_staging_job(staging_job_euid)
+            if staging_job is None:
+                raise HTTPException(status_code=404, detail="Staging job not found")
+            if staging_job.tenant_id != workset.tenant_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Staging job tenant does not match analysis job tenant",
+                )
+            if staging_job.workset_euid != workset.workset_euid:
+                raise HTTPException(
+                    status_code=400, detail="Staging job does not belong to workset"
+                )
+            if staging_job.manifest_euid != manifest.manifest_euid:
+                raise HTTPException(
+                    status_code=400, detail="Staging job does not belong to manifest"
+                )
+            if staging_job.state != "COMPLETED":
+                raise HTTPException(status_code=409, detail="Staging job is not completed")
+        try:
+            command = analysis_command_payload(
+                trigger_request.command_id,
+                optional_features=execution.optional_features,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        request_payload = {
+            "analysis_command_id": trigger_request.command_id,
+            "optional_features": list(execution.optional_features),
+            "destination": execution.destination,
+            "reference_s3_uri": execution.reference_s3_uri,
+            "session_name": execution.session_name,
+            "project": execution.project,
+            "aws_profile": execution.aws_profile,
+            "dry_run": bool(execution.dry_run),
+            "stage_target": execution.stage_target,
+            "staging_job_euid": staging_job_euid,
+            "command": command,
+            "dewey_trigger": {
+                "dewey_receipt_euid": trigger_request.dewey_receipt_euid,
+                "run_artifact_set_euid": trigger_request.run_artifact_set_euid,
+                "platform": trigger_request.platform,
+                "sidecar_artifact_euid": trigger_request.sidecar_artifact_euid,
+                "sidecar_version_id": trigger_request.sidecar_version_id,
+                "run_context_refs": dict(trigger_request.run_context_refs),
+                "sample_read_refs": list(trigger_request.sample_read_refs),
+                "sample_identifiers": list(trigger_request.sample_identifiers),
+            },
+            "dewey_result_registration": (
+                execution.result_registration.model_dump(mode="json")
+                if execution.result_registration is not None
+                else None
+            ),
+        }
+        record = resources.create_analysis_job(
+            job_name=str(execution.job_name or "").strip()
+            or f"{workset.name}:{trigger_request.command_id}",
+            workset_euid=workset.workset_euid,
+            manifest_euid=manifest.manifest_euid,
+            cluster_name=execution.cluster_name,
+            region=execution.region,
+            tenant_id=workset.tenant_id,
+            owner_user_id=execution.owner_user_id,
+            request=request_payload,
+        )
+        resources.add_analysis_job_event(
+            job_euid=record.job_euid,
+            event_type="dewey-trigger-defined",
+            status="DEFINED",
+            summary=f"Defined Dewey-triggered analysis job for {trigger_request.command_id}",
+            details={"manifest_euid": manifest.manifest_euid},
+            created_by=execution.owner_user_id,
+        )
+        return resources.get_analysis_job(record.job_euid) or record, staging_job_euid
+
     @app.post(
         "/api/v1/dewey/run-analysis-triggers",
         response_model=DeweyRunAnalysisTriggerResponse,
@@ -3623,26 +4092,31 @@ def create_app(
         request: DeweyRunAnalysisTriggerRequest,
         _api_key: str = Depends(require_write_api_key),
         idempotency_key: str = Depends(require_idempotency_key),
+        resources: ResourceStore = Depends(require_resource_store),
+        manager: AnalysisJobManager = Depends(require_analysis_job_manager),
     ) -> DeweyRunAnalysisTriggerResponse:
         _ = _api_key
         request_payload = request.model_dump(mode="json", exclude_none=True)
         fingerprint = _canonical_trigger_fingerprint(request_payload)
         idempotency_lookup = str(idempotency_key)
-        trigger_idempotency = cast(
-            dict[str, dict[str, Any]],
-            app.state.dewey_run_trigger_idempotency,
-        )
-        trigger_records = cast(dict[str, dict[str, Any]], app.state.dewey_run_triggers)
-        existing = trigger_idempotency.get(idempotency_lookup)
+        existing = resources.get_dewey_run_trigger_by_idempotency(idempotency_lookup)
         if existing is not None:
-            if existing["fingerprint"] != fingerprint:
+            if existing.fingerprint != fingerprint:
                 raise HTTPException(
                     status_code=409,
                     detail="Idempotency-Key reuse with different request payload",
                 )
-            return DeweyRunAnalysisTriggerResponse(**cast(dict[str, Any], existing["response"]))
+            return _dewey_trigger_response_from_record(existing)
         try:
-            command = analysis_command_payload(request.command_id)
+            optional_features = (
+                request.execution_context.optional_features
+                if request.execution_context is not None
+                else []
+            )
+            command = analysis_command_payload(
+                request.command_id,
+                optional_features=optional_features,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -3650,9 +4124,41 @@ def create_app(
 
         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         trigger_euid = f"UTRG-{fingerprint[:16].upper()}"
+        analysis_job: AnalysisJobRecord | None = None
+        staging_job_euid: str | None = None
+        dewey_result: dict[str, Any] | None = None
+        response_status = "QUEUED"
+        if request.auto_launch:
+            analysis_job, staging_job_euid = _create_analysis_job_for_dewey_trigger(
+                trigger_request=request,
+                resources=resources,
+            )
+            actor_user_id = (
+                request.execution_context.owner_user_id
+                if request.execution_context is not None
+                else "dewey-service"
+            )
+            try:
+                analysis_job = manager.launch_job(
+                    analysis_job.job_euid,
+                    actor_user_id=actor_user_id,
+                )
+                analysis_job, dewey_result = _register_dewey_result_if_terminal(
+                    trigger_request=request,
+                    analysis_job=analysis_job,
+                    resources=resources,
+                    actor_user_id=actor_user_id,
+                )
+            except HTTPException:
+                raise
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            response_status = analysis_job.state
         response = {
             "trigger_euid": trigger_euid,
-            "status": "QUEUED",
+            "status": response_status,
             "idempotency_key": idempotency_lookup,
             "command_id": request.command_id,
             "command_preview": {
@@ -3664,12 +4170,22 @@ def create_app(
             "request": request_payload,
             "created_at": now_iso,
             "updated_at": now_iso,
+            "analysis_job_euid": analysis_job.job_euid if analysis_job is not None else None,
+            "staging_job_euid": staging_job_euid,
+            "dewey_result": dewey_result,
         }
-        trigger_records[trigger_euid] = response
-        trigger_idempotency[idempotency_lookup] = {
-            "fingerprint": fingerprint,
-            "response": response,
-        }
+        resources.create_dewey_run_trigger(
+            trigger_euid=trigger_euid,
+            idempotency_key=idempotency_lookup,
+            fingerprint=fingerprint,
+            status=response_status,
+            command_id=request.command_id,
+            request=request_payload,
+            response=response,
+            analysis_job_euid=analysis_job.job_euid if analysis_job is not None else None,
+            staging_job_euid=staging_job_euid,
+            error=analysis_job.error if analysis_job is not None else None,
+        )
         return DeweyRunAnalysisTriggerResponse(**response)
 
     @app.get(
@@ -3679,13 +4195,13 @@ def create_app(
     async def get_dewey_run_analysis_trigger(
         trigger_euid: str,
         _api_key: str = Depends(require_write_api_key),
+        resources: ResourceStore = Depends(require_resource_store),
     ) -> DeweyRunAnalysisTriggerResponse:
         _ = _api_key
-        trigger_records = cast(dict[str, dict[str, Any]], app.state.dewey_run_triggers)
-        record = trigger_records.get(str(trigger_euid or "").strip())
+        record = resources.get_dewey_run_trigger(str(trigger_euid or "").strip())
         if record is None:
             raise HTTPException(status_code=404, detail="Dewey run-analysis trigger not found")
-        return DeweyRunAnalysisTriggerResponse(**record)
+        return _dewey_trigger_response_from_record(record)
 
     @app.post(
         "/api/v1/worksets", response_model=WorksetResponse, status_code=status.HTTP_201_CREATED
@@ -4153,9 +4669,13 @@ def create_app(
     ) -> AnalysisJobResponse:
         require_analysis_job_access(job_euid=job_euid, actor=actor, resources=resources)
         try:
-            return _analysis_job_response(
-                manager.refresh_job(job_euid, actor_user_id=actor.user_id)
+            record = manager.refresh_job(job_euid, actor_user_id=actor.user_id)
+            record, _ = _register_analysis_job_dewey_result_if_terminal(
+                analysis_job=record,
+                resources=resources,
+                actor_user_id=actor.user_id,
             )
+            return _analysis_job_response(record)
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except RuntimeError as exc:
@@ -4229,10 +4749,10 @@ def create_app(
             if request.artifact_euid:
                 resolved = app.state.dewey_client.resolve_artifact(request.artifact_euid)
                 record_observed_dependency("dewey")
-                return resolved
+                return cast(dict[str, Any], resolved)
             resolved = app.state.dewey_client.resolve_artifact_set(str(request.artifact_set_euid))
             record_observed_dependency("dewey")
-            return resolved
+            return cast(dict[str, Any], resolved)
         except DeweyClientError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -4694,6 +5214,218 @@ def create_app(
                 request.region,
             )
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def _cluster_cleanup_policy_response() -> ClusterCleanupPolicyResponse:
+        return ClusterCleanupPolicyResponse(**dict(app.state.cluster_cleanup_policy))
+
+    def _cluster_cleanup_policy() -> dict[str, Any]:
+        payload: dict[str, Any] = _cluster_cleanup_policy_response().model_dump(mode="json")
+        return cast(dict[str, Any], payload)
+
+    def _parse_cluster_time(value: str | None) -> datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _cluster_idle_minutes(cluster) -> int | None:
+        reference = _parse_cluster_time(
+            getattr(cluster, "last_updated_time", None) or getattr(cluster, "creation_time", None)
+        )
+        if reference is None:
+            return None
+        return max(0, int((datetime.now(timezone.utc) - reference).total_seconds() // 60))
+
+    def _cluster_job_count(cluster) -> int | None:
+        queue = getattr(cluster, "job_queue", None)
+        if queue is None:
+            return None
+        if isinstance(queue, dict):
+            return int(queue.get("total_jobs") or 0)
+        return int(getattr(queue, "total_jobs", 0) or 0)
+
+    def _cleanup_destination_for_cluster(policy: dict[str, Any], cluster_name: str) -> str:
+        base = str(policy.get("export_destination_s3_uri") or "").strip().rstrip("/")
+        return f"{base}/{cluster_name}/"
+
+    def _cleanup_candidate_for_cluster(
+        *, policy: dict[str, Any], cluster
+    ) -> ClusterCleanupCandidateResponse:
+        cluster_name = str(getattr(cluster, "cluster_name", "") or "").strip()
+        region = str(getattr(cluster, "region", "") or "").strip()
+        status_value = str(getattr(cluster, "cluster_status", "") or "").upper()
+        idle_minutes = _cluster_idle_minutes(cluster)
+        total_jobs = _cluster_job_count(cluster)
+        if not cluster_name or not region:
+            return ClusterCleanupCandidateResponse(
+                cluster_name=cluster_name,
+                region=region,
+                eligible=False,
+                reason="cluster_name and region are required",
+            )
+        if status_value != "CREATE_COMPLETE":
+            return ClusterCleanupCandidateResponse(
+                cluster_name=cluster_name,
+                region=region,
+                eligible=False,
+                reason=f"cluster status is {status_value or 'unknown'}",
+                idle_minutes=idle_minutes,
+            )
+        if total_jobs is None:
+            return ClusterCleanupCandidateResponse(
+                cluster_name=cluster_name,
+                region=region,
+                eligible=False,
+                reason="job queue status is unavailable",
+                idle_minutes=idle_minutes,
+            )
+        if total_jobs > 0:
+            return ClusterCleanupCandidateResponse(
+                cluster_name=cluster_name,
+                region=region,
+                eligible=False,
+                reason=f"cluster has {total_jobs} active or queued jobs",
+                idle_minutes=idle_minutes,
+            )
+        if idle_minutes is None or idle_minutes < int(policy["idle_minutes"]):
+            return ClusterCleanupCandidateResponse(
+                cluster_name=cluster_name,
+                region=region,
+                eligible=False,
+                reason=f"cluster idle age is below {policy['idle_minutes']} minutes",
+                idle_minutes=idle_minutes,
+            )
+        return ClusterCleanupCandidateResponse(
+            cluster_name=cluster_name,
+            region=region,
+            eligible=True,
+            reason="eligible",
+            idle_minutes=idle_minutes,
+            export_destination_s3_uri=_cleanup_destination_for_cluster(policy, cluster_name),
+        )
+
+    @app.get(
+        "/api/v1/admin/cluster-cleanup-policy",
+        response_model=ClusterCleanupPolicyResponse,
+    )
+    async def get_cluster_cleanup_policy(actor: RequireAdmin) -> ClusterCleanupPolicyResponse:
+        _ = actor
+        return _cluster_cleanup_policy_response()
+
+    @app.put(
+        "/api/v1/admin/cluster-cleanup-policy",
+        response_model=ClusterCleanupPolicyResponse,
+    )
+    async def update_cluster_cleanup_policy(
+        request: ClusterCleanupPolicyRequest,
+        actor: RequireAdmin,
+    ) -> ClusterCleanupPolicyResponse:
+        updated = {
+            "enabled": bool(request.enabled),
+            "idle_minutes": int(request.idle_minutes),
+            "export_source_path": str(request.export_source_path or "").strip(),
+            "export_destination_s3_uri": str(request.export_destination_s3_uri or "").strip(),
+            "export_output_dir": str(request.export_output_dir or "").strip(),
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "updated_by": actor.user_id,
+        }
+        app.state.cluster_cleanup_policy = updated
+        return ClusterCleanupPolicyResponse(**updated)
+
+    @app.post(
+        "/api/v1/admin/cluster-cleanup/run",
+        response_model=ClusterCleanupRunResponse,
+    )
+    async def run_cluster_cleanup(
+        request: ClusterCleanupRunRequest,
+        actor: RequireAdmin,
+        service: ClusterService = Depends(require_cluster_service),
+    ) -> ClusterCleanupRunResponse:
+        _ = actor
+        policy = _cluster_cleanup_policy()
+        if bool(request.execute) and not bool(policy["enabled"]):
+            raise HTTPException(status_code=409, detail="Cluster auto-cleanup policy is disabled")
+        if bool(request.execute) and (
+            str(request.destructive_confirmation or "").strip()
+            != "export-fsx-to-s3-then-delete-idle-clusters"
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "destructive_confirmation must equal export-fsx-to-s3-then-delete-idle-clusters"
+                ),
+            )
+        clusters = await run_in_threadpool(
+            lambda: service.get_all_clusters_with_status(
+                force_refresh=True,
+                fetch_ssh_status=True,
+            )
+        )
+        candidates: list[ClusterCleanupCandidateResponse] = []
+        for cluster in clusters:
+            candidate = _cleanup_candidate_for_cluster(policy=policy, cluster=cluster)
+            if bool(request.execute) and candidate.eligible:
+                export_destination = str(candidate.export_destination_s3_uri or "")
+                try:
+                    export_result = await run_in_threadpool(
+                        lambda cluster_name=candidate.cluster_name, region=candidate.region: (
+                            service.export_analysis_results(
+                                cluster_name=cluster_name,
+                                region=region,
+                                source_path=str(policy["export_source_path"]),
+                                destination_s3_uri=export_destination,
+                                output_dir=str(policy["export_output_dir"]),
+                                aws_profile=str(app.state.settings.aws_profile or "").strip()
+                                or None,
+                            )
+                        )
+                    )
+                    delete_plan = await run_in_threadpool(
+                        lambda cluster_name=candidate.cluster_name, region=candidate.region: (
+                            service.create_delete_plan(
+                                cluster_name,
+                                region,
+                            )
+                        )
+                    )
+                    delete_result = await run_in_threadpool(
+                        lambda cluster_name=candidate.cluster_name, region=candidate.region, token=str(delete_plan["confirmation_token"]): (
+                            service.delete_cluster(
+                                cluster_name,
+                                region,
+                                confirmation_token=token,
+                                confirm_cluster_name=cluster_name,
+                            )
+                        )
+                    )
+                    candidate = ClusterCleanupCandidateResponse(
+                        **{
+                            **candidate.model_dump(mode="json"),
+                            "export_result": export_result,
+                            "delete_plan": delete_plan,
+                            "delete_result": delete_result,
+                        }
+                    )
+                except Exception as exc:
+                    candidate = ClusterCleanupCandidateResponse(
+                        **{
+                            **candidate.model_dump(mode="json"),
+                            "eligible": False,
+                            "reason": f"export/delete blocked: {type(exc).__name__}: {exc}",
+                        }
+                    )
+            candidates.append(candidate)
+        return ClusterCleanupRunResponse(
+            executed=bool(request.execute),
+            policy=_cluster_cleanup_policy_response(),
+            candidates=candidates,
+        )
 
     @app.get("/api/v1/clusters")
     async def list_clusters(

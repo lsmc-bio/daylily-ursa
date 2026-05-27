@@ -574,16 +574,24 @@ def _staging_job_record(job_euid: str, state: str) -> StagingJobRecord:
 
 class DummyClusterInfo:
     def __init__(
-        self, cluster_name: str, region: str, cluster_status: str = "CREATE_COMPLETE"
+        self,
+        cluster_name: str,
+        region: str,
+        cluster_status: str = "CREATE_COMPLETE",
+        *,
+        total_jobs: int = 2,
+        last_updated_time: str = "2026-03-25T00:30:00Z",
     ) -> None:
         self.cluster_name = cluster_name
         self.region = region
         self.cluster_status = cluster_status
+        self.creation_time = "2026-03-25T00:00:00Z"
+        self.last_updated_time = last_updated_time
         self.error_message = None
         self.job_queue = SimpleNamespace(
-            total_jobs=2,
-            running_jobs=1,
-            pending_jobs=1,
+            total_jobs=total_jobs,
+            running_jobs=1 if total_jobs else 0,
+            pending_jobs=1 if total_jobs > 1 else 0,
             configuring_jobs=0,
             other_jobs=0,
             total_cpus=12,
@@ -616,9 +624,9 @@ class DummyClusterInfo:
                 )
             ],
             to_dict=lambda: {
-                "total_jobs": 2,
-                "running_jobs": 1,
-                "pending_jobs": 1,
+                "total_jobs": total_jobs,
+                "running_jobs": 1 if total_jobs else 0,
+                "pending_jobs": 1 if total_jobs > 1 else 0,
                 "configuring_jobs": 0,
                 "other_jobs": 0,
                 "total_cpus": 12,
@@ -648,8 +656,8 @@ class DummyClusterInfo:
             "cluster_status": self.cluster_status,
             "compute_fleet_status": "RUNNING",
             "scheduler_type": "slurm",
-            "creation_time": "2026-03-25T00:00:00Z",
-            "last_updated_time": "2026-03-25T00:30:00Z",
+            "creation_time": self.creation_time,
+            "last_updated_time": self.last_updated_time,
             "head_node": {
                 "instance_type": "c7i.large",
                 "public_ip": "198.51.100.10",
@@ -727,6 +735,7 @@ class DummyClusterService:
         derived_regions = [cluster.region for cluster in self._clusters if cluster.region]
         self.regions = list(regions or derived_regions or ["us-west-2"])
         self.client = SimpleNamespace()
+        self.operations: list[str] = []
 
     def get_all_clusters_with_status(
         self, *, force_refresh: bool = False, fetch_ssh_status: bool = False
@@ -824,6 +833,7 @@ class DummyClusterService:
         }
 
     def create_delete_plan(self, cluster_name: str, region: str):
+        self.operations.append(f"delete-plan:{region}:{cluster_name}")
         return {
             "cluster_name": cluster_name,
             "region": region,
@@ -839,11 +849,33 @@ class DummyClusterService:
         confirmation_token: str,
         confirm_cluster_name: str,
     ):
+        self.operations.append(f"delete:{region}:{cluster_name}")
         if confirmation_token != f"delete:{region}:{cluster_name}":
             raise ValueError("Invalid confirmation token")
         if confirm_cluster_name != cluster_name:
             raise ValueError("Cluster confirmation does not match")
         return {"cluster_name": cluster_name, "region": region, "status": "DELETE_IN_PROGRESS"}
+
+    def export_analysis_results(
+        self,
+        *,
+        cluster_name: str,
+        source_path: str,
+        destination_s3_uri: str,
+        region: str,
+        output_dir: str,
+        aws_profile: str | None = None,
+    ):
+        self.operations.append(f"export:{region}:{cluster_name}")
+        return {
+            "cluster_name": cluster_name,
+            "region": region,
+            "source_path": source_path,
+            "destination_s3_uri": destination_s3_uri,
+            "output_dir": output_dir,
+            "aws_profile": aws_profile,
+            "return_code": 0,
+        }
 
     def clear_cache(self) -> None:
         return None
@@ -867,7 +899,13 @@ class DummyClusterJobManager:
         )
 
     def record_create_dry_run(
-        self, *, cluster_name: str, owner_user_id: str, sponsor_user_id: str, dry_run_result, **_kwargs
+        self,
+        *,
+        cluster_name: str,
+        owner_user_id: str,
+        sponsor_user_id: str,
+        dry_run_result,
+        **_kwargs,
     ):
         self.dry_run_jobs.append(cluster_name)
         job = self.resource_store.add_cluster_job(
@@ -1484,6 +1522,146 @@ def test_gui_routes_cover_remaining_pages_and_logout() -> None:
     assert logout.headers["location"].startswith("https://auth.example.test/logout?")
 
 
+def test_cluster_cleanup_policy_exports_before_delete_and_exposes_gui() -> None:
+    app, _resources = _create_test_app(admin=True)
+    cluster_service = DummyClusterService(
+        clusters=[
+            DummyClusterInfo(
+                "cluster-idle",
+                "us-west-2",
+                total_jobs=0,
+                last_updated_time="2026-03-25T00:30:00Z",
+            )
+        ]
+    )
+    app.state.cluster_service = cluster_service
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        client.post("/login", data={"access_token": "atlas-token", "next_path": "/admin/config"})
+        admin_config_page = client.get("/admin/config")
+        default_policy = client.get(
+            "/api/v1/admin/cluster-cleanup-policy",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        updated_policy = client.put(
+            "/api/v1/admin/cluster-cleanup-policy",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "enabled": True,
+                "idle_minutes": 45,
+                "export_source_path": "/fsx/analysis_results/ubuntu",
+                "export_destination_s3_uri": "s3://dra-export/ursa-cleanup/",
+                "export_output_dir": "/tmp/ursa-cleanup-receipts",
+            },
+        )
+        dry_run = client.post(
+            "/api/v1/admin/cluster-cleanup/run",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={"execute": False},
+        )
+        assert dry_run.status_code == 200, dry_run.text
+        assert cluster_service.operations == []
+        execute = client.post(
+            "/api/v1/admin/cluster-cleanup/run",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "execute": True,
+                "destructive_confirmation": "export-fsx-to-s3-then-delete-idle-clusters",
+            },
+        )
+
+    assert admin_config_page.status_code == 200
+    assert "Cluster Auto Cleanup" in admin_config_page.text
+    assert "/api/v1/admin/cluster-cleanup-policy" in admin_config_page.text
+    assert default_policy.status_code == 200
+    assert default_policy.json()["enabled"] is False
+    assert updated_policy.status_code == 200, updated_policy.text
+    assert updated_policy.json()["enabled"] is True
+    dry_candidate = dry_run.json()["candidates"][0]
+    assert dry_candidate["eligible"] is True
+    assert dry_candidate["export_destination_s3_uri"] == (
+        "s3://dra-export/ursa-cleanup/cluster-idle/"
+    )
+    assert execute.status_code == 200, execute.text
+    candidate = execute.json()["candidates"][0]
+    assert candidate["eligible"] is True
+    assert candidate["export_result"]["destination_s3_uri"] == (
+        "s3://dra-export/ursa-cleanup/cluster-idle/"
+    )
+    assert candidate["delete_result"]["status"] == "DELETE_IN_PROGRESS"
+    assert cluster_service.operations == [
+        "export:us-west-2:cluster-idle",
+        "delete-plan:us-west-2:cluster-idle",
+        "delete:us-west-2:cluster-idle",
+    ]
+
+
+def test_cluster_cleanup_blocks_delete_when_export_fails() -> None:
+    class ExportFailingClusterService(DummyClusterService):
+        def export_analysis_results(self, **kwargs):
+            self.operations.append(f"export:{kwargs['region']}:{kwargs['cluster_name']}")
+            raise RuntimeError("DRA export failed")
+
+    app, _resources = _create_test_app(admin=True)
+    cluster_service = ExportFailingClusterService(
+        clusters=[
+            DummyClusterInfo(
+                "cluster-idle",
+                "us-west-2",
+                total_jobs=0,
+                last_updated_time="2026-03-25T00:30:00Z",
+            )
+        ]
+    )
+    app.state.cluster_service = cluster_service
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        policy = client.put(
+            "/api/v1/admin/cluster-cleanup-policy",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "enabled": True,
+                "idle_minutes": 45,
+                "export_source_path": "/fsx/analysis_results/ubuntu",
+                "export_destination_s3_uri": "s3://dra-export/ursa-cleanup/",
+                "export_output_dir": "/tmp/ursa-cleanup-receipts",
+            },
+        )
+        cleanup = client.post(
+            "/api/v1/admin/cluster-cleanup/run",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "execute": True,
+                "destructive_confirmation": "export-fsx-to-s3-then-delete-idle-clusters",
+            },
+        )
+
+    assert policy.status_code == 200, policy.text
+    assert cleanup.status_code == 200, cleanup.text
+    candidate = cleanup.json()["candidates"][0]
+    assert candidate["eligible"] is False
+    assert candidate["reason"].startswith("export/delete blocked: RuntimeError: DRA export failed")
+    assert cluster_service.operations == ["export:us-west-2:cluster-idle"]
+
+
+def test_cluster_cleanup_policy_requires_admin() -> None:
+    app, _resources = _create_test_app(admin=False)
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        policy = client.get(
+            "/api/v1/admin/cluster-cleanup-policy",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        cleanup = client.post(
+            "/api/v1/admin/cluster-cleanup/run",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={"execute": False},
+        )
+
+    assert policy.status_code == 403
+    assert cleanup.status_code == 403
+
+
 def test_staging_gui_exposes_authenticated_forms_statuses_and_analysis_selector() -> None:
     app, resources = _create_test_app(admin=True)
     for state in ("DEFINED", "STAGING", "COMPLETED", "FAILED"):
@@ -1687,8 +1865,6 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert "Configuration" in admin_config_page.text
 
 
-
-
 def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
     app, _resources = _create_test_app(admin=True)
     dashboard_calls = {"clusters": 0, "usage": 0}
@@ -1750,6 +1926,7 @@ def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
     assert usage_refresh.json()["cache"]["state"] in {"ready", "refreshing"}
     assert dashboard_calls["clusters"] >= 1
     assert dashboard_calls["usage"] >= 3
+
 
 def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
     app, _resources = _create_test_app(admin=True)
@@ -1824,7 +2001,10 @@ def test_usage_page_renders_aws_budget_tag_and_service_report() -> None:
     payload = response.json()
     assert service_calls[-1] is True
     assert payload["usage_report"]["tag_keys"] == ["aws-parallelcluster-project"]
-    assert payload["usage_report"]["costs_by_tag_service"][0]["service"] == "Amazon Elastic Compute Cloud - Compute"
+    assert (
+        payload["usage_report"]["costs_by_tag_service"][0]["service"]
+        == "Amazon Elastic Compute Cloud - Compute"
+    )
     assert payload["usage_report"]["costs_by_tag_service"][0]["amount"] == 42.5
     assert payload["cache"]["cached"] is False
 
@@ -2003,12 +2183,13 @@ def test_cluster_partition_prechecks_cover_pass_warn_fail_and_pricing() -> None:
     assert pricing.json()["partitions"][2]["availability_zones"][1]["mean"] == 12.1
 
 
-
 def test_aws_usage_report_route_and_nav_are_lsmc_domain_gated(tmp_path) -> None:
     app, _resources = _create_test_app(admin=True)
     report_dir = tmp_path / "aws_usage_report"
     (report_dir / "images").mkdir(parents=True)
-    (report_dir / "index.html").write_text("<html>AWS 90-Day Retrospective Cost Analysis</html>", encoding="utf-8")
+    (report_dir / "index.html").write_text(
+        "<html>AWS 90-Day Retrospective Cost Analysis</html>", encoding="utf-8"
+    )
     (report_dir / "images" / "daily_spend.svg").write_text("<svg></svg>", encoding="utf-8")
     app.state.settings.aws_usage_report_dir = str(report_dir)
     app.state.settings.aws_usage_report_allowed_domains = "lsmc.com"
@@ -2023,7 +2204,10 @@ def test_aws_usage_report_route_and_nav_are_lsmc_domain_gated(tmp_path) -> None:
 
     assert unauthenticated.status_code == 303
     assert unauthenticated.headers["location"].startswith("/login")
-    assert 'href="/aws_usage_report/" class="nav-link" target="_blank" rel="noopener noreferrer"' in dashboard.text
+    assert (
+        'href="/aws_usage_report/" class="nav-link" target="_blank" rel="noopener noreferrer"'
+        in dashboard.text
+    )
     assert index.status_code == 200
     assert "AWS 90-Day Retrospective Cost Analysis" in index.text
     assert asset.status_code == 200
@@ -2057,6 +2241,7 @@ def test_aws_usage_report_rejects_non_lsmc_domain_and_missing_report(tmp_path) -
     assert 'href="/aws_usage_report/"' not in dashboard.text
     assert blocked.status_code == 403
 
+
 def test_gui_admin_pages_reject_non_admin_sessions() -> None:
     app, _resources = _create_test_app(admin=False)
 
@@ -2084,6 +2269,7 @@ def test_portal_js_exposes_sortable_table_helper() -> None:
     assert "MutationObserver" in portal_js
     assert "initSortableTables," in portal_js
     assert "portal.js" in base_html
+
 
 def test_non_admin_can_view_clusters_but_cannot_create_or_delete() -> None:
     app, _resources = _create_test_app(admin=False)

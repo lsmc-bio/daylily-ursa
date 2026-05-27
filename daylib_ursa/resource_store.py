@@ -29,6 +29,7 @@ ANALYSIS_JOB_EVENT_TEMPLATE = "RGX/analysis/launch-job-event/1.0/"
 STAGING_JOB_TEMPLATE = "RGX/staging/job/1.0/"
 STAGING_JOB_EVENT_TEMPLATE = "RGX/staging/job-event/1.0/"
 STAGING_JOB_STATES = frozenset({"DEFINED", "STAGING", "COMPLETED", "FAILED"})
+DEWEY_RUN_TRIGGER_TEMPLATE = "RGX/dewey/run-analysis-trigger/1.0/"
 LINKED_BUCKET_TEMPLATE = "RGX/storage/linked-bucket/1.0/"
 
 
@@ -203,6 +204,22 @@ class StagingJobRecord:
     request: dict[str, Any]
     stage: dict[str, Any]
     events: list[StagingJobEventRecord] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DeweyRunTriggerRecord:
+    trigger_euid: str
+    idempotency_key: str
+    fingerprint: str
+    status: str
+    command_id: str
+    request: dict[str, Any]
+    response: dict[str, Any]
+    analysis_job_euid: str | None
+    staging_job_euid: str | None
+    error: str | None
+    created_at: str
+    updated_at: str
 
 
 @dataclass(frozen=True)
@@ -464,6 +481,24 @@ class ResourceStore:
             request=dict(payload.get("request") or {}),
             stage=dict(payload.get("stage") or {}),
             events=events,
+        )
+
+    @staticmethod
+    def _dewey_run_trigger_from_instance(instance) -> DeweyRunTriggerRecord:
+        payload = from_json_addl(instance)
+        return DeweyRunTriggerRecord(
+            trigger_euid=str(payload.get("trigger_euid") or instance.euid),
+            idempotency_key=str(payload.get("idempotency_key") or ""),
+            fingerprint=str(payload.get("fingerprint") or ""),
+            status=str(payload.get("status") or instance.bstatus),
+            command_id=str(payload.get("command_id") or ""),
+            request=dict(payload.get("request") or {}),
+            response=dict(payload.get("response") or {}),
+            analysis_job_euid=str(payload.get("analysis_job_euid") or "").strip() or None,
+            staging_job_euid=str(payload.get("staging_job_euid") or "").strip() or None,
+            error=str(payload.get("error") or "").strip() or None,
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
         )
 
     def list_worksets(self, *, tenant_id: uuid.UUID, limit: int = 100) -> list[WorksetRecord]:
@@ -1695,3 +1730,104 @@ class ResourceStore:
                 limit=limit,
             )
             return [self._staging_job_from_instance(session, item) for item in jobs]
+
+    def create_dewey_run_trigger(
+        self,
+        *,
+        trigger_euid: str,
+        idempotency_key: str,
+        fingerprint: str,
+        status: str,
+        command_id: str,
+        request: dict[str, Any],
+        response: dict[str, Any],
+        analysis_job_euid: str | None = None,
+        staging_job_euid: str | None = None,
+        error: str | None = None,
+    ) -> DeweyRunTriggerRecord:
+        now = utc_now_iso()
+        payload = {
+            "trigger_euid": trigger_euid,
+            "idempotency_key": idempotency_key,
+            "fingerprint": fingerprint,
+            "status": status,
+            "command_id": command_id,
+            "request": dict(request or {}),
+            "response": dict(response or {}),
+            "analysis_job_euid": analysis_job_euid,
+            "staging_job_euid": staging_job_euid,
+            "error": error,
+            "created_at": now,
+            "updated_at": now,
+        }
+        with self.backend.session_scope(commit=True) as session:
+            record = self.backend.create_instance(
+                session,
+                DEWEY_RUN_TRIGGER_TEMPLATE,
+                trigger_euid,
+                json_addl=payload,
+                bstatus=status,
+            )
+            return self._dewey_run_trigger_from_instance(record)
+
+    def update_dewey_run_trigger(
+        self,
+        *,
+        trigger_euid: str,
+        status: str,
+        response: dict[str, Any],
+        analysis_job_euid: str | None = None,
+        staging_job_euid: str | None = None,
+        error: str | None = None,
+    ) -> DeweyRunTriggerRecord:
+        with self.backend.session_scope(commit=True) as session:
+            rows = self.backend.list_instances_by_property(
+                session,
+                template_code=DEWEY_RUN_TRIGGER_TEMPLATE,
+                key="trigger_euid",
+                value=trigger_euid,
+                limit=1,
+            )
+            if not rows:
+                raise KeyError(f"Dewey run-analysis trigger not found: {trigger_euid}")
+            instance = rows[0]
+            now = utc_now_iso()
+            updates = {
+                "status": status,
+                "response": dict(response or {}),
+                "analysis_job_euid": analysis_job_euid,
+                "staging_job_euid": staging_job_euid,
+                "error": error,
+                "updated_at": now,
+            }
+            self.backend.update_instance_json(session, instance, updates)
+            instance.bstatus = status
+            return self._dewey_run_trigger_from_instance(instance)
+
+    def get_dewey_run_trigger(self, trigger_euid: str) -> DeweyRunTriggerRecord | None:
+        with self.backend.session_scope(commit=False) as session:
+            rows = self.backend.list_instances_by_property(
+                session,
+                template_code=DEWEY_RUN_TRIGGER_TEMPLATE,
+                key="trigger_euid",
+                value=trigger_euid,
+                limit=1,
+            )
+            if not rows:
+                return None
+            return self._dewey_run_trigger_from_instance(rows[0])
+
+    def get_dewey_run_trigger_by_idempotency(
+        self, idempotency_key: str
+    ) -> DeweyRunTriggerRecord | None:
+        with self.backend.session_scope(commit=False) as session:
+            rows = self.backend.list_instances_by_property(
+                session,
+                template_code=DEWEY_RUN_TRIGGER_TEMPLATE,
+                key="idempotency_key",
+                value=idempotency_key,
+                limit=1,
+            )
+            if not rows:
+                return None
+            return self._dewey_run_trigger_from_instance(rows[0])

@@ -32,6 +32,7 @@ def test_update_config_regions_preserves_existing_region_options(tmp_path: Path)
                     {"us-east-1": {"ssh_pem": "~/.ssh/lsmc-us-east-1.pem"}},
                     "ap-south-1",
                 ],
+                "deployment": {"name": "unit"},
             },
             sort_keys=False,
         ),
@@ -88,6 +89,8 @@ def test_yaml_seed_from_ursa_config_includes_allowed_regions(monkeypatch) -> Non
         deployment_color="#7521ca",
         deployment_is_production=False,
         ui_show_environment_chrome=True,
+        ursa_tapdb_mount_enabled=False,
+        ursa_tapdb_mount_path="/admin/tapdb",
     )
     monkeypatch.setattr("daylib_ursa.ursa_config.get_ursa_config", lambda: config)
 

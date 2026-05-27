@@ -73,6 +73,14 @@ dewey_base_url: ""
 dewey_api_token: ""
 dewey_verify_ssl: true
 
+# Admin-controlled idle cluster cleanup defaults. Cleanup is disabled by default.
+# When enabled, Ursa exports FSx analysis output to S3 before any delete.
+ursa_cluster_auto_cleanup_enabled: false
+ursa_cluster_auto_cleanup_idle_minutes: 45
+ursa_cluster_auto_cleanup_export_source_path: /fsx/analysis_results/ubuntu
+ursa_cluster_auto_cleanup_export_destination_s3_uri: ""
+ursa_cluster_auto_cleanup_export_output_dir: ""
+
 # Cognito configuration is read from this YAML file.
 # cognito_user_pool_id: us-west-2_xxxxxxxx
 # cognito_app_client_id: xxxxxxxxxxxxxxxxxxxxxxxxxx

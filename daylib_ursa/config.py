@@ -433,6 +433,26 @@ class Settings(BaseSettings):
         default=True,
         description="Start background refresh tasks for slow GUI aggregate payloads",
     )
+    ursa_cluster_auto_cleanup_enabled: bool = Field(
+        default=False,
+        description="Enable admin-controlled idle cluster auto-cleanup.",
+    )
+    ursa_cluster_auto_cleanup_idle_minutes: int = Field(
+        default=45,
+        description="Minimum no-job idle age before admin auto-cleanup may delete a cluster.",
+    )
+    ursa_cluster_auto_cleanup_export_source_path: str = Field(
+        default="/fsx/analysis_results/ubuntu",
+        description="FSx source path exported before admin auto-cleanup deletes a cluster.",
+    )
+    ursa_cluster_auto_cleanup_export_destination_s3_uri: str = Field(
+        default="",
+        description="S3 URI receiving FSx analysis exports before admin auto-cleanup deletes clusters.",
+    )
+    ursa_cluster_auto_cleanup_export_output_dir: str = Field(
+        default="",
+        description="Local output directory for DayEC fsx_export.yaml receipts during auto-cleanup.",
+    )
 
     def get_allowed_regions(self) -> List[str]:
         """Get list of allowed regions from comma-separated string."""
@@ -913,8 +933,7 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(
-                    "external_broker auth requires explicit settings: "
-                    + ", ".join(sorted(missing))
+                    "external_broker auth requires explicit settings: " + ", ".join(sorted(missing))
                 )
             ca_bundle = str(self.external_broker_ca_bundle or "").strip()
             if ca_bundle and not Path(ca_bundle).is_file():
@@ -1003,9 +1022,7 @@ class Settings(BaseSettings):
                         "LSMC_AUTH_BROKER_SERVICE_ID",
                         "LSMC_AUTH_SERVICE_ID",
                     ),
-                    "external_broker_login_url": _read_first_env(
-                        "LSMC_AUTH_BROKER_LOGIN_URL"
-                    ),
+                    "external_broker_login_url": _read_first_env("LSMC_AUTH_BROKER_LOGIN_URL"),
                     "external_broker_handoff_exchange_url": _read_first_env(
                         "LSMC_AUTH_BROKER_HANDOFF_EXCHANGE_URL"
                     ),
@@ -1015,12 +1032,8 @@ class Settings(BaseSettings):
                     "external_broker_callback_url": _read_first_env(
                         "LSMC_AUTH_BROKER_CALLBACK_URL"
                     ),
-                    "external_broker_logout_url": _read_first_env(
-                        "LSMC_AUTH_BROKER_LOGOUT_URL"
-                    ),
-                    "external_broker_ca_bundle": _read_first_env(
-                        "LSMC_AUTH_BROKER_CA_BUNDLE"
-                    ),
+                    "external_broker_logout_url": _read_first_env("LSMC_AUTH_BROKER_LOGOUT_URL"),
+                    "external_broker_ca_bundle": _read_first_env("LSMC_AUTH_BROKER_CA_BUNDLE"),
                     "ursa_observability_service_token": _read_first_env(
                         "URSA_OBSERVABILITY_SERVICE_TOKEN"
                     ),

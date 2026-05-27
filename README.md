@@ -111,13 +111,17 @@ Core API surface:
 - `/api/v1/manifests/{manifest_euid}/download` returns the generated `analysis_samples.tsv`.
 - `/api/v1/staging-jobs` defines and runs sample staging through `daylily-ec samples stage`.
 - `/api/v1/analysis-jobs` defines, launches, refreshes, and reads analysis workflow jobs.
+- `/api/v1/dewey/run-analysis-triggers` accepts service-token Dewey triggers and can launch catalog-backed analysis jobs when explicit execution context is supplied.
 - `/api/v1/clusters` and `/api/v1/clusters/jobs` expose cluster creation, inspection, dry-run delete planning, and cluster job state.
+- `/api/v1/admin/cluster-cleanup-policy` and `/api/v1/admin/cluster-cleanup/run` expose admin-only idle cleanup policy and dry-run/execute controls.
 - `/api/v1/buckets` manages linked S3 buckets and object browsing/upload helper routes.
 - `/api/v1/user-tokens` and `/api/v1/admin/user-tokens` manage Ursa user tokens.
 
 Manifest creation rejects caller-supplied generated manifest metadata. Ursa derives `analysis_samples_manifest` from `editor_analysis_inputs` or S3 input references, using the installed Daylily-Informatics `daylily-ephemeral-cluster` `5.0.0` template.
 
 Staging jobs run against an existing manifest and capture the remote FSx stage directory plus stdout/stderr. Analysis jobs may either stage from a `reference_s3_uri` or reuse a completed `staging_job_euid` whose tenant, workset, manifest, state, and `stage_dir` match the request.
+
+Cluster auto cleanup is disabled by default. When enabled by an admin, cleanup must export `/fsx/analysis_results/...` to S3 through the DayEC export path before delete; export failure blocks delete.
 
 Atlas result return is allowed only after approval. Ursa sends opaque EUIDs and Dewey artifact EUIDs to Atlas and persists the Atlas response on the analysis record.
 
@@ -164,6 +168,8 @@ The repo uses setuptools-scm for versions. Release tags are bare numeric semver 
 
 - [Docs index](docs/README.md)
 - [Google OAuth default](docs/GOOGLE_OAUTH_DEFAULT.md)
+- [Dewey run analysis trigger contract](docs/dewey_run_analysis_triggers.md)
+- [Cluster auto cleanup runbook](docs/cluster_auto_cleanup.md)
 - [Ursa-Atlas return contract](docs/ursa_atlas_return_contract.md)
 - [TapDB admin mount status](docs/tapdb_mount_execplan.md)
 - [Conformance audit](ursa-conformance-directive.md)

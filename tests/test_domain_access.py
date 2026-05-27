@@ -44,6 +44,7 @@ def _settings() -> Settings:
         atlas_base_url="https://atlas.example",
         atlas_internal_api_key="atlas-internal-key",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
         ursa_observability_service_token="ursa-observability-token",
         ursa_write_service_token="ursa-write-token",
         ursa_tapdb_admin_service_token="ursa-tapdb-admin-token",
@@ -54,6 +55,7 @@ def _settings() -> Settings:
         cognito_callback_url="https://testserver/auth/callback",
         cognito_logout_url="https://testserver/auth/logout",
         ursa_tapdb_mount_enabled=False,
+        allowed_hosts="testserver,localhost,evil.example.com",
     )
 
 

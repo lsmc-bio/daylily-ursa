@@ -1,13 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import uuid
 
 import httpx
 from fastapi.testclient import TestClient
 
 from daylib_ursa.config import Settings
 from daylib_ursa.integrations.dewey_client import DeweyClient
+from daylib_ursa.resource_store import (
+    AnalysisJobEventRecord,
+    AnalysisJobRecord,
+    DeweyRunTriggerRecord,
+    ManifestRecord,
+    WorksetRecord,
+)
 from daylib_ursa.workset_api import create_app
+
+TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+OWNER_USER_ID = "00000000-0000-0000-0000-000000000101"
 
 
 class _DummyBloomClient:
@@ -21,6 +32,276 @@ class _DummyClusterService:
 @dataclass
 class _DummyStore:
     calls: list[dict] = field(default_factory=list)
+
+
+class _MemoryResourceStore:
+    def __init__(self) -> None:
+        self.worksets: dict[str, WorksetRecord] = {}
+        self.manifests: dict[str, ManifestRecord] = {}
+        self.analysis_jobs: dict[str, AnalysisJobRecord] = {}
+        self.analysis_events: dict[str, list[AnalysisJobEventRecord]] = {}
+        self.triggers_by_euid: dict[str, DeweyRunTriggerRecord] = {}
+        self.triggers_by_idempotency: dict[str, DeweyRunTriggerRecord] = {}
+        self._workset_seq = 0
+        self._manifest_seq = 0
+        self._analysis_job_seq = 0
+        self._analysis_event_seq = 0
+
+    def create_workset(
+        self,
+        *,
+        name: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        artifact_set_euids,
+        metadata,
+    ):
+        self._workset_seq += 1
+        record = WorksetRecord(
+            workset_euid=f"WS-{self._workset_seq}",
+            name=name,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            state="ACTIVE",
+            artifact_set_euids=list(artifact_set_euids or []),
+            metadata=dict(metadata or {}),
+            created_at="2026-05-27T00:00:00Z",
+            updated_at="2026-05-27T00:00:00Z",
+            manifests=[],
+            analysis_euids=[],
+        )
+        self.worksets[record.workset_euid] = record
+        return record
+
+    def get_workset(self, workset_euid: str):
+        return self.worksets.get(workset_euid)
+
+    def create_manifest(
+        self,
+        *,
+        workset_euid: str,
+        name: str,
+        artifact_set_euid: str | None,
+        artifact_euids,
+        input_references,
+        metadata,
+    ):
+        workset = self.worksets[workset_euid]
+        self._manifest_seq += 1
+        manifest = ManifestRecord(
+            manifest_euid=f"MF-{self._manifest_seq}",
+            name=name,
+            workset_euid=workset_euid,
+            tenant_id=workset.tenant_id,
+            owner_user_id=workset.owner_user_id,
+            artifact_set_euid=artifact_set_euid,
+            artifact_euids=list(artifact_euids or []),
+            input_references=list(input_references or []),
+            metadata=dict(metadata or {}),
+            created_at="2026-05-27T00:01:00Z",
+            updated_at="2026-05-27T00:01:00Z",
+            state="ACTIVE",
+        )
+        self.manifests[manifest.manifest_euid] = manifest
+        self.worksets[workset_euid] = replace(
+            workset,
+            manifests=[*workset.manifests, manifest],
+            updated_at="2026-05-27T00:01:00Z",
+        )
+        return manifest
+
+    def get_manifest(self, manifest_euid: str):
+        return self.manifests.get(manifest_euid)
+
+    def create_analysis_job(
+        self,
+        *,
+        job_name: str,
+        workset_euid: str,
+        manifest_euid: str,
+        cluster_name: str,
+        region: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        request,
+    ):
+        self._analysis_job_seq += 1
+        record = AnalysisJobRecord(
+            job_euid=f"AJ-{self._analysis_job_seq}",
+            job_name=job_name,
+            workset_euid=workset_euid,
+            manifest_euid=manifest_euid,
+            cluster_name=cluster_name,
+            region=region,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            state="DEFINED",
+            created_at="2026-05-27T00:02:00Z",
+            updated_at="2026-05-27T00:02:00Z",
+            started_at=None,
+            completed_at=None,
+            return_code=None,
+            error=None,
+            output_summary=None,
+            request=dict(request or {}),
+            launch={},
+            events=[],
+        )
+        self.analysis_jobs[record.job_euid] = record
+        return record
+
+    def add_analysis_job_event(
+        self,
+        *,
+        job_euid: str,
+        event_type: str,
+        status: str,
+        summary: str,
+        details=None,
+        created_by=None,
+    ):
+        self._analysis_event_seq += 1
+        event = AnalysisJobEventRecord(
+            event_euid=f"AJE-{self._analysis_event_seq}",
+            job_euid=job_euid,
+            event_type=event_type,
+            status=status,
+            summary=summary,
+            details=dict(details or {}),
+            created_by=created_by,
+            created_at="2026-05-27T00:02:30Z",
+        )
+        record = self.analysis_jobs[job_euid]
+        updated = replace(
+            record,
+            events=[event, *record.events],
+            updated_at=event.created_at,
+        )
+        self.analysis_jobs[job_euid] = updated
+        self.analysis_events.setdefault(job_euid, []).append(event)
+        return event
+
+    def update_analysis_job_status(self, *, job_euid: str, state: str, created_by: str, **updates):
+        _ = created_by
+        record = self.analysis_jobs[job_euid]
+        updated = replace(
+            record,
+            state=state,
+            updated_at="2026-05-27T00:03:00Z",
+            started_at=updates.get("started_at", record.started_at),
+            completed_at=updates.get("completed_at", record.completed_at),
+            return_code=updates.get("return_code", record.return_code),
+            error=updates.get("error", record.error),
+            output_summary=updates.get("output_summary", record.output_summary),
+            launch=updates.get("launch", record.launch),
+        )
+        self.analysis_jobs[job_euid] = updated
+        return updated
+
+    def get_analysis_job(self, job_euid: str):
+        return self.analysis_jobs.get(job_euid)
+
+    def list_analysis_jobs(self, *, tenant_id: uuid.UUID | None = None, limit: int = 200):
+        _ = limit
+        return [
+            job
+            for job in self.analysis_jobs.values()
+            if tenant_id is None or job.tenant_id == tenant_id
+        ]
+
+    def get_staging_job(self, staging_job_euid: str):
+        _ = staging_job_euid
+        return None
+
+    def create_dewey_run_trigger(
+        self,
+        *,
+        trigger_euid: str,
+        idempotency_key: str,
+        fingerprint: str,
+        status: str,
+        command_id: str,
+        request: dict,
+        response: dict,
+        analysis_job_euid: str | None = None,
+        staging_job_euid: str | None = None,
+        error: str | None = None,
+    ):
+        record = DeweyRunTriggerRecord(
+            trigger_euid=trigger_euid,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            status=status,
+            command_id=command_id,
+            request=dict(request or {}),
+            response=dict(response or {}),
+            analysis_job_euid=analysis_job_euid,
+            staging_job_euid=staging_job_euid,
+            error=error,
+            created_at="2026-05-27T00:04:00Z",
+            updated_at="2026-05-27T00:04:00Z",
+        )
+        self.triggers_by_euid[trigger_euid] = record
+        self.triggers_by_idempotency[idempotency_key] = record
+        return record
+
+    def get_dewey_run_trigger(self, trigger_euid: str):
+        return self.triggers_by_euid.get(trigger_euid)
+
+    def get_dewey_run_trigger_by_idempotency(self, idempotency_key: str):
+        return self.triggers_by_idempotency.get(idempotency_key)
+
+
+class _DummyAnalysisJobManager:
+    def __init__(self, resources: _MemoryResourceStore, terminal_state: str = "RUNNING") -> None:
+        self.resources = resources
+        self.terminal_state = terminal_state
+
+    def launch_job(self, job_euid: str, *, actor_user_id: str):
+        if self.terminal_state == "COMPLETED":
+            return self.resources.update_analysis_job_status(
+                job_euid=job_euid,
+                state="COMPLETED",
+                created_by=actor_user_id,
+                started_at="2026-05-27T00:03:00Z",
+                completed_at="2026-05-27T00:04:00Z",
+                return_code=0,
+                output_summary="Workflow status: COMPLETED",
+                launch={"session_name": "dewey-run-1", "exit_code": 0},
+            )
+        if self.terminal_state == "FAILED":
+            return self.resources.update_analysis_job_status(
+                job_euid=job_euid,
+                state="FAILED",
+                created_by=actor_user_id,
+                started_at="2026-05-27T00:03:00Z",
+                completed_at="2026-05-27T00:04:00Z",
+                return_code=1,
+                error="workflow failed",
+                output_summary="Workflow status: FAILED",
+                launch={"session_name": "dewey-run-1", "exit_code": 1},
+            )
+        return self.resources.update_analysis_job_status(
+            job_euid=job_euid,
+            state="RUNNING",
+            created_by=actor_user_id,
+            started_at="2026-05-27T00:03:00Z",
+            return_code=0,
+            output_summary="Workflow session launched",
+            launch={"session_name": "dewey-run-1"},
+        )
+
+
+class _DummyDeweyClient:
+    def __init__(self) -> None:
+        self.result_calls: list[dict] = []
+
+    def register_analysis_results(self, *, payload, idempotency_key: str):
+        self.result_calls.append({"payload": dict(payload), "idempotency_key": idempotency_key})
+        return {
+            "receipt": {"artifact_set_euid": "AS-RESULT-1"},
+            "artifact_set": {"artifact_set_euid": "AS-RESULT-1"},
+        }
 
 
 def _settings() -> Settings:
@@ -44,8 +325,18 @@ def _settings() -> Settings:
     )
 
 
-def _app(monkeypatch):
-    def fake_analysis_command_payload(command_id: str):
+def _app(
+    monkeypatch,
+    *,
+    resource_store: _MemoryResourceStore | None = None,
+    analysis_job_manager: _DummyAnalysisJobManager | None = None,
+    dewey_client: _DummyDeweyClient | None = None,
+):
+    resources = resource_store or _MemoryResourceStore()
+    manager = analysis_job_manager or _DummyAnalysisJobManager(resources)
+
+    def fake_analysis_command_payload(command_id: str, optional_features=None):
+        _ = optional_features
         if command_id != "illumina_snv_alignstats_relatedness_vep_multiqc":
             raise ValueError(f"Unknown analysis command: {command_id}")
         return {
@@ -62,8 +353,10 @@ def _app(monkeypatch):
         _DummyStore(),
         bloom_client=_DummyBloomClient(),
         atlas_client=None,
-        dewey_client=None,
+        dewey_client=dewey_client,
+        resource_store=resources,
         cluster_service=_DummyClusterService(),
+        analysis_job_manager=manager,
         settings=_settings(),
     )
 
@@ -82,6 +375,43 @@ def _trigger_body() -> dict:
         "sample_identifiers": [{"sample_euid": "SAMPLE-1"}],
         "auto_launch": False,
     }
+
+
+def _execution_context(*, result_registration: dict | None = None) -> dict:
+    payload = {
+        "tenant_id": str(TENANT_ID),
+        "owner_user_id": OWNER_USER_ID,
+        "workset": {
+            "name": "Dewey run workset",
+            "artifact_set_euids": ["AS-RUN-1"],
+            "metadata": {"source": "dewey"},
+        },
+        "manifest": {
+            "name": "Dewey run manifest",
+            "artifact_set_euid": "AS-RUN-1",
+            "artifact_euids": ["AT-FQ-1"],
+            "input_references": [{"reference_type": "artifact_set_euid", "value": "AS-RUN-1"}],
+            "metadata": {
+                "analysis_samples_manifest": {
+                    "filename": "analysis_samples.tsv",
+                    "content": (
+                        "sample_id\tILMN_R1_PATH\tILMN_R2_PATH\n"
+                        "SAMPLE-1\ts3://reads/r1.fastq.gz\ts3://reads/r2.fastq.gz\n"
+                    ),
+                }
+            },
+        },
+        "cluster_name": "cluster-1",
+        "region": "us-west-2",
+        "reference_s3_uri": "s3://refs/hg38/",
+        "stage_target": "/staging/staged_external_sequencing_data",
+        "destination": "s3://analysis-results/run-1/",
+        "session_name": "dewey-run-1",
+        "project": "daylily",
+    }
+    if result_registration is not None:
+        payload["result_registration"] = result_registration
+    return payload
 
 
 def test_dewey_trigger_endpoint_requires_service_token_and_idempotency(monkeypatch) -> None:
@@ -165,6 +495,89 @@ def test_dewey_trigger_rejects_payload_change_and_unknown_command(monkeypatch) -
             json=arbitrary_shell,
         )
         assert invalid.status_code == 422
+
+
+def test_dewey_trigger_auto_launch_creates_analysis_job_and_replays(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    app = _app(monkeypatch, resource_store=resources)
+    body = _trigger_body()
+    body["auto_launch"] = True
+    body["execution_context"] = _execution_context()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-launch-1"},
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        payload = created.json()
+        assert payload["status"] == "RUNNING"
+        assert payload["analysis_job_euid"] == "AJ-1"
+        assert len(resources.analysis_jobs) == 1
+        assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == (
+            "illumina_snv_alignstats_relatedness_vep_multiqc"
+        )
+
+        replay = client.post(
+            "/api/v1/dewey/run-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-launch-1"},
+            json=body,
+        )
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["trigger_euid"] == payload["trigger_euid"]
+        assert len(resources.analysis_jobs) == 1
+
+
+def test_dewey_trigger_terminal_launch_registers_results(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    manager = _DummyAnalysisJobManager(resources, terminal_state="COMPLETED")
+    dewey = _DummyDeweyClient()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        analysis_job_manager=manager,
+        dewey_client=dewey,
+    )
+    body = _trigger_body()
+    body["auto_launch"] = True
+    body["execution_context"] = _execution_context(
+        result_registration={
+            "idempotency_key": "dewey-result-1",
+            "payload": {
+                "analysis_euid": "AN-1",
+                "result_root_uri": "s3://analysis-results/run-1/",
+                "artifacts": [
+                    {
+                        "logical_name": "multiqc",
+                        "artifact_role": "multiqc_html",
+                        "relative_path": "multiqc_report.html",
+                    }
+                ],
+            },
+        }
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-terminal-1"},
+            json=body,
+        )
+
+    assert created.status_code == 202, created.text
+    payload = created.json()
+    assert payload["status"] == "COMPLETED"
+    assert payload["dewey_result"]["receipt"]["artifact_set_euid"] == "AS-RESULT-1"
+    assert len(dewey.result_calls) == 1
+    call = dewey.result_calls[0]
+    assert call["idempotency_key"] == "dewey-result-1"
+    assert call["payload"]["result_status"] == "succeeded"
+    assert call["payload"]["analysis_job_euid"] == "AJ-1"
+    assert call["payload"]["sample_identifiers"] == [{"sample_euid": "SAMPLE-1"}]
+    assert {"ref_type": "ursa_analysis_job_euid", "value": "AJ-1"} in call["payload"][
+        "lineage_refs"
+    ]
 
 
 def test_dewey_client_registers_analysis_results_with_bearer_and_idempotency() -> None:

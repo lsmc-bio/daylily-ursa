@@ -49,6 +49,7 @@ URSA_TEMPLATE_DEFINITIONS: list[TemplateSpec] = [
     TemplateSpec("RGX/cluster/ephemeral-job-event/1.0/"),
     TemplateSpec("RGX/analysis/launch-job/1.0/"),
     TemplateSpec("RGX/analysis/launch-job-event/1.0/"),
+    TemplateSpec("RGX/dewey/run-analysis-trigger/1.0/"),
     TemplateSpec("RGX/anomaly/local-record/1.0/"),
 ]
 
@@ -137,14 +138,10 @@ class TapDBBackend:
             configured_regions = getattr(settings, "regions", []) or []
             if configured_regions:
                 first_region = configured_regions[0]
-                resolved_region = str(
-                    getattr(first_region, "name", first_region) or ""
-                ).strip()
+                resolved_region = str(getattr(first_region, "name", first_region) or "").strip()
             if not resolved_region:
                 allowed_regions = getattr(settings, "get_allowed_regions", None)
-                configured_allowed_regions = (
-                    allowed_regions() if callable(allowed_regions) else []
-                )
+                configured_allowed_regions = allowed_regions() if callable(allowed_regions) else []
                 if configured_allowed_regions:
                     resolved_region = str(configured_allowed_regions[0] or "").strip()
         self.bundle = bundle or get_tapdb_bundle(

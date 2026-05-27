@@ -50,6 +50,7 @@ def test_ursa_registry_fixtures_match_template_pack() -> None:
 def test_ursa_settings_accept_explicit_registry_paths() -> None:
     settings = get_settings_for_testing(
         ursa_internal_output_bucket="bucket",
+        deployment_name="unit",
         tapdb_domain_registry_path="/tmp/domain_code_registry.json",
         tapdb_prefix_ownership_registry_path="/tmp/prefix_ownership_registry.json",
     )
@@ -189,6 +190,8 @@ def test_ursa_seed_prefers_explicit_registry_paths(
         lambda: SimpleNamespace(
             tapdb_domain_registry_path="/tmp/default-domain.json",
             tapdb_prefix_ownership_registry_path="/tmp/default-prefix.json",
+            tapdb_domain_code="Z",
+            tapdb_owner_repo_name="ursa",
         ),
     )
 

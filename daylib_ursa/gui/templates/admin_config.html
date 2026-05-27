@@ -21,6 +21,42 @@
     </article>
 </section>
 
+<section class="card" style="margin-bottom: 1rem;">
+    <div class="card-header">
+        <h2 class="card-title">Cluster Auto Cleanup</h2>
+    </div>
+    <form id="cluster-cleanup-policy-form" class="grid grid-2">
+        <label>
+            <span class="small">Enabled</span>
+            <select id="cleanup-enabled" name="enabled">
+                <option value="false">Off</option>
+                <option value="true">On</option>
+            </select>
+        </label>
+        <label>
+            <span class="small">Idle minutes</span>
+            <input id="cleanup-idle-minutes" name="idle_minutes" type="number" min="1" value="45">
+        </label>
+        <label>
+            <span class="small">FSx export source</span>
+            <input id="cleanup-export-source" name="export_source_path" type="text" value="/fsx/analysis_results/ubuntu">
+        </label>
+        <label>
+            <span class="small">S3 export destination</span>
+            <input id="cleanup-export-destination" name="export_destination_s3_uri" type="text" placeholder="s3://bucket/prefix/">
+        </label>
+        <label>
+            <span class="small">Export receipt directory</span>
+            <input id="cleanup-export-output-dir" name="export_output_dir" type="text" placeholder="/var/lib/ursa/fsx-exports">
+        </label>
+        <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save Cleanup Policy</button>
+            <button class="btn btn-outline" type="button" id="cluster-cleanup-dry-run">Dry Run Cleanup</button>
+        </div>
+    </form>
+    <pre id="cluster-cleanup-policy-output" class="mono small" style="white-space: pre-wrap;"></pre>
+</section>
+
 <section class="card">
     <div class="card-header">
         <h2 class="card-title">Effective Config Rows</h2>
@@ -43,4 +79,57 @@
         </table>
     </div>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const form = document.getElementById('cluster-cleanup-policy-form');
+    const output = document.getElementById('cluster-cleanup-policy-output');
+    if (!form || !output || !window.UrsaPortal) return;
+
+    function setOutput(payload) {
+        output.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    function formPayload() {
+        return {
+            enabled: document.getElementById('cleanup-enabled').value === 'true',
+            idle_minutes: Number(document.getElementById('cleanup-idle-minutes').value || 45),
+            export_source_path: document.getElementById('cleanup-export-source').value,
+            export_destination_s3_uri: document.getElementById('cleanup-export-destination').value,
+            export_output_dir: document.getElementById('cleanup-export-output-dir').value,
+        };
+    }
+
+    async function loadPolicy() {
+        const policy = await UrsaPortal.apiRequest('/api/v1/admin/cluster-cleanup-policy');
+        document.getElementById('cleanup-enabled').value = policy.enabled ? 'true' : 'false';
+        document.getElementById('cleanup-idle-minutes').value = policy.idle_minutes;
+        document.getElementById('cleanup-export-source').value = policy.export_source_path || '';
+        document.getElementById('cleanup-export-destination').value = policy.export_destination_s3_uri || '';
+        document.getElementById('cleanup-export-output-dir').value = policy.export_output_dir || '';
+        setOutput(policy);
+    }
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const policy = await UrsaPortal.apiRequest('/api/v1/admin/cluster-cleanup-policy', {
+            method: 'PUT',
+            body: formPayload(),
+        });
+        setOutput(policy);
+    });
+
+    document.getElementById('cluster-cleanup-dry-run')?.addEventListener('click', async () => {
+        const plan = await UrsaPortal.apiRequest('/api/v1/admin/cluster-cleanup/run', {
+            method: 'POST',
+            body: { execute: false },
+        });
+        setOutput(plan);
+    });
+
+    loadPolicy().catch((error) => setOutput({ error: error.message }));
+})();
+</script>
 {% endblock %}

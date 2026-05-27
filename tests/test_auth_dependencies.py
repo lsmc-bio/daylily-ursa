@@ -203,6 +203,7 @@ def test_claims_to_current_user_maps_external_admin_group() -> None:
 def test_settings_whitelist_domains_default_to_base_four() -> None:
     settings = Settings(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
         cognito_domain="auth.example.com",
         cognito_app_client_id="client-1",
         cognito_callback_url="https://localhost:8913/auth/callback",
@@ -223,6 +224,7 @@ def test_settings_rejects_schemeful_cognito_domain() -> None:
     with pytest.raises(ValueError, match="must be a bare host"):
         Settings(
             ursa_internal_output_bucket="ursa-internal",
+            deployment_name="unit",
             cognito_domain="https://auth.example.com",
             cognito_app_client_id="client-1",
             cognito_callback_url="https://localhost:8913/auth/callback",
@@ -233,6 +235,7 @@ def test_settings_rejects_schemeful_cognito_domain() -> None:
 def test_build_web_session_config_requires_cognito_domain() -> None:
     settings = Settings(
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
         cognito_domain=None,
         cognito_app_client_id="client-1",
         cognito_callback_url="https://localhost:8913/auth/callback",

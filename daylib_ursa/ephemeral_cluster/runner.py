@@ -20,6 +20,11 @@ DAYLILY_EC_INSTALL_SPEC = (
 )
 
 
+class _CasePreservingConfigParser(configparser.RawConfigParser):
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
 def require_daylily_ec_version() -> str:
     """Require the installed daylily-ec distribution to match Ursa's contract."""
 
@@ -107,8 +112,7 @@ def _write_aws_config_with_s3_acceleration_disabled(
     dest: Path,
     profile: str,
 ) -> Path:
-    parser = configparser.RawConfigParser()
-    parser.optionxform = str
+    parser = _CasePreservingConfigParser()
     if source.exists():
         read_paths = parser.read(source)
         if not read_paths:
@@ -333,6 +337,34 @@ class DaylilyEcClient:
         cwd: Optional[Path] = None,
     ) -> subprocess.CompletedProcess[str]:
         return self.run(args, cwd=cwd)
+
+    def export_analysis_results(
+        self,
+        *,
+        cluster_name: str,
+        source_path: str,
+        destination_s3_uri: str,
+        region: str,
+        output_dir: str,
+        aws_profile: Optional[str] = None,
+    ) -> subprocess.CompletedProcess[str]:
+        args = [
+            "export",
+            "--cluster-name",
+            cluster_name,
+            "--source-path",
+            source_path,
+            "--destination-s3-uri",
+            destination_s3_uri,
+            "--region",
+            region,
+            "--output-dir",
+            output_dir,
+        ]
+        resolved_profile = aws_profile if aws_profile is not None else self.aws_profile
+        if resolved_profile:
+            args.extend(["--profile", resolved_profile])
+        return self.run(args)
 
     def delete_dry_run(self, *, cluster_name: str, region: str) -> subprocess.CompletedProcess[str]:
         args = [

@@ -5,7 +5,7 @@ Ursa accepts Dewey-originated run-analysis triggers through:
 - `POST /api/v1/dewey/run-analysis-triggers`
 - `GET /api/v1/dewey/run-analysis-triggers/{trigger_euid}`
 
-Both endpoints require the scoped Ursa write service token in `X-API-Key`. Trigger creation also requires `Idempotency-Key`.
+Both endpoints require the scoped Ursa write service token in `X-API-Key`. Trigger creation also requires `Idempotency-Key`. These are service-token routes; they do not accept a browser admin session as a substitute for Dewey attribution.
 
 ## Request
 
@@ -22,24 +22,68 @@ Both endpoints require the scoped Ursa write service token in `X-API-Key`. Trigg
 - `sample_read_refs`
 - `sample_identifiers`
 - `auto_launch`
+- `execution_context` when `auto_launch=true`
 
-`command_id` is validated through the DayEC catalog. Ursa does not accept or execute arbitrary sidecar shell strings.
+`command_id` is validated through the DayEC catalog. Ursa does not accept or execute arbitrary sidecar shell strings. Unknown catalog IDs return a hard error.
+
+When `auto_launch=true`, `execution_context` must include explicit tenant/user and execution context:
+
+- `tenant_id`
+- `owner_user_id`
+- exactly one of `workset_euid` or `workset`
+- exactly one of `manifest_euid` or `manifest`
+- `cluster_name`
+- `region`
+- either `reference_s3_uri` or a completed `staging_job_euid`
+- optional `destination`, `session_name`, `project`, `aws_profile`, `optional_features`, `job_name`, and `dry_run`
+
+For manifest creation from a Dewey trigger, `manifest.metadata.analysis_samples_manifest.content` is required. Ursa will not infer a sample manifest from filesystem paths.
+
+Terminal Dewey result registration is opt-in through `execution_context.result_registration`:
+
+- `idempotency_key`
+- `payload`
+
+Ursa adds terminal status, analysis job EUID, run artifact-set EUID, Dewey receipt EUID, platform, command ID, sample identifiers, and Ursa lineage refs before calling Dewey `POST /api/v1/analysis-results/register`.
 
 ## Response
 
-The current private implementation records a queued trigger:
+The response contains:
 
 - `trigger_euid`
-- `status=QUEUED`
+- `status`
 - `idempotency_key`
 - `command_id`
 - catalog-backed `command_preview`
 - original request payload
 - `created_at`
 - `updated_at`
+- `analysis_job_euid` when an analysis job was created
+- `staging_job_euid` when an existing staging job was reused
+- `dewey_result` when a terminal launch registered results back to Dewey
 
-Live cluster launch, export monitoring, Dewey terminal result registration, and idle cleanup are still owned by Ursa execution code paths and deployment gates. Destructive idle cluster deletion remains config-gated and requires the workspace approval boundary before live action.
+`auto_launch=false` records a durable queued trigger. `auto_launch=true` creates a workset/manifest as requested, defines an analysis job, and launches it through the existing Ursa analysis job manager. Replay with the same idempotency key and identical payload returns the stored trigger response without creating a second analysis job. Reusing an idempotency key with a different payload returns `409`.
 
 ## Dewey Result Return
 
 Ursa's Dewey client exposes `register_analysis_results(...)`, which posts terminal result payloads to Dewey `POST /api/v1/analysis-results/register` using bearer auth and the supplied idempotency key.
+
+Terminal result registration happens when a launched or refreshed analysis job reaches `COMPLETED` or `FAILED` and the job request carries a Dewey result registration context. Result payloads should contain Dewey artifact refs and opaque EUID/XID identifiers, not PHI or patient-facing identifiers.
+
+## Persistence
+
+Ursa stores trigger/idempotency records in the ResourceStore/TapDB template:
+
+- `RGX/dewey/run-analysis-trigger/1.0/`
+
+The stored record includes the idempotency key, canonical request fingerprint, status, original request, response, analysis job EUID, staging job EUID, and error field. This is append-style trigger evidence; replay is handled from the persisted fingerprint and response.
+
+## Cross-Service Boundaries
+
+- Dewey owns canonical sequencer-run and analysis-result artifact registration.
+- Ursa owns staging, launch, monitor, export orchestration, and terminal Dewey result return.
+- DayEC owns command catalog validation and execution argument construction.
+- DayOA owns workflow recipes.
+- QEO consumes Dewey evidence; Ursa does not interpret QC meaning.
+- Atlas receives Dewey links through the approved result-return path.
+- Bloom ULTIMA/hybrid wet-lab queue support is intentionally out of scope for this work.

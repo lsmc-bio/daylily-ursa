@@ -42,7 +42,9 @@ def _settings(*, mount_enabled: bool = False) -> Settings:
         bloom_base_url="https://bloom.example",
         atlas_base_url="https://atlas.example",
         ursa_internal_output_bucket="ursa-internal",
+        deployment_name="unit",
         ursa_tapdb_mount_enabled=mount_enabled,
+        allowed_hosts="testserver,localhost",
     )
 
 
@@ -184,6 +186,8 @@ def test_all_decorated_routes_have_direct_request_coverage() -> None:
         ("GET", "/auth/logout"),
         ("POST", "/auth/logout"),
         ("GET", "/logout"),
+        ("GET", "/aws_usage_report"),
+        ("GET", "/aws_usage_report/index.html"),
         ("GET", "/api/v1/analysis-commands/illumina_snv_alignstats"),
     }
     missing = sorted(

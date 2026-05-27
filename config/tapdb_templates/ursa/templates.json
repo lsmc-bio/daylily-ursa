@@ -262,6 +262,19 @@
       "json_addl": {}
     },
     {
+      "name": "Ursa Dewey Run Analysis Trigger",
+      "polymorphic_discriminator": "action_template",
+      "category": "RGX",
+      "type": "dewey",
+      "subtype": "run-analysis-trigger",
+      "version": "1.0",
+      "instance_prefix": "RGX",
+      "instance_polymorphic_identity": "action_instance",
+      "bstatus": "active",
+      "is_singleton": false,
+      "json_addl": {}
+    },
+    {
       "name": "Ursa Local Anomaly Record",
       "polymorphic_discriminator": "generic_template",
       "category": "RGX",

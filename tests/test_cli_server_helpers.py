@@ -356,6 +356,7 @@ def test_settings_ignore_repo_root_dotenv(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AWS_PROFILE", raising=False)
     monkeypatch.setenv("URSA_INTERNAL_OUTPUT_BUCKET", "test-bucket")
+    monkeypatch.setenv("DEPLOYMENT_NAME", "unit")
     config_module.get_settings.cache_clear()
 
     settings = config_module.Settings()

@@ -139,7 +139,9 @@ def _settings() -> Settings:
         cognito_callback_url="https://localhost:8913/auth/callback",
         cognito_logout_url="https://localhost:8913/login",
         ursa_internal_output_bucket="analysis-bucket",
+        deployment_name="unit",
         ursa_tapdb_mount_enabled=False,
+        allowed_hosts="testserver,localhost",
     )
 
 
