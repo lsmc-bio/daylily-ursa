@@ -67,6 +67,14 @@ def _sidecar_uri(*, run_storage_uri: str, run_folder_name: str, analysis_id: str
     return run_root + filename
 
 
+def _retry_safe_session_name(*, analysis_id: str, command_id: str) -> str:
+    raw = f"ursa-{analysis_id}-{command_id}"
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip("-")
+    if not cleaned:
+        raise ValueError("Could not derive a path-safe workflow session name")
+    return cleaned[:80]
+
+
 def _destination_for_run(
     *,
     destination_root: str,
@@ -446,6 +454,10 @@ class RunDirectoryOrchestrator:
                     "analysis_id": job.job_euid,
                     "executing_entity": selected.name,
                     "destination": destination,
+                    "session_name": _retry_safe_session_name(
+                        analysis_id=job.job_euid,
+                        command_id=str(job.request.get("analysis_command_id") or job.job_name),
+                    ),
                     "delete_on_export_success": True,
                     "artifact_registration_command_id": job.request.get("analysis_command_id"),
                     "dewey_url": policy.dewey_url,

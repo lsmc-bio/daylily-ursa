@@ -2648,13 +2648,6 @@ def create_app(
             return True
         return _canonical_run_directory_trigger_fingerprint(existing.request) == fingerprint
 
-    def _analysis_job_failed_before_workflow_launch(job: AnalysisJobRecord | None) -> bool:
-        if job is None or job.state != "FAILED":
-            return False
-        launch = dict(job.launch or {})
-        launched_markers = ("session_name", "run_dir", "repo_path")
-        return not any(str(launch.get(marker) or "").strip() for marker in launched_markers)
-
     def _worker_pid_is_running(response: dict[str, Any]) -> bool:
         worker = response.get("worker")
         if not isinstance(worker, dict):
@@ -4523,9 +4516,7 @@ def create_app(
                     error=None,
                 )
                 return _dewey_run_directory_trigger_response_from_record(updated)
-            if existing_job is not None and _analysis_job_failed_before_workflow_launch(
-                existing_job
-            ):
+            if existing_job is not None and existing_job.state == "FAILED":
                 existing_job = resources.update_analysis_job_status(
                     job_euid=existing_job.job_euid,
                     state="DEFINED",

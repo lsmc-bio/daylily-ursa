@@ -1095,6 +1095,80 @@ def test_run_directory_trigger_replay_relaunches_queued_defined_without_live_wor
     assert len(resources.analysis_jobs) == 1
 
 
+def test_run_directory_trigger_replay_relaunches_failed_workflow_job(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient()
+    orchestrator = _DummyRunDirectoryOrchestrator()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        dewey_client=dewey,
+        run_directory_orchestrator=orchestrator,
+    )
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+        "bloom_run_euid": "BLOOM-RUN-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-failed-workflow",
+            },
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        first_payload = created.json()
+        record = resources.triggers_by_idempotency["idem-run-dir-failed-workflow"]
+        job = resources.analysis_jobs[first_payload["analysis_job_euids"][0]]
+        resources.analysis_jobs[job.job_euid] = replace(
+            job,
+            state="FAILED",
+            error="Workflow status: FAILED",
+            return_code=2,
+            launch={
+                "session_name": "run-a-illumina_run_qc",
+                "run_dir": "/fsx/analysis/run-a",
+                "repo_path": "/fsx/analysis/run-a/daylily-omics-analysis",
+            },
+        )
+        resources.triggers_by_idempotency["idem-run-dir-failed-workflow"] = replace(
+            record,
+            status="FAILED",
+            error="RuntimeError: Workflow status: FAILED",
+            response={key: value for key, value in record.response.items() if key != "worker"},
+        )
+
+        replay = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-failed-workflow",
+            },
+            json=body,
+        )
+
+    assert replay.status_code == 202, replay.text
+    payload = replay.json()
+    assert payload["status"] == "QUEUED"
+    assert payload["trigger_euid"] == first_payload["trigger_euid"]
+    assert payload["analysis_job_euids"] == first_payload["analysis_job_euids"]
+    assert resources.analysis_jobs[job.job_euid].state == "DEFINED"
+    assert resources.triggers_by_idempotency["idem-run-dir-failed-workflow"].status == "QUEUED"
+    assert orchestrator.start_calls == [first_payload["trigger_euid"], first_payload["trigger_euid"]]
+    assert len(resources.worksets) == 1
+    assert len(resources.analysis_jobs) == 1
+
+
 def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> None:
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()
@@ -1534,6 +1608,7 @@ def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_
     assert updated.request["analysis_id"] == "AJ-1"
     assert updated.request["executing_entity"] == "cluster-a"
     assert updated.request["destination"] == expected_destination
+    assert updated.request["session_name"] == "ursa-AJ-1-illumina_run_qc"
     assert updated.request["delete_on_export_success"] is True
     assert updated.request["artifact_registration_command_id"] == "illumina_run_qc"
     assert updated.request["dewey_url"] == "https://dewey.example"
@@ -1546,6 +1621,7 @@ def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_
     argv = captured["argv"]
     assert "--analysis-id" in argv and "AJ-1" in argv
     assert "--executing-entity" in argv and "cluster-a" in argv
+    assert "--session-name" in argv and "ursa-AJ-1-illumina_run_qc" in argv
     assert "--delete-on-export-success" in argv
     assert "--dewey-analysis-dir-external-object-id" in argv
     assert expected_destination + "daylily-omics-analysis/" in argv

@@ -421,3 +421,38 @@ Recorded: 2026-05-28T21:06:00Z
 | REL21-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.21` tag, push tag, build, and publish. | OPEN | release_hygiene | 5 | Pending. |  | Existing tags must not be moved. |
 | PROD21-001 | Orchestrator | Deploy Ursa `4.0.21` to `ursa.day.lsmc.bio` with exact DAY-EC `5.0.24`. | OPEN | active_product_contract | 6 | Pending. |  | Production restart must avoid interrupting active analysis/workflow processes. |
 | OWY21-001 | Orchestrator | Replay the exact stored OWY request and verify CLI launch, export, Dewey registration/linking, cleanup, and `.ursa.M-RGX-9S3G.complete`. | OPEN | active_product_contract | 7 | Pending. |  | Cron remains paused until targeted retry succeeds. |
+
+### Ursa 4.0.22 Failed-Workflow Retry Amendment
+
+Recorded: 2026-05-28T21:22:00Z
+
+- Ursa `4.0.21` was committed, pushed to `main`, annotated-tagged, pushed, built, published, and deployed to `ursa.day.lsmc.bio`.
+- Production runtime proof for `4.0.21`:
+  - `daylily-ursa==4.0.21`;
+  - `daylily-ephemeral-cluster==5.0.24`;
+  - `/healthz` and `/readyz` returned `ok`;
+  - OpenAPI reported version `4.0.21` and included `/api/v1/dewey/run-directory-analysis-triggers`.
+- Exact replay of the original OWY idempotency key relaunched the accepted job and selected `xfer-cluster`.
+- DAY-EC workflow launch used the CLI path and passed:
+  - `--analysis-id M-RGX-9S3G`;
+  - `--executing-entity xfer-cluster`;
+  - `--export-destination-s3-uri s3://lsmc-ssf-sequencing-data/derived/lsmc/ssf-hq/lh01121/2026/20260520_LH01121_0001_A23WW7FLT4/analysis_results/xfer-cluster/M-RGX-9S3G/`;
+  - `--delete-on-export-success`;
+  - `--dewey-analysis-dir-external-object-id s3://lsmc-ssf-sequencing-data/derived/lsmc/ssf-hq/lh01121/2026/20260520_LH01121_0001_A23WW7FLT4/analysis_results/xfer-cluster/M-RGX-9S3G/daylily-omics-analysis/`;
+  - `--dewey-run-artifact-euid M-DGX-9SD7`;
+  - `--dewey-ursa-analysis-euid M-RGX-9S3G`.
+- The workflow failed before pipeline execution with exit code `2` because Mermaid CLI could not find Chrome headless-shell in `/home/ubuntu/.cache/puppeteer`.
+- The headnode was repaired through SSM as `ubuntu` by installing Puppeteer `chrome-headless-shell`; `mmdc --version` reported `11.15.0` under the `DAYOA` environment.
+- A fresh Ursa idempotency key is not a valid shortcut because Dewey correctly rejected duplicate external-object creation with HTTP 409.
+- Ursa therefore needs one more retry patch: exact-payload replay of a failed analysis job must reset the existing analysis job to `DEFINED` and relaunch the worker, preserving the original trigger and analysis EUID.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| REL21-002 | Orchestrator | Record `4.0.21` release/publish/deploy evidence and close `REL21-001` / `PROD21-001`. | SUCCESS | release_hygiene | 6 | Tag `4.0.21` on commit `76321a0`; PyPI latest `4.0.21`; production PID `517797`; `/healthz`, `/readyz`, OpenAPI clean. |  | Superseded by `4.0.22` for failed-workflow retry. |
+| OWY21-002 | Orchestrator | Record `4.0.21` OWY replay failure evidence. | FAIL | active_product_contract | 7 | Workflow session `20260520_LH01121_0001_A23WW7FLT4-illumina_run_qc_bclconvert` exited code `2`; S3 sidecars include `.ursa.M-RGX-9S3G.fail`; export prefix has `0` objects. | `mmdc` was installed, but Puppeteer Chrome headless-shell was missing for user `ubuntu`. | Headnode repaired as `ubuntu`; retry requires Ursa `4.0.22`. |
+| URSA22-001 | Orchestrator | Make exact-payload replay of a failed analysis job retryable without recreating Dewey trigger/external objects. | SUCCESS | feature_implementation | 7 | `workset_api.py` resets existing failed jobs to `DEFINED` and relaunches the worker for matching idempotency requests. | Existing idempotency replay returned the failed record and could not resume after an environment fix. | Changed-payload idempotency reuse still returns HTTP 409. |
+| URSA22-002 | Orchestrator | Avoid workflow tmux/session-name collision on failed retries. | SUCCESS | feature_implementation | 7 | Run-directory orchestration now sets workflow `session_name` to `ursa-<analysis-euid>-<command-id>`. | Prior failed workflow session name remained on the headnode. | Analysis EUID remains the stable export and sidecar identity. |
+| VALID22-001 | Orchestrator | Validate `4.0.22` retry patch locally. | SUCCESS | contract_test | 7 | `uv run --python 3.12 python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py tests/test_cluster_partition_helpers.py` -> 82 passed; `ruff check ...`, `uv lock --check`, and `git diff --check` passed. |  | Release candidate ready for tag `4.0.22`. |
+| REL22-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.22` tag, push tag, build, and publish. | OPEN | release_hygiene | 7 | Pending. |  | Existing tags must not be moved. |
+| PROD22-001 | Orchestrator | Deploy Ursa `4.0.22` to `ursa.day.lsmc.bio` and verify runtime. | OPEN | active_product_contract | 7 | Pending. |  | Production restart must avoid interrupting active analysis/workflow processes. |
+| OWY22-001 | Orchestrator | Replay the original OWY idempotency key after the headnode Chrome repair and verify export, Dewey links, cleanup, and `.complete`. | OPEN | active_product_contract | 7 | Pending. |  | This retry must reuse `M-RGX-9S3G`. |
