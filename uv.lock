@@ -1789,8 +1789,8 @@ wheels = [
 
 [[package]]
 name = "daylily-ephemeral-cluster"
-version = "5.0.14"
-source = { git = "https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git?rev=5.0.14#28cbc61c0754b096fc74f4beb6d9ea404f43bbec" }
+version = "5.0.20"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-parallelcluster" },
     { name = "black" },
@@ -1815,6 +1815,10 @@ dependencies = [
     { name = "typeguard" },
     { name = "typer" },
     { name = "yamllint" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/42/01/5b4a65573a11d3ffb66c45bbf68b159227d3466954798d4286a85d40c8c2/daylily_ephemeral_cluster-5.0.20.tar.gz", hash = "sha256:3ddc1bf869ea44f8cd0fd5dfeb55af1dc30e21034daa14d30403d1be6b635f89", size = 50368100, upload-time = "2026-05-28T10:39:14.991Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/2c/93c447ad07bf9bc91781f7e60747adcbb76ad6cf158c2869af7984927ce8/daylily_ephemeral_cluster-5.0.20-py3-none-any.whl", hash = "sha256:0c387fdb7320a8b530feb3f670b362f5cd948d4c0370a24bd0a4c8b6aa89f49c", size = 1721066, upload-time = "2026-05-28T10:39:11.108Z" },
 ]
 
 [[package]]
@@ -1857,6 +1861,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "moto" },
     { name = "mypy" },
+    { name = "packaging" },
     { name = "passlib", extra = ["bcrypt"] },
     { name = "playwright" },
     { name = "pre-commit" },
@@ -1885,7 +1890,7 @@ requires-dist = [
     { name = "boto3-stubs", extras = ["cloudwatch", "s3", "sns"], specifier = ">=1.28.0" },
     { name = "cli-core-yo", specifier = "==2.1.1" },
     { name = "daylily-auth-cognito", specifier = "==2.1.5" },
-    { name = "daylily-ephemeral-cluster", git = "https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git?rev=5.0.14" },
+    { name = "daylily-ephemeral-cluster", specifier = ">=5.0.19" },
     { name = "daylily-tapdb", specifier = "==7.0.9" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },
@@ -1894,6 +1899,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.17.0" },
     { name = "moto", specifier = ">=4.2.0" },
     { name = "mypy", specifier = ">=1.5.0" },
+    { name = "packaging", specifier = ">=23.0" },
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "playwright", specifier = ">=1.42.0" },
     { name = "pre-commit", specifier = ">=3.8.0" },
