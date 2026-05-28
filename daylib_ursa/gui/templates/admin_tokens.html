@@ -18,6 +18,7 @@
         </div>
         <div class="toolbar"><button class="btn btn-primary" type="submit">Create Admin Token</button></div>
     </form>
+    <div id="admin-token-result" class="token-secret-result d-none" aria-live="polite"></div>
 </section>
 
 <div class="table-container">
@@ -45,7 +46,7 @@
 <script>
 UrsaPortal.bindJsonForm("#admin-token-form", async (form) => {
   const data = UrsaPortal.formToObject(form);
-  await UrsaPortal.apiRequest("/api/v1/admin/user-tokens", {
+  const result = await UrsaPortal.apiRequest("/api/v1/admin/user-tokens", {
     method: "POST",
     body: {
       owner_user_id: data.owner_user_id,
@@ -54,7 +55,9 @@ UrsaPortal.bindJsonForm("#admin-token-form", async (form) => {
       expires_in_days: Number(data.expires_in_days || 30),
     },
   });
-  window.location.reload();
+  UrsaPortal.renderOneTimeTokenResult("#admin-token-result", result, {
+    title: "Copy this admin-issued token now",
+  });
 });
 UrsaPortal.bindClick("[data-admin-revoke]", async (button) => {
   await UrsaPortal.apiRequest(`/api/v1/admin/user-tokens/${encodeURIComponent(button.dataset.adminRevoke)}/revoke`, {

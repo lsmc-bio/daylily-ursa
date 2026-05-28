@@ -1870,6 +1870,61 @@ def test_gui_routes_use_session_auth_and_gate_admin_pages() -> None:
     assert "Configuration" in admin_config_page.text
 
 
+def test_token_create_pages_preserve_one_time_plaintext_in_gui() -> None:
+    app, _resources = _create_test_app(admin=True)
+
+    with TestClient(app, base_url=TEST_BASE_URL) as client:
+        client.post(
+            "/login",
+            data={"access_token": "atlas-token", "next_path": "/tokens"},
+            follow_redirects=False,
+        )
+        registration = client.post(
+            "/api/v1/admin/client-registrations",
+            json={
+                "client_name": "dewey-client",
+                "owner_user_id": SECONDARY_USER_ID,
+                "scopes": ["internal_rw"],
+                "metadata": {"purpose": "integration"},
+            },
+        )
+        tokens_page = client.get("/tokens")
+        admin_tokens_page = client.get("/admin/tokens")
+        admin_client_page = client.get(
+            f"/admin/clients/{registration.json()['client_registration_euid']}"
+        )
+
+    assert registration.status_code == 201
+    assert tokens_page.status_code == 200
+    assert 'id="token-create-result"' in tokens_page.text
+    assert 'UrsaPortal.renderOneTimeTokenResult("#token-create-result", result' in tokens_page.text
+    assert 'const result = await UrsaPortal.apiRequest("/api/v1/user-tokens"' in tokens_page.text
+
+    assert admin_tokens_page.status_code == 200
+    assert 'id="admin-token-result"' in admin_tokens_page.text
+    assert (
+        'UrsaPortal.renderOneTimeTokenResult("#admin-token-result", result'
+        in admin_tokens_page.text
+    )
+    assert (
+        'const result = await UrsaPortal.apiRequest("/api/v1/admin/user-tokens"'
+        in admin_tokens_page.text
+    )
+
+    assert admin_client_page.status_code == 200
+    assert 'id="client-token-result"' in admin_client_page.text
+    assert (
+        'UrsaPortal.renderOneTimeTokenResult("#client-token-result", result'
+        in admin_client_page.text
+    )
+    assert "client-registrations/" in admin_client_page.text
+
+    portal_js = Path("daylib_ursa/gui/static/portal.js").read_text(encoding="utf-8")
+    assert "function renderOneTimeTokenResult" in portal_js
+    assert "plaintext_token" in portal_js
+    assert "Token create response did not include plaintext_token" in portal_js
+
+
 def test_dashboard_and_usage_gui_payloads_are_cached() -> None:
     app, _resources = _create_test_app(admin=True)
     dashboard_calls = {"clusters": 0, "usage": 0}

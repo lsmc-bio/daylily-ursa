@@ -181,6 +181,54 @@ window.UrsaPortal = (() => {
     });
   }
 
+  function renderOneTimeTokenResult(containerOrSelector, tokenResponse, options = {}) {
+    const container =
+      typeof containerOrSelector === "string"
+        ? document.querySelector(containerOrSelector)
+        : containerOrSelector;
+    if (!container) {
+      throw new Error("Token result container not found");
+    }
+    const plaintextToken = String(tokenResponse?.plaintext_token || "").trim();
+    if (!plaintextToken) {
+      throw new Error("Token create response did not include plaintext_token; reissue the token");
+    }
+    const tokenName = String(tokenResponse?.token_name || "New token");
+    const tokenEuid = String(tokenResponse?.token_euid || "");
+    const tokenScope = String(tokenResponse?.scope || "");
+    const title = String(options.title || "Copy this token now");
+
+    container.classList.remove("d-none");
+    container.innerHTML = `
+      <section class="token-secret-card alert alert-warning">
+        <div class="token-secret-header">
+          <div>
+            <strong>${escapeHtml(title)}</strong>
+            <div class="small">${escapeHtml(tokenName)}${tokenScope ? ` - ${escapeHtml(tokenScope)}` : ""}</div>
+          </div>
+          ${tokenEuid ? `<span class="badge badge-warning mono">${escapeHtml(tokenEuid)}</span>` : ""}
+        </div>
+        <p class="small">This token is shown once. Store it now; Ursa will not display it again.</p>
+        <div class="token-secret-row">
+          <code class="token-secret-value">${escapeHtml(plaintextToken)}</code>
+          <button class="btn btn-outline btn-sm" type="button" data-copy-created-token>
+            <i class="fa-solid fa-copy"></i> Copy
+          </button>
+          <button class="btn btn-outline btn-sm" type="button" data-refresh-after-token>
+            Refresh List
+          </button>
+        </div>
+      </section>
+    `;
+    container.querySelector("[data-copy-created-token]")?.addEventListener("click", () => {
+      copyText(plaintextToken, "Token copied");
+    });
+    container.querySelector("[data-refresh-after-token]")?.addEventListener("click", () => {
+      window.location.reload();
+    });
+    container.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
   function sortableCellValue(cell) {
     const raw = String(cell?.textContent || "").trim();
     if (!raw) {
@@ -324,6 +372,7 @@ window.UrsaPortal = (() => {
     formToObject,
     parseJsonText,
     parsePageData,
+    renderOneTimeTokenResult,
     showLoading,
     showModal,
     showToast,

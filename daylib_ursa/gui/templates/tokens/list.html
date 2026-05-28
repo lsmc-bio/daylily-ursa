@@ -18,6 +18,7 @@
         </div>
         <div class="toolbar"><button class="btn btn-primary" type="submit">Create Token</button></div>
     </form>
+    <div id="token-create-result" class="token-secret-result d-none" aria-live="polite"></div>
 </section>
 
 <div class="table-container">
@@ -45,7 +46,7 @@
 <script>
 UrsaPortal.bindJsonForm("#token-create-form", async (form) => {
   const data = UrsaPortal.formToObject(form);
-  await UrsaPortal.apiRequest("/api/v1/user-tokens", {
+  const result = await UrsaPortal.apiRequest("/api/v1/user-tokens", {
     method: "POST",
     body: {
       token_name: data.token_name,
@@ -54,7 +55,9 @@ UrsaPortal.bindJsonForm("#token-create-form", async (form) => {
       note: data.note || null,
     },
   });
-  window.location.reload();
+  UrsaPortal.renderOneTimeTokenResult("#token-create-result", result, {
+    title: "Copy this user token now",
+  });
 });
 UrsaPortal.bindClick("[data-revoke-token]", async (button) => {
   await UrsaPortal.apiRequest(`/api/v1/user-tokens/${encodeURIComponent(button.dataset.revokeToken)}/revoke`, {

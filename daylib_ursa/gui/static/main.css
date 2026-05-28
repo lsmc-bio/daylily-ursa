@@ -477,6 +477,34 @@ tr:last-child td {
 .alert-warning { border-left: 4px solid var(--color-warning); }
 .alert-error { border-left: 4px solid var(--color-error); }
 
+.token-secret-card {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.token-secret-header,
+.token-secret-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.token-secret-header {
+    justify-content: space-between;
+}
+
+.token-secret-value {
+    flex: 1 1 360px;
+    min-width: 0;
+    padding: 0.65rem 0.75rem;
+    border-radius: var(--radius-sm);
+    background: #101622;
+    color: #ecf3fb;
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+}
+
 .toast-container {
     position: fixed;
     right: 1rem;
