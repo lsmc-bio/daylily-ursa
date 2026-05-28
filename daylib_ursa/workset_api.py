@@ -3964,7 +3964,6 @@ def create_app(
         required = {
             "tenant_id": "ursa_run_directory_analysis_tenant_id",
             "owner_user_id": "ursa_run_directory_analysis_owner_user_id",
-            "executing_entity": "ursa_run_directory_analysis_executing_entity",
             "cluster_name": "ursa_run_directory_analysis_cluster_name",
             "region": "ursa_run_directory_analysis_region",
             "reference_s3_uri": "ursa_run_directory_analysis_reference_s3_uri",
@@ -3991,14 +3990,6 @@ def create_app(
                 status_code=503,
                 detail="Ursa run-directory analysis policy has invalid tenant_id",
             ) from exc
-        if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(values["executing_entity"]):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Ursa run-directory analysis policy has invalid executing_entity; "
-                    "expected a path-safe segment matching ^[A-Za-z0-9][A-Za-z0-9._-]*$"
-                ),
-            )
         try:
             values["reference_s3_uri"] = _normalize_s3_prefix_uri(values["reference_s3_uri"])
             values["destination_s3_uri"] = _normalize_s3_prefix_uri(values["destination_s3_uri"])
@@ -4024,14 +4015,15 @@ def create_app(
         *,
         policy: dict[str, Any],
         analysis_job_euid: str,
+        run_storage_uri: str,
     ) -> str:
-        executing_entity = str(policy["executing_entity"]).strip()
+        executing_entity = str(policy["cluster_name"]).strip()
         job_euid = str(analysis_job_euid or "").strip()
         if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(executing_entity):
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "Ursa run-directory analysis policy has invalid executing_entity; "
+                    "Ursa run-directory analysis policy has invalid cluster_name; "
                     "expected a path-safe segment matching ^[A-Za-z0-9][A-Za-z0-9._-]*$"
                 ),
             )
@@ -4040,9 +4032,53 @@ def create_app(
                 status_code=500,
                 detail="Ursa analysis job EUID is not path-safe for DAY-EC export identity",
             )
+        destination = urlparse(str(policy["destination_s3_uri"]))
+        source = urlparse(str(run_storage_uri))
+        if destination.scheme != "s3" or not destination.netloc:
+            raise HTTPException(
+                status_code=503,
+                detail="Ursa run-directory destination_s3_uri must be an s3:// URI",
+            )
+        if source.scheme != "s3" or not source.netloc:
+            raise HTTPException(status_code=400, detail="run_storage_uri must be an s3:// URI")
+        if destination.netloc != source.netloc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ursa run-directory destination_s3_uri bucket must match "
+                    "run_storage_uri bucket"
+                ),
+            )
+        destination_parts = [
+            part for part in destination.path.strip("/").split("/") if part
+        ]
+        if destination_parts != ["derived"]:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ursa run-directory destination_s3_uri must be the explicit "
+                    "s3://<sequencing-bucket>/derived/ root"
+                ),
+            )
+        source_parts = [part for part in source.path.strip("/").split("/") if part]
+        if len(source_parts) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="run_storage_uri must include a collection prefix and run-relative path",
+            )
+        if any(part in {"", ".", ".."} or "/" in part for part in source_parts):
+            raise HTTPException(status_code=400, detail="run_storage_uri contains unsafe path parts")
+        derived_parts = [
+            "derived",
+            *source_parts[1:],
+            "analysis_results",
+            executing_entity,
+            job_euid,
+        ]
         return (
-            str(policy["destination_s3_uri"]).rstrip("/")
-            + f"/{executing_entity}/{job_euid}/"
+            f"s3://{destination.netloc}/"
+            + "/".join(derived_parts)
+            + "/"
         )
 
     def _with_run_directory_analysis_destination(
@@ -4051,14 +4087,16 @@ def create_app(
         job: AnalysisJobRecord,
         policy: dict[str, Any],
         actor_user_id: str,
+        run_storage_uri: str,
     ) -> AnalysisJobRecord:
         destination = _run_directory_analysis_destination(
             policy=policy,
             analysis_job_euid=job.job_euid,
+            run_storage_uri=run_storage_uri,
         )
         request_payload = {
             **dict(job.request or {}),
-            "executing_entity": str(policy["executing_entity"]),
+            "executing_entity": str(policy["cluster_name"]),
             "destination": destination,
         }
         return resources.update_analysis_job_request(
@@ -4521,15 +4559,17 @@ def create_app(
                     job=existing_job,
                     policy=policy,
                     actor_user_id=str(policy["owner_user_id"]),
+                    run_storage_uri=str(existing.request.get("run_storage_uri") or ""),
                 )
                 relaunched = manager.launch_job(
                     existing_job.job_euid,
                     actor_user_id=str(policy["owner_user_id"]),
                     request_overrides={
-                        "executing_entity": str(policy["executing_entity"]),
+                        "executing_entity": str(policy["cluster_name"]),
                         "destination": _run_directory_analysis_destination(
                             policy=policy,
                             analysis_job_euid=existing_job.job_euid,
+                            run_storage_uri=str(existing.request.get("run_storage_uri") or ""),
                         ),
                     },
                 )
@@ -4629,7 +4669,7 @@ def create_app(
                 "optional_features": [],
                 "destination": None,
                 "export_trigger": "on-success",
-                "executing_entity": policy["executing_entity"],
+                "executing_entity": policy["cluster_name"],
                 "reference_s3_uri": policy["reference_s3_uri"],
                 "session_name": f"{request.run_folder_name}-{command_id}"[:64],
                 "project": policy["project"],
@@ -4662,6 +4702,7 @@ def create_app(
                 job=record,
                 policy=policy,
                 actor_user_id=str(policy["owner_user_id"]),
+                run_storage_uri=request_payload["run_storage_uri"],
             )
             resources.add_analysis_job_event(
                 job_euid=record.job_euid,

@@ -243,3 +243,51 @@ Recorded: 2026-05-28
 | REL17-001 | Orchestrator | Merge/push main, create annotated Ursa `4.0.17` tag, and push tag. | OPEN | plan_amendment | 5 | Pending. |  |  |
 | PROD17-001 | Orchestrator | Deploy Ursa `4.0.17` to `ursa.day.lsmc.bio`, update explicit production runtime config, and verify DYEC `5.0.22`. | OPEN | plan_amendment | 5 | Pending. |  |  |
 | OWY17-001 | Orchestrator | Run targeted OWY retry and verify `.ursa.*` sidecar for `20260520_LH01121_0001_A23WW7FLT4`. | OPEN | plan_amendment | 5 | Pending. |  | Cron remains paused until targeted retry succeeds. |
+
+## Post-Approval 4.0.19 Amendment
+
+Recorded: 2026-05-28
+
+- Ursa `4.0.18` was committed, merged to `origin/main`, and annotated-tagged,
+  but was not restarted on `ursa.day.lsmc.bio`. The live service remained
+  `4.0.17` while this amendment was made.
+- User clarified the required OWY run-directory export layout:
+  - DAY-EC should export the analysis root containing
+    `daylily-omics-analysis/`.
+  - The final S3 location must be in the sequencing data bucket under
+    `derived/.../analysis_results/<cluster-name>/<analysis-euid>/`, so exported
+    objects appear under
+    `derived/.../analysis_results/<cluster-name>/<analysis-euid>/daylily-omics-analysis/...`.
+- DAY-EC `5.0.22` validation was rechecked: `--export-destination-s3-uri`
+  must end with the same `<executing-entity>/<analysis-id>/` suffix as the FSx
+  analysis root. Therefore Ursa must use the explicit run-directory
+  `cluster_name` as the DAY-EC executing entity for these OWY launches.
+- Ursa `4.0.19` source change:
+  - remove the separate `ursa_run_directory_analysis_executing_entity` policy
+    surface for this path;
+  - use explicit `ursa_run_directory_analysis_cluster_name` as the DAY-EC
+    executing entity;
+  - require `ursa_run_directory_analysis_destination_s3_uri` to be the explicit
+    `s3://<sequencing-bucket>/derived/` root;
+  - require the destination bucket to match `run_storage_uri`;
+  - derive the matching run-relative prefix by replacing the source collection
+    prefix such as `basecalls/` with `derived/`;
+  - persist and relaunch with
+    `derived/<run-relative-path>/analysis_results/<cluster-name>/<analysis-euid>/`;
+  - rewrite `OUTPUT_ROOT` in the generated run-context TSV to the job-specific
+    export destination before launching DAY-EC.
+- Local validation for `4.0.19` source:
+  - `python -m pytest -q tests/test_dewey_run_analysis_triggers.py` -> `17 passed`;
+  - `python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py`
+    -> `62 passed`;
+  - `ruff check daylib_ursa tests/test_dewey_run_analysis_triggers.py` -> passed;
+  - `git diff --check` -> passed.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| EXPORT19-001 | Agent 1 | Replace the generic `ursa-run-directory/<analysis-euid>/` export destination with the sequencing-bucket `derived/.../analysis_results/<cluster-name>/<analysis-euid>/` layout. | SUCCESS | contract_fix | 4 | `daylib_ursa/workset_api.py`; exact OWY test expects `s3://lsmc-ssf-sequencing-data/derived/lsmc/ssf-hq/lh01121/2026/20260520_LH01121_0001_A23WW7FLT4/analysis_results/cluster-1/AJ-1/`. | 4.0.18 satisfied DAY-EC suffix validation but used the wrong export namespace. | 4.0.18 must not be deployed for OWY acceptance. |
+| RUNCTX19-001 | Agent 1 | Ensure generated run-context TSV `OUTPUT_ROOT` matches the job-specific export destination. | SUCCESS | contract_fix | 4 | `daylib_ursa/analysis_jobs.py`; `test_run_directory_analysis_job_launch_uses_run_context_file`. | The manifest was created before job EUID assignment, so its initial `OUTPUT_ROOT` could not be job-specific. | Launch-time run-context file now rewrites `OUTPUT_ROOT`. |
+| VALID19-001 | Orchestrator | Validate 4.0.19 source before release. | SUCCESS | contract_test | 4 | Focused and broader pytest suites, ruff, and diff-check listed above. |  | Validation passed. |
+| REL19-001 | Orchestrator | Merge/push main, create annotated Ursa `4.0.19` tag, and push tag. | OPEN | plan_amendment | 5 | Pending. |  |  |
+| PROD19-001 | Orchestrator | Deploy Ursa `4.0.19` to `ursa.day.lsmc.bio`, update production `destination_s3_uri` to `s3://lsmc-ssf-sequencing-data/derived/`, and verify DYEC `5.0.22`. | OPEN | plan_amendment | 5 | Pending. |  | Do not restart with 4.0.18. |
+| OWY19-001 | Orchestrator | Run targeted OWY retry and verify `.ursa.*` sidecar for `20260520_LH01121_0001_A23WW7FLT4`. | OPEN | plan_amendment | 5 | Pending. |  | Cron remains paused until targeted retry succeeds. |

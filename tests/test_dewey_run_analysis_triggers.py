@@ -466,12 +466,11 @@ def _settings() -> Settings:
         ursa_tapdb_mount_enabled=False,
         ursa_run_directory_analysis_tenant_id=str(TENANT_ID),
         ursa_run_directory_analysis_owner_user_id=OWNER_USER_ID,
-        ursa_run_directory_analysis_executing_entity="ursa-run-directory",
         ursa_run_directory_analysis_cluster_name="cluster-1",
         ursa_run_directory_analysis_region="us-west-2",
         ursa_run_directory_analysis_reference_s3_uri="s3://refs/hg38/",
         ursa_run_directory_analysis_stage_target="/staging/run-directories",
-        ursa_run_directory_analysis_destination_s3_uri="s3://analysis-results/run-directories/",
+        ursa_run_directory_analysis_destination_s3_uri="s3://bucket/derived/",
         ursa_run_directory_analysis_project="daylily",
         ursa_run_directory_analysis_aws_profile="lsmc",
     )
@@ -803,7 +802,7 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
         "BLOOM-RUN-1"
     )
     assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
     )
     assert len(resources.external_objects) == 1
     assert len(dewey.external_objects) == 3
@@ -912,7 +911,7 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
         assert created.json()["status"] == "FAILED"
         assert "AnalysisIdentityError" in resources.analysis_jobs["AJ-1"].error
         assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-            "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+            "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
         )
 
         stale_job = resources.analysis_jobs["AJ-1"]
@@ -921,7 +920,7 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
             request={
                 **stale_job.request,
                 "destination": (
-                    "s3://analysis-results/run-directories/run-a/01-illumina_run_qc/"
+                    "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/01-illumina_run_qc/"
                 ),
             },
         )
@@ -942,13 +941,13 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
     assert payload["analysis_jobs"][0]["status"] == "RUNNING"
     assert payload["analysis_job_euids"] == ["AJ-1"]
     assert manager.launch_calls[1]["request_overrides"] == {
-        "executing_entity": "ursa-run-directory",
-        "destination": "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/",
+        "executing_entity": "cluster-1",
+        "destination": "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/",
     }
     assert resources.triggers_by_idempotency["idem-run-dir-prelaunch-failure"].status == "RUNNING"
     assert resources.analysis_jobs["AJ-1"].state == "RUNNING"
     assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
     )
     assert len(resources.worksets) == 1
     assert len(resources.analysis_jobs) == 1
@@ -981,15 +980,15 @@ def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> No
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == "illumina_run_qc_bclconvert"
-    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "ursa-run-directory"
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "cluster-1"
     assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
     )
 
 
-def test_run_directory_trigger_requires_explicit_path_safe_executing_entity(monkeypatch) -> None:
+def test_run_directory_trigger_requires_path_safe_cluster_name(monkeypatch) -> None:
     settings = _settings()
-    settings.ursa_run_directory_analysis_executing_entity = "johnm@lsmc.com"
+    settings.ursa_run_directory_analysis_cluster_name = "johnm@lsmc.com"
     app = _app(monkeypatch, dewey_client=_DummyDeweyClient(), settings=settings)
     body = {
         "dewey_run_artifact_euid": "AT-RUN-1",
@@ -1013,7 +1012,7 @@ def test_run_directory_trigger_requires_explicit_path_safe_executing_entity(monk
         )
 
     assert rejected.status_code == 503
-    assert "invalid executing_entity" in rejected.text
+    assert "invalid cluster_name" in rejected.text
 
 
 def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeypatch) -> None:
@@ -1023,7 +1022,16 @@ def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeyp
     )
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient(storage_uri=run_storage_uri)
-    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey)
+    settings = _settings()
+    settings.ursa_run_directory_analysis_destination_s3_uri = (
+        "s3://lsmc-ssf-sequencing-data/derived/"
+    )
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        dewey_client=dewey,
+        settings=settings,
+    )
     body = {
         "run_folder_name": "20260520_LH01121_0001_A23WW7FLT4",
         "platform": "ILMN",
@@ -1058,9 +1066,10 @@ def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeyp
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert payload["request"]["owy_execution_id"] == "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9"
-    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "ursa-run-directory"
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "cluster-1"
     assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+        "s3://lsmc-ssf-sequencing-data/derived/lsmc/ssf-hq/lh01121/2026/"
+        "20260520_LH01121_0001_A23WW7FLT4/analysis_results/cluster-1/AJ-1/"
     )
     assert payload["ursa_external_objects"][0]["external_object_id"] == "M-BRM-4Z"
     assert resources.external_object_parent_lookups == [
@@ -1202,8 +1211,9 @@ def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path) -> No
             "run_context_manifest": {
                 "filename": "config/runs.tsv",
                 "content": (
-                    "RUNID\tPLATFORM\tRUN_DIR\n"
-                    "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/\n"
+                    "RUNID\tPLATFORM\tRUN_DIR\tOUTPUT_ROOT\n"
+                    "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/"
+                    "\ts3://old-output/\n"
                 ),
             }
         },
@@ -1258,9 +1268,14 @@ def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path) -> No
     assert "--stage-dir" not in argv
     run_context_file = argv[argv.index("--run-context-file") + 1]
     assert run_context_file.endswith(".ursa-run-contexts/AJ-1/config/runs.tsv")
-    assert "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/" in (
+    run_context_content = (
         tmp_path / ".ursa-run-contexts" / "AJ-1" / "config" / "runs.tsv"
     ).read_text(encoding="utf-8")
+    assert "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/" in (
+        run_context_content
+    )
+    assert "s3://analysis-results/run-a/01-illumina_run_qc/" in run_context_content
+    assert "s3://old-output/" not in run_context_content
 
 
 def test_run_directory_analysis_refresh_launches_successor_job(tmp_path) -> None:

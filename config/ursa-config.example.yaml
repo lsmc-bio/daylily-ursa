@@ -77,7 +77,6 @@ dewey_verify_ssl: true
 # POST /api/v1/dewey/run-directory-analysis-triggers can launch jobs.
 ursa_run_directory_analysis_tenant_id: ""
 ursa_run_directory_analysis_owner_user_id: ""
-ursa_run_directory_analysis_executing_entity: ""
 ursa_run_directory_analysis_cluster_name: ""
 ursa_run_directory_analysis_region: ""
 ursa_run_directory_analysis_reference_s3_uri: ""

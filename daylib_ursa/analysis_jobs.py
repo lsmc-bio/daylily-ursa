@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
 import subprocess
 from pathlib import Path
@@ -36,6 +38,28 @@ def _parse_launch_markers(stdout: str) -> dict[str, str]:
         "run_dir": run_dir,
         "repo_path": repo_path,
     }
+
+
+def _run_context_with_output_root(content: str, output_root: str) -> str:
+    destination = str(output_root or "").strip()
+    if not destination:
+        return content
+    reader = csv.DictReader(io.StringIO(content), delimiter="\t")
+    if reader.fieldnames is None or "OUTPUT_ROOT" not in reader.fieldnames:
+        return content
+    rows = [dict(row) for row in reader]
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=list(reader.fieldnames),
+        delimiter="\t",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for row in rows:
+        row["OUTPUT_ROOT"] = destination
+        writer.writerow(row)
+    return output.getvalue().rstrip("\n")
 
 
 def _snakemake_log_reports_success(text: str) -> bool:
@@ -202,6 +226,10 @@ class AnalysisJobManager:
         content = str(run_context.get("content") or "").strip()
         if not content:
             raise ValueError("manifest.metadata.run_context_manifest.content is required")
+        content = _run_context_with_output_root(
+            content,
+            str((job.request or {}).get("destination") or "").strip(),
+        )
         filename = str(run_context.get("filename") or "config/runs.tsv").strip()
         if not filename or filename.startswith("/"):
             raise ValueError("run_context_manifest.filename must be a relative path")
