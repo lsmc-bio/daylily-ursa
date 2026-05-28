@@ -50,6 +50,7 @@ URSA_TEMPLATE_DEFINITIONS: list[TemplateSpec] = [
     TemplateSpec("RGX/analysis/launch-job/1.0/"),
     TemplateSpec("RGX/analysis/launch-job-event/1.0/"),
     TemplateSpec("RGX/dewey/run-analysis-trigger/1.0/"),
+    TemplateSpec("RGX/external/object/1.0/"),
     TemplateSpec("RGX/anomaly/local-record/1.0/"),
 ]
 

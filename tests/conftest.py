@@ -15,6 +15,17 @@ os.environ.setdefault(
 os.environ.setdefault("XDG_CONFIG_HOME", "/tmp/ursa-test-config")
 os.environ.setdefault("URSA_DEPLOYMENT_CODE", "test")
 
+_REAL_METADATA_VERSION = importlib_metadata.version
+
+
+def _test_metadata_version(distribution_name: str) -> str:
+    if distribution_name == "daylily-ephemeral-cluster":
+        return "5.0.19"
+    return _REAL_METADATA_VERSION(distribution_name)
+
+
+importlib_metadata.version = _test_metadata_version
+
 
 @pytest.fixture(autouse=True)
 def _installed_required_dayec_for_unit_tests(monkeypatch):
@@ -22,11 +33,9 @@ def _installed_required_dayec_for_unit_tests(monkeypatch):
 
     from daylib_ursa.ephemeral_cluster import runner
 
-    real_version = importlib_metadata.version
-
     def fake_version(distribution_name: str) -> str:
         if distribution_name == runner.DAYLILY_EC_DISTRIBUTION:
             return runner.REQUIRED_DAYLILY_EC_VERSION
-        return real_version(distribution_name)
+        return _REAL_METADATA_VERSION(distribution_name)
 
     monkeypatch.setattr(runner.importlib_metadata, "version", fake_version)

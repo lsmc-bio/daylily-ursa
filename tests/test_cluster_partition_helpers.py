@@ -54,6 +54,12 @@ def test_require_daylily_ec_version_accepts_required_version(monkeypatch) -> Non
     assert runner.require_daylily_ec_version() == runner.REQUIRED_DAYLILY_EC_VERSION
 
 
+def test_require_daylily_ec_version_accepts_newer_version(monkeypatch) -> None:
+    monkeypatch.setattr(runner.importlib_metadata, "version", lambda _name: "5.1.0")
+
+    assert runner.require_daylily_ec_version() == "5.1.0"
+
+
 def test_require_daylily_ec_version_rejects_missing_distribution(monkeypatch) -> None:
     def _missing(_name: str) -> str:
         raise importlib_metadata.PackageNotFoundError
@@ -69,7 +75,7 @@ def test_require_daylily_ec_version_rejects_mismatched_distribution(monkeypatch)
 
     with pytest.raises(
         RuntimeError,
-        match=rf"expected {runner.REQUIRED_DAYLILY_EC_VERSION}, found 1.9.9",
+        match=rf"expected {runner.DAYLILY_EC_VERSION_REQUIREMENT}, found 1.9.9",
     ):
         runner.require_daylily_ec_version()
 

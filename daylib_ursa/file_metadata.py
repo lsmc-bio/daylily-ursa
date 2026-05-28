@@ -25,7 +25,8 @@ from typing import Dict, List, Optional, Tuple
 from daylib_ursa.ephemeral_cluster.runner import (
     DAYLILY_EC_DISTRIBUTION,
     DAYLILY_EC_INSTALL_SPEC,
-    REQUIRED_DAYLILY_EC_VERSION,
+    DAYLILY_EC_VERSION_REQUIREMENT,
+    require_daylily_ec_version,
 )
 
 ANALYSIS_SAMPLES_TEMPLATE_PACKAGE = "daylily_ec.resources.payload"
@@ -41,11 +42,13 @@ def require_daylily_ec_template_version() -> str:
             f"{DAYLILY_EC_DISTRIBUTION} is not installed. Install "
             f"{DAYLILY_EC_INSTALL_SPEC} in the active Ursa environment."
         ) from exc
-    if installed != REQUIRED_DAYLILY_EC_VERSION:
+    try:
+        require_daylily_ec_version()
+    except RuntimeError as exc:
         raise RuntimeError(
             f"{DAYLILY_EC_DISTRIBUTION} version mismatch: expected "
-            f"{REQUIRED_DAYLILY_EC_VERSION}, found {installed}."
-        )
+            f"{DAYLILY_EC_VERSION_REQUIREMENT}, found {installed}."
+        ) from exc
     return installed
 
 

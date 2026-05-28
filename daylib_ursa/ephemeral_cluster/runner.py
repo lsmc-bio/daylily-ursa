@@ -6,6 +6,7 @@ from importlib import import_module
 from importlib import metadata as importlib_metadata
 import json
 import os
+from packaging.version import InvalidVersion, Version
 import subprocess
 import sys
 import tempfile
@@ -13,11 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "5.0.14"
-DAYLILY_EC_INSTALL_SPEC = (
-    f"{DAYLILY_EC_DISTRIBUTION} @ "
-    f"git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
-)
+MINIMUM_DAYLILY_EC_VERSION = "5.0.19"
+DAYLILY_EC_VERSION_REQUIREMENT = f">={MINIMUM_DAYLILY_EC_VERSION}"
+REQUIRED_DAYLILY_EC_VERSION = MINIMUM_DAYLILY_EC_VERSION
+DAYLILY_EC_INSTALL_SPEC = f"{DAYLILY_EC_DISTRIBUTION}{DAYLILY_EC_VERSION_REQUIREMENT}"
 
 
 class _CasePreservingConfigParser(configparser.RawConfigParser):
@@ -26,7 +26,7 @@ class _CasePreservingConfigParser(configparser.RawConfigParser):
 
 
 def require_daylily_ec_version() -> str:
-    """Require the installed daylily-ec distribution to match Ursa's contract."""
+    """Require the installed daylily-ec distribution to satisfy Ursa's contract."""
 
     try:
         installed = importlib_metadata.version(DAYLILY_EC_DISTRIBUTION)
@@ -35,10 +35,17 @@ def require_daylily_ec_version() -> str:
             f"{DAYLILY_EC_DISTRIBUTION} is not installed. Install "
             f"{DAYLILY_EC_INSTALL_SPEC} in the active Ursa environment."
         ) from exc
-    if installed != REQUIRED_DAYLILY_EC_VERSION:
+    try:
+        installed_version = Version(installed)
+    except InvalidVersion as exc:
         raise RuntimeError(
             f"{DAYLILY_EC_DISTRIBUTION} version mismatch: expected "
-            f"{REQUIRED_DAYLILY_EC_VERSION}, found {installed}."
+            f"{DAYLILY_EC_VERSION_REQUIREMENT}, found invalid version {installed!r}."
+        ) from exc
+    if installed_version < Version(MINIMUM_DAYLILY_EC_VERSION):
+        raise RuntimeError(
+            f"{DAYLILY_EC_DISTRIBUTION} version mismatch: expected "
+            f"{DAYLILY_EC_VERSION_REQUIREMENT}, found {installed}."
         )
     return installed
 
@@ -163,7 +170,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 5.0.14 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster >=5.0.19 contract."""
 
     def __init__(
         self,
@@ -583,6 +590,8 @@ def run_create_sync(
 __all__ = [
     "DAYLILY_EC_DISTRIBUTION",
     "REQUIRED_DAYLILY_EC_VERSION",
+    "MINIMUM_DAYLILY_EC_VERSION",
+    "DAYLILY_EC_VERSION_REQUIREMENT",
     "DaylilyEcClient",
     "_summarize_process_output",
     "get_daylily_ec_client",

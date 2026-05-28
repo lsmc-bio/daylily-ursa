@@ -30,6 +30,7 @@ STAGING_JOB_TEMPLATE = "RGX/staging/job/1.0/"
 STAGING_JOB_EVENT_TEMPLATE = "RGX/staging/job-event/1.0/"
 STAGING_JOB_STATES = frozenset({"DEFINED", "STAGING", "COMPLETED", "FAILED"})
 DEWEY_RUN_TRIGGER_TEMPLATE = "RGX/dewey/run-analysis-trigger/1.0/"
+EXTERNAL_OBJECT_TEMPLATE = "RGX/external/object/1.0/"
 LINKED_BUCKET_TEMPLATE = "RGX/storage/linked-bucket/1.0/"
 
 
@@ -220,6 +221,20 @@ class DeweyRunTriggerRecord:
     error: str | None
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class ExternalObjectRecord:
+    external_object_euid: str
+    parent_euid: str
+    external_system: str
+    external_object_type: str
+    external_object_id: str
+    relation_type: str
+    metadata: dict[str, Any]
+    created_at: str
+    updated_at: str
+    state: str
 
 
 @dataclass(frozen=True)
@@ -500,6 +515,37 @@ class ResourceStore:
             created_at=str(payload.get("created_at") or utc_now_iso()),
             updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
         )
+
+    @staticmethod
+    def _external_object_from_instance(instance, *, parent_euid: str) -> ExternalObjectRecord:
+        payload = from_json_addl(instance)
+        return ExternalObjectRecord(
+            external_object_euid=str(payload.get("external_object_euid") or instance.euid),
+            parent_euid=parent_euid,
+            external_system=str(payload.get("external_system") or ""),
+            external_object_type=str(payload.get("external_object_type") or ""),
+            external_object_id=str(payload.get("external_object_id") or ""),
+            relation_type=str(payload.get("relation_type") or "external_object"),
+            metadata=dict(payload.get("metadata") or {}),
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
+            state=str(payload.get("state") or instance.bstatus),
+        )
+
+    @staticmethod
+    def external_object_payload(record: ExternalObjectRecord) -> dict[str, Any]:
+        return {
+            "external_object_euid": record.external_object_euid,
+            "parent_euid": record.parent_euid,
+            "external_system": record.external_system,
+            "external_object_type": record.external_object_type,
+            "external_object_id": record.external_object_id,
+            "relation_type": record.relation_type,
+            "metadata": dict(record.metadata or {}),
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "state": record.state,
+        }
 
     def list_worksets(self, *, tenant_id: uuid.UUID, limit: int = 100) -> list[WorksetRecord]:
         with self.backend.session_scope(commit=False) as session:
@@ -1769,6 +1815,78 @@ class ResourceStore:
                 bstatus=status,
             )
             return self._dewey_run_trigger_from_instance(record)
+
+    def create_external_object_child(
+        self,
+        *,
+        parent_template_code: str,
+        parent_euid: str,
+        external_system: str,
+        external_object_type: str,
+        external_object_id: str,
+        relation_type: str = "external_object",
+        metadata: dict[str, Any] | None = None,
+    ) -> ExternalObjectRecord:
+        now = utc_now_iso()
+        clean_external_system = str(external_system or "").strip()
+        clean_external_type = str(external_object_type or "").strip()
+        clean_external_id = str(external_object_id or "").strip()
+        clean_relation_type = str(relation_type or "").strip() or "external_object"
+        if not clean_external_system:
+            raise ValueError("external_system is required")
+        if not clean_external_type:
+            raise ValueError("external_object_type is required")
+        if not clean_external_id:
+            raise ValueError("external_object_id is required")
+        with self.backend.session_scope(commit=True) as session:
+            parent = self.backend.find_instance_by_euid(
+                session,
+                parent_template_code,
+                str(parent_euid),
+                for_update=True,
+            )
+            if parent is None:
+                raise KeyError(f"Parent instance not found: {parent_euid}")
+            for child in self.backend.list_children(
+                session,
+                parent=parent,
+                relationship_type=clean_relation_type,
+            ):
+                payload = from_json_addl(child)
+                if (
+                    str(payload.get("external_system") or "") == clean_external_system
+                    and str(payload.get("external_object_type") or "") == clean_external_type
+                    and str(payload.get("external_object_id") or "") == clean_external_id
+                ):
+                    return self._external_object_from_instance(child, parent_euid=str(parent.euid))
+
+            external_object_euid = f"URXO-{uuid.uuid5(uuid.NAMESPACE_URL, f'{parent.euid}:{clean_external_system}:{clean_external_type}:{clean_external_id}').hex[:16].upper()}"
+            payload = {
+                "external_object_euid": external_object_euid,
+                "parent_euid": str(parent.euid),
+                "external_system": clean_external_system,
+                "external_object_type": clean_external_type,
+                "external_object_id": clean_external_id,
+                "relation_type": clean_relation_type,
+                "metadata": dict(metadata or {}),
+                "created_at": now,
+                "updated_at": now,
+                "state": "ACTIVE",
+            }
+            child = self.backend.create_instance(
+                session,
+                EXTERNAL_OBJECT_TEMPLATE,
+                external_object_euid,
+                json_addl=payload,
+                bstatus="ACTIVE",
+            )
+            self.backend.create_lineage(
+                session,
+                parent=parent,
+                child=child,
+                relationship_type=clean_relation_type,
+            )
+            return self._external_object_from_instance(child, parent_euid=str(parent.euid))
 
     def update_dewey_run_trigger(
         self,

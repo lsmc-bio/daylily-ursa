@@ -88,7 +88,7 @@ from daylib_ursa.domain_access import (
 from daylib_ursa.integrations.dewey_client import DeweyClient, DeweyClientError
 from daylib_ursa.ephemeral_cluster.runner import (
     DAYEC_CLUSTER_CONFIG_FIELDS,
-    REQUIRED_DAYLILY_EC_VERSION,
+    DAYLILY_EC_VERSION_REQUIREMENT,
     _summarize_process_output,
     require_daylily_ec_version,
     run_aws_validate_all_sync,
@@ -127,6 +127,7 @@ from daylib_ursa.resource_store import (
     AnalysisJobRecord,
     ClusterJobEventRecord,
     ClusterJobRecord,
+    DEWEY_RUN_TRIGGER_TEMPLATE,
     DeweyImportRecord,
     LinkedBucketRecord,
     ManifestEditorOptionRecord,
@@ -467,6 +468,7 @@ class DeweyRunDirectoryAnalysisTriggerRequest(BaseModel):
     run_folder_name: str
     platform: Literal["ILMN", "ONT", "ULTIMA"]
     command_ids: list[str]
+    bloom_run_euid: str | None = None
     producer_system: str = "offwithyou"
     producer_object_euid: str
     owy_execution_id: str
@@ -491,6 +493,8 @@ class DeweyRunDirectoryAnalysisTriggerRequest(BaseModel):
         if len(set(normalized_commands)) != len(normalized_commands):
             raise ValueError("command_ids must not contain duplicates")
         self.command_ids = normalized_commands
+        bloom_run_euid = str(self.bloom_run_euid or "").strip()
+        self.bloom_run_euid = bloom_run_euid or None
         return self
 
 
@@ -503,11 +507,12 @@ class DeweyRunDirectoryAnalysisTriggerResponse(BaseModel):
     run_folder_name: str
     platform: str
     command_ids: list[str]
-    bloom_run_euid: str
+    bloom_run_euid: str | None = None
     workset_euid: str
     manifest_euid: str
     analysis_job_euids: list[str]
     analysis_jobs: list[dict[str, Any]]
+    ursa_external_objects: list[dict[str, Any]] = Field(default_factory=list)
     dewey_external_relations: list[dict[str, Any]]
     request: dict[str, Any]
     created_at: str
@@ -1950,7 +1955,7 @@ def _load_daylily_ec_pricing_helpers() -> tuple[Any, Any, Any]:
         )
     except Exception as exc:  # pragma: no cover - exercised via integration
         raise RuntimeError(
-            f"Failed to import daylily-ec {REQUIRED_DAYLILY_EC_VERSION} pricing helpers: {exc}"
+            f"Failed to import daylily-ec {DAYLILY_EC_VERSION_REQUIREMENT} pricing helpers: {exc}"
         ) from exc
     return collect_pricing_snapshot, load_partition_instance_types, resolve_cluster_config_path
 
@@ -4394,24 +4399,7 @@ def create_app(
 
         now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         trigger_euid = f"URDT-{fingerprint[:16].upper()}"
-        try:
-            bloom_run = app.state.bloom_client.create_or_reuse_run_directory_run(
-                run_folder_name=request.run_folder_name,
-                platform=request.platform,
-                storage_uri=request_payload["run_storage_uri"],
-                dewey_artifact_euid=request.dewey_run_artifact_euid,
-                metadata={
-                    "source": "ursa_run_directory_analysis_trigger",
-                    "trigger_euid": trigger_euid,
-                    "producer_system": request.producer_system,
-                    "producer_object_euid": request.producer_object_euid,
-                    "owy_execution_id": request.owy_execution_id,
-                },
-                idempotency_key=f"{idempotency_lookup}:bloom-run",
-            )
-        except BloomResolverError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        bloom_run_euid = str(bloom_run["run_euid"])
+        bloom_run_euid = request.bloom_run_euid
         run_context = _run_context_tsv(
             run_folder_name=request.run_folder_name,
             platform=request.platform,
@@ -4451,7 +4439,7 @@ def create_app(
             metadata={
                 "run_context_manifest": run_context,
                 "dewey_run_artifact": resolved_artifact,
-                "bloom_run": bloom_run,
+                "bloom_run_euid": bloom_run_euid,
                 "trigger_euid": trigger_euid,
                 "command_ids": list(request.command_ids),
             },
@@ -4525,20 +4513,21 @@ def create_app(
 
         relation_records: list[dict[str, Any]] = []
         try:
-            relation_records.append(
-                _attach_dewey_external_relation(
-                    dewey_client=dewey_client,
-                    dewey_artifact_euid=request.dewey_run_artifact_euid,
-                    external_system="bloom",
-                    external_object_type="sequencing_run",
-                    external_object_id=bloom_run_euid,
-                    relation_type="bloom_run",
-                    metadata={
-                        "trigger_euid": trigger_euid,
-                        "run_folder_name": request.run_folder_name,
-                    },
+            if bloom_run_euid is not None:
+                relation_records.append(
+                    _attach_dewey_external_relation(
+                        dewey_client=dewey_client,
+                        dewey_artifact_euid=request.dewey_run_artifact_euid,
+                        external_system="bloom",
+                        external_object_type="sequencing_run",
+                        external_object_id=bloom_run_euid,
+                        relation_type="bloom_run",
+                        metadata={
+                            "trigger_euid": trigger_euid,
+                            "run_folder_name": request.run_folder_name,
+                        },
+                    )
                 )
-            )
             relation_records.append(
                 _attach_dewey_external_relation(
                     dewey_client=dewey_client,
@@ -4598,12 +4587,13 @@ def create_app(
             "manifest_euid": manifest.manifest_euid,
             "analysis_job_euids": [job.job_euid for job in created_jobs],
             "analysis_jobs": analysis_jobs,
+            "ursa_external_objects": [],
             "dewey_external_relations": relation_records,
             "request": request_payload,
             "created_at": now_iso,
             "updated_at": now_iso,
         }
-        resources.create_dewey_run_trigger(
+        trigger_record = resources.create_dewey_run_trigger(
             trigger_euid=trigger_euid,
             idempotency_key=idempotency_lookup,
             fingerprint=fingerprint,
@@ -4615,6 +4605,31 @@ def create_app(
             staging_job_euid=None,
             error=created_jobs[0].error if created_jobs else None,
         )
+        if bloom_run_euid is not None:
+            external_record = resources.create_external_object_child(
+                parent_template_code=DEWEY_RUN_TRIGGER_TEMPLATE,
+                parent_euid=trigger_record.trigger_euid,
+                external_system="bloom",
+                external_object_type="sequencing_run",
+                external_object_id=bloom_run_euid,
+                relation_type="bloom_run",
+                metadata={
+                    "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
+                    "run_folder_name": request.run_folder_name,
+                    "trigger_euid": trigger_euid,
+                },
+            )
+            response["ursa_external_objects"] = [
+                resources.external_object_payload(external_record)
+            ]
+            resources.update_dewey_run_trigger(
+                trigger_euid=trigger_euid,
+                status=response_status,
+                response=response,
+                analysis_job_euid=created_jobs[0].job_euid if created_jobs else None,
+                staging_job_euid=None,
+                error=created_jobs[0].error if created_jobs else None,
+            )
         return DeweyRunDirectoryAnalysisTriggerResponse(**response)
 
     @app.post(

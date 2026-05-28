@@ -53,6 +53,7 @@ class _MemoryResourceStore:
         self.analysis_events: dict[str, list[AnalysisJobEventRecord]] = {}
         self.triggers_by_euid: dict[str, DeweyRunTriggerRecord] = {}
         self.triggers_by_idempotency: dict[str, DeweyRunTriggerRecord] = {}
+        self.external_objects: list[dict] = []
         self._workset_seq = 0
         self._manifest_seq = 0
         self._analysis_job_seq = 0
@@ -256,6 +257,60 @@ class _MemoryResourceStore:
         self.triggers_by_idempotency[idempotency_key] = record
         return record
 
+    def update_dewey_run_trigger(
+        self,
+        *,
+        trigger_euid: str,
+        status: str,
+        response: dict,
+        analysis_job_euid: str | None = None,
+        staging_job_euid: str | None = None,
+        error: str | None = None,
+    ):
+        record = self.triggers_by_euid[trigger_euid]
+        updated = replace(
+            record,
+            status=status,
+            response=dict(response or {}),
+            analysis_job_euid=analysis_job_euid,
+            staging_job_euid=staging_job_euid,
+            error=error,
+            updated_at="2026-05-27T00:05:00Z",
+        )
+        self.triggers_by_euid[trigger_euid] = updated
+        self.triggers_by_idempotency[updated.idempotency_key] = updated
+        return updated
+
+    def create_external_object_child(
+        self,
+        *,
+        parent_template_code: str,
+        parent_euid: str,
+        external_system: str,
+        external_object_type: str,
+        external_object_id: str,
+        relation_type: str = "external_object",
+        metadata=None,
+    ):
+        _ = parent_template_code
+        row = {
+            "external_object_euid": f"URXO-{len(self.external_objects) + 1}",
+            "parent_euid": parent_euid,
+            "external_system": external_system,
+            "external_object_type": external_object_type,
+            "external_object_id": external_object_id,
+            "relation_type": relation_type,
+            "metadata": dict(metadata or {}),
+            "created_at": "2026-05-27T00:05:00Z",
+            "updated_at": "2026-05-27T00:05:00Z",
+            "state": "ACTIVE",
+        }
+        self.external_objects.append(row)
+        return row
+
+    def external_object_payload(self, record):
+        return dict(record)
+
     def get_dewey_run_trigger(self, trigger_euid: str):
         return self.triggers_by_euid.get(trigger_euid)
 
@@ -383,19 +438,22 @@ def _app(
 
     def fake_analysis_command_payload(command_id: str, optional_features=None):
         _ = optional_features
-        if command_id not in {
-            "illumina_snv_alignstats_relatedness_vep_multiqc",
+        run_analysis_commands = {
             "illumina_run_qc",
             "illumina_bclconvert",
+            "illumina_run_qc_bclconvert",
             "ont_run_qc",
+            "ultima_run_qc",
+        }
+        if command_id not in {
+            "illumina_snv_alignstats_relatedness_vep_multiqc",
+            *run_analysis_commands,
         }:
             raise ValueError(f"Unknown analysis command: {command_id}")
         return {
             "command_id": command_id,
             "workflow": "daylily-omics-analysis",
-            "command_class": "run_analysis"
-            if command_id in {"illumina_run_qc", "illumina_bclconvert", "ont_run_qc"}
-            else "sample_analysis",
+            "command_class": "run_analysis" if command_id in run_analysis_commands else "sample_analysis",
             "input_contract": "run_context",
         }
 
@@ -634,7 +692,7 @@ def test_dewey_trigger_terminal_launch_registers_results(monkeypatch) -> None:
     ]
 
 
-def test_run_directory_trigger_creates_bloom_run_manifest_jobs_and_relations(monkeypatch) -> None:
+def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relations(monkeypatch) -> None:
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()
     bloom = _DummyBloomClient()
@@ -648,6 +706,7 @@ def test_run_directory_trigger_creates_bloom_run_manifest_jobs_and_relations(mon
         "producer_system": "offwithyou",
         "producer_object_euid": "exec-1:run-a",
         "owy_execution_id": "exec-1",
+        "bloom_run_euid": "BLOOM-RUN-1",
         "run_metadata": {"instrument_id": "LH01106"},
     }
 
@@ -664,6 +723,8 @@ def test_run_directory_trigger_creates_bloom_run_manifest_jobs_and_relations(mon
         assert payload["analysis_job_euids"] == ["AJ-1"]
         assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc"
         assert payload["command_ids"] == ["illumina_run_qc"]
+        assert payload["ursa_external_objects"][0]["external_system"] == "bloom"
+        assert payload["ursa_external_objects"][0]["external_object_id"] == "BLOOM-RUN-1"
         assert len(payload["dewey_external_relations"]) == 3
 
         replay = client.post(
@@ -673,8 +734,9 @@ def test_run_directory_trigger_creates_bloom_run_manifest_jobs_and_relations(mon
         )
         assert replay.status_code == 202, replay.text
         assert replay.json()["trigger_euid"] == payload["trigger_euid"]
+        assert replay.json()["ursa_external_objects"][0]["external_object_id"] == "BLOOM-RUN-1"
 
-    assert len(bloom.run_directory_calls) == 1
+    assert bloom.run_directory_calls == []
     assert len(resources.worksets) == 1
     manifest = next(iter(resources.manifests.values()))
     run_context = manifest.metadata["run_context_manifest"]
@@ -687,8 +749,44 @@ def test_run_directory_trigger_creates_bloom_run_manifest_jobs_and_relations(mon
     assert resources.analysis_jobs["AJ-1"].request["run_directory_trigger"]["bloom_run_euid"] == (
         "BLOOM-RUN-1"
     )
+    assert len(resources.external_objects) == 1
     assert len(dewey.external_objects) == 3
     assert len(dewey.external_relations) == 3
+
+
+def test_run_directory_trigger_accepts_null_bloom_run(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient()
+    bloom = _DummyBloomClient()
+    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey, bloom_client=bloom)
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "bloom_run_euid": None,
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-run-dir-null-bloom"},
+            json=body,
+        )
+
+    assert created.status_code == 202, created.text
+    payload = created.json()
+    assert payload["bloom_run_euid"] is None
+    assert payload["ursa_external_objects"] == []
+    assert len(payload["dewey_external_relations"]) == 2
+    assert bloom.run_directory_calls == []
+    assert resources.external_objects == []
+    assert len(dewey.external_objects) == 2
+    assert len(dewey.external_relations) == 2
 
 
 def test_run_directory_trigger_rejects_non_run_analysis_command(monkeypatch) -> None:

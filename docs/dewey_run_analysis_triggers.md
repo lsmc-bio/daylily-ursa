@@ -70,11 +70,48 @@ Ursa's Dewey client exposes `register_analysis_results(...)`, which posts termin
 
 Terminal result registration happens when a launched or refreshed analysis job reaches `COMPLETED` or `FAILED` and the job request carries a Dewey result registration context. Result payloads should contain Dewey artifact refs and opaque EUID/XID identifiers, not PHI or patient-facing identifiers.
 
+## Run-Directory Trigger
+
+OWY uses the run-directory-specific trigger:
+
+- `POST /api/v1/dewey/run-directory-analysis-triggers`
+
+This route requires the scoped Ursa write service token in `X-API-Key` and
+`Idempotency-Key`.
+
+Request fields:
+
+- `dewey_run_artifact_euid`
+- `run_storage_uri`
+- `run_folder_name`
+- `platform`: `ILMN`, `ONT`, or `ULTIMA`
+- `command_ids`: ordered DayEC `command_class=run_analysis` IDs
+- `bloom_run_euid`: optional string or `null`
+- `producer_system`, `producer_object_euid`, `owy_execution_id`
+- `run_metadata`
+- `dry_run`
+
+Ursa resolves the Dewey artifact and requires
+`artifact_type=sequencing_run_dir` plus an exact normalized S3 URI match before
+creating work. Ursa validates each command ID against the DayEC catalog and
+rejects non-`run_analysis` commands.
+
+When `bloom_run_euid` is supplied, Ursa creates an Ursa-local external-object
+child under the run-directory trigger and creates a Dewey external-object
+relation from the Dewey run-dir artifact to the Bloom sequencing run. When
+`bloom_run_euid` is `null`, Ursa skips those Bloom links and still creates the
+trigger, workset, manifest, and analysis jobs.
+
+The response includes `trigger_euid`, `workset_euid`, `manifest_euid`,
+`analysis_job_euids`, `analysis_jobs`, `ursa_external_objects`,
+`dewey_external_relations`, and the optional `bloom_run_euid`.
+
 ## Persistence
 
 Ursa stores trigger/idempotency records in the ResourceStore/TapDB template:
 
 - `RGX/dewey/run-analysis-trigger/1.0/`
+- `RGX/external/object/1.0/` for local external-object children
 
 The stored record includes the idempotency key, canonical request fingerprint, status, original request, response, analysis job EUID, staging job EUID, and error field. This is append-style trigger evidence; replay is handled from the persisted fingerprint and response.
 
