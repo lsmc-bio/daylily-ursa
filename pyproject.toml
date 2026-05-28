@@ -23,7 +23,7 @@ dependencies = [
     # Cognito auth library
     "daylily-auth-cognito==2.1.5",
     # TapDB graph persistence
-    "daylily-tapdb>=7.0.7,<8.0.0",
+    "daylily-tapdb==7.0.9",
     # Ephemeral cluster API/CLI contract
     "daylily-ephemeral-cluster @ git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@5.0.14",
     "fastapi>=0.104.0",
