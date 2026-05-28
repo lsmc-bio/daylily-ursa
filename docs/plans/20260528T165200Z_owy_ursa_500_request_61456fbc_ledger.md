@@ -116,6 +116,43 @@ Recorded: 2026-05-28
 - The implementation must not silently reinterpret `DYEC 5.0.22` as a lower version or a loose minimum.
 - The implementation must not add fallback config behavior or compatibility shims.
 
+## Post-Approval 4.0.16 Amendment
+
+Recorded: 2026-05-28
+
+- User approved production deployment with the exact phrase
+  `APPROVE URSA PROD OWY FIX DEPLOY us-west-2 ursa.day.lsmc.bio`.
+- Ursa `4.0.15` was deployed to production and verified live:
+  - `https://ursa.day.lsmc.bio/healthz` -> HTTP 200, build `4.0.15`.
+  - `https://ursa.day.lsmc.bio/readyz` -> HTTP 200, DB ready.
+  - `https://ursa.day.lsmc.bio/openapi.json` -> version `4.0.15`, run-directory trigger route present.
+  - Production package proof on the EC2 host showed `daylily-ursa=4.0.15` and
+    `daylily-ephemeral-cluster=5.0.22`.
+- The first approved OWY retry no longer hit the original Ursa HTTP 500. It
+  reached Ursa and failed closed with HTTP 409:
+  `Idempotency-Key reuse with different request payload`.
+- Root cause: OWY uses a stable idempotency key for the run/artifact/command
+  trigger, but each retry carries a new OWY attempt identity in
+  `producer_object_euid`, `owy_execution_id`, and `run_metadata.execution_id`.
+  Ursa `4.0.15` compared those attempt fields as part of the run-directory
+  trigger fingerprint, causing replay to reject the already-created trigger.
+- Ursa `4.0.16` fix:
+  - `daylib_ursa/workset_api.py` now computes the run-directory trigger
+    idempotency fingerprint from stable trigger inputs only, excluding the OWY
+    attempt fields above.
+  - Existing stored trigger requests are canonicalized the same way during
+    comparison, so the live trigger record created before this fix can be
+    replayed without data deletion or manual DB edits.
+  - Real payload changes such as different `command_ids` still return HTTP 409.
+- Local validation after merging current `origin/main`:
+  - `python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py`
+    -> `32 passed`.
+  - `ruff check daylib_ursa tests/test_dewey_run_analysis_triggers.py` -> passed.
+  - `git diff --check` -> passed.
+- Release hygiene amendment: because `4.0.15` was tagged on the release branch
+  before `origin/main` was merged, `4.0.16` is the corrected main-line release
+  candidate for the idempotent OWY retry unblock.
+
 ## Terminal Report
 
 Recorded: 2026-05-28
