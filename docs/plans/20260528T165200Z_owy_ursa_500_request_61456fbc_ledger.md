@@ -62,6 +62,10 @@ Recorded: 2026-05-28
 - SSM note:
   - Local `aws ssm start-session` failed because `SessionManagerPlugin is not found`.
   - Agent 1 used read-only SSM Run Command as a fallback inspection path and reported no file edits, no deploy, no restart, no cron unpause, and no destructive AWS action.
+- Release-line note:
+  - Pre-commit tag audit found `4.0.14` on disjoint branch `codex/inf6-deploy-formalization-20260528`.
+  - `git grep` on `4.0.14` showed `pyproject.toml` still using `daylily-ephemeral-cluster @ git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@4.0.9` and no OWY run-directory route evidence.
+  - Merging `4.0.14` into this OWY line would regress the requested route/DYEC work, so this ledger amends the release target to `4.0.15` without merging that disjoint tag.
 
 ## Gates
 
