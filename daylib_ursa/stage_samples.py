@@ -639,7 +639,9 @@ def normalise_units_paths(rows: Sequence[Dict[str, str]]) -> None:
             if value == "/data" or value.startswith("/data/"):
                 raise CommandError("The /data staging namespace is not supported; use /staging.")
             if value == "/fsx/data" or value.startswith("/fsx/data/"):
-                raise CommandError("The /fsx/data staging namespace is not supported; use /fsx/staging.")
+                raise CommandError(
+                    "The /fsx/data staging namespace is not supported; use /fsx/staging."
+                )
             if value.startswith("/staging/"):
                 row[field] = f"/fsx{value}"
             elif value == "/staging":

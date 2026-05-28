@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "5.0.0"
+REQUIRED_DAYLILY_EC_VERSION = "5.0.14"
 DAYLILY_EC_INSTALL_SPEC = (
     f"{DAYLILY_EC_DISTRIBUTION} @ "
     f"git+https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git@{REQUIRED_DAYLILY_EC_VERSION}"
@@ -47,6 +47,7 @@ DAYEC_CLUSTER_CONFIG_FIELDS = (
     "reference_s3_uri",
     "control_data_s3_uri",
     "stage_s3_uri",
+    "export_destination_s3_uri",
     "public_subnet_id",
     "private_subnet_id",
     "iam_policy_arn",
@@ -162,7 +163,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster 5.0.0 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster 5.0.14 contract."""
 
     def __init__(
         self,
@@ -398,6 +399,7 @@ def write_dayec_cluster_config(
     reference_s3_uri: str,
     control_data_s3_uri: str,
     stage_s3_uri: str,
+    export_destination_s3_uri: str,
     contact_email: Optional[str],
     config_values: Mapping[str, Any] | None = None,
 ) -> Path:
@@ -417,6 +419,7 @@ def write_dayec_cluster_config(
         reference_s3_uri=reference_s3_uri,
         control_data_s3_uri=control_data_s3_uri,
         stage_s3_uri=stage_s3_uri,
+        export_destination_s3_uri=export_destination_s3_uri,
         contact_email=contact_email,
     )
     for key, raw_value in dict(config_values or {}).items():

@@ -18,7 +18,10 @@ def test_profile_s3_and_stage_target_validation():
     with pytest.raises(ss.CommandError, match="Expected an s3:// URI"):
         ss.parse_s3_uri("https://bucket/path")
 
-    assert ss.normalise_stage_target("/staging/staged_external_sequencing_data/") == "/staging/staged_external_sequencing_data"
+    assert (
+        ss.normalise_stage_target("/staging/staged_external_sequencing_data/")
+        == "/staging/staged_external_sequencing_data"
+    )
     with pytest.raises(ss.CommandError, match="expected to start with /staging"):
         ss.normalise_stage_target("/tmp/not-fsx")
     with pytest.raises(ss.CommandError, match="/data is not supported"):
@@ -36,9 +39,14 @@ def test_build_stage_paths_and_env_helpers(monkeypatch):
             return _Stamp()
 
     monkeypatch.setattr(ss.dt, "datetime", _FakeDatetime)
-    stage = ss.build_stage_paths("/staging/staged_external_sequencing_data", "s3://ref-bucket/prefix")
+    stage = ss.build_stage_paths(
+        "/staging/staged_external_sequencing_data", "s3://ref-bucket/prefix"
+    )
     assert stage.remote_stage_name == "remote_stage_20260309T010203Z"
-    assert stage.remote_fsx_stage == "/staging/staged_external_sequencing_data/remote_stage_20260309T010203Z"
+    assert (
+        stage.remote_fsx_stage
+        == "/staging/staged_external_sequencing_data/remote_stage_20260309T010203Z"
+    )
     assert (
         stage.remote_s3_stage
         == "s3://ref-bucket/prefix/staging/staged_external_sequencing_data/remote_stage_20260309T010203Z"
@@ -228,7 +236,10 @@ def test_process_samples_single_lane_builds_units_and_samples(monkeypatch, tmp_p
     monkeypatch.setattr(
         ss,
         "stage_single_lane",
-        lambda *_args, **_kwargs: ("/fsx/staging/stage/r1.fastq.gz", "/fsx/staging/stage/r2.fastq.gz"),
+        lambda *_args, **_kwargs: (
+            "/fsx/staging/stage/r1.fastq.gz",
+            "/fsx/staging/stage/r2.fastq.gz",
+        ),
     )
     monkeypatch.setattr(
         ss,

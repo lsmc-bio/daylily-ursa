@@ -50,7 +50,7 @@ def _snakemake_log_reports_success(text: str) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec 5.0.0."""
+    """Launch manager for Ursa analysis jobs through daylily-ec 5.0.14."""
 
     def __init__(
         self,
@@ -135,7 +135,7 @@ class AnalysisJobManager:
         *,
         job: AnalysisJobRecord,
         request: dict[str, Any],
-        stage_dir: str,
+        stage_dir: str | None,
         aws_profile: str | None,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
         command_id = str(
@@ -147,17 +147,35 @@ class AnalysisJobManager:
             if str(item or "").strip()
         ]
         command = get_analysis_command(command_id, optional_features=optional_features)
+        command_class = str(getattr(command, "command_class", "") or "").strip()
+        input_contract = str(getattr(command, "input_contract", "") or "").strip()
+        if command_class == "run_analysis" and input_contract != "run_context":
+            raise ValueError(f"{command_id} is run_analysis but does not use run_context input")
+        if command_class != "run_analysis" and not stage_dir:
+            raise ValueError(f"stage_dir is required for {command_id}")
         session_name = str(request.get("session_name") or "").strip() or _safe_session_name(
             job.job_euid
         )
+        run_context_file = str(request.get("run_context_file") or "").strip() or None
+        if command_class == "run_analysis":
+            if not run_context_file:
+                raise ValueError("run_context_file is required for run_analysis launch")
+            stage_dir = None
+        elif run_context_file:
+            raise ValueError("run_context_file is only valid for run_analysis launch")
+        destination = str(request.get("destination") or "").strip() or None
         argv = command.launch_argv(
-            destination=str(request.get("destination") or "").strip() or None,
+            analysis_id=str(request.get("analysis_id") or job.job_euid),
+            executing_entity=str(request.get("executing_entity") or job.owner_user_id),
+            export_destination_s3_uri=destination,
+            export_trigger=str(request.get("export_trigger") or "none"),
             profile=aws_profile,
             region=job.region,
             cluster=job.cluster_name,
             stage_dir=stage_dir,
             session_name=session_name,
             project=str(request.get("project") or "").strip() or None,
+            run_context_file=run_context_file,
             dry_run=bool(request.get("dry_run")),
         )
         result = self.client.workflow_launch(argv, cwd=self.workspace_root)
@@ -169,11 +187,67 @@ class AnalysisJobManager:
             "optional_features": optional_features,
             "argv": list(argv),
             "stage_dir": stage_dir,
+            "run_context_file": run_context_file,
             "stdout": (result.stdout or "")[-8000:],
             "stderr": (result.stderr or "")[-8000:],
             **markers,
         }
         return result, launch
+
+    def _run_context_file_from_manifest(self, *, job: AnalysisJobRecord) -> Path:
+        manifest = self.resource_store.get_manifest(job.manifest_euid)
+        if manifest is None:
+            raise KeyError(f"manifest not found: {job.manifest_euid}")
+        run_context = dict((manifest.metadata or {}).get("run_context_manifest") or {})
+        content = str(run_context.get("content") or "").strip()
+        if not content:
+            raise ValueError("manifest.metadata.run_context_manifest.content is required")
+        filename = str(run_context.get("filename") or "config/runs.tsv").strip()
+        if not filename or filename.startswith("/"):
+            raise ValueError("run_context_manifest.filename must be a relative path")
+        if ".." in Path(filename).parts:
+            raise ValueError("run_context_manifest.filename must not contain '..'")
+        target = self.workspace_root / ".ursa-run-contexts" / job.job_euid / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content + "\n", encoding="utf-8")
+        return target
+
+    def _launch_run_directory_successors(
+        self,
+        *,
+        completed_job: AnalysisJobRecord,
+        actor_user_id: str,
+    ) -> None:
+        trigger = dict((completed_job.request or {}).get("run_directory_trigger") or {})
+        trigger_euid = str(trigger.get("trigger_euid") or "").strip()
+        if not trigger_euid:
+            return
+        for candidate in self.resource_store.list_analysis_jobs(
+            tenant_id=completed_job.tenant_id,
+            limit=500,
+        ):
+            candidate_trigger = dict((candidate.request or {}).get("run_directory_trigger") or {})
+            if str(candidate_trigger.get("trigger_euid") or "").strip() != trigger_euid:
+                continue
+            if (
+                str(candidate_trigger.get("predecessor_analysis_job_euid") or "").strip()
+                != completed_job.job_euid
+            ):
+                continue
+            if candidate.state != "DEFINED":
+                continue
+            self.resource_store.add_analysis_job_event(
+                job_euid=candidate.job_euid,
+                event_type="run-directory-predecessor",
+                status="COMPLETED",
+                summary=f"Predecessor {completed_job.job_euid} completed; launching next job",
+                details={
+                    "trigger_euid": trigger_euid,
+                    "predecessor_analysis_job_euid": completed_job.job_euid,
+                },
+                created_by=actor_user_id,
+            )
+            self.launch_job(candidate.job_euid, actor_user_id=actor_user_id)
 
     def launch_job(self, job_euid: str, *, actor_user_id: str) -> AnalysisJobRecord:
         job = self.resource_store.get_analysis_job(job_euid)
@@ -185,63 +259,90 @@ class AnalysisJobManager:
         )
         started_at = utc_now_iso()
         try:
-            self.resource_store.update_analysis_job_status(
-                job_euid=job_euid,
-                state="STAGING",
-                created_by=actor_user_id,
-                started_at=started_at,
-            )
-            self.resource_store.add_analysis_job_event(
-                job_euid=job_euid,
-                event_type="stage",
-                status="RUNNING",
-                summary="Preparing analysis staging",
-                details={"manifest_euid": job.manifest_euid},
-                created_by=actor_user_id,
-            )
-            requested_staging_job_euid = str(request.get("staging_job_euid") or "").strip()
-            if requested_staging_job_euid:
-                staging_job = self.resource_store.get_staging_job(requested_staging_job_euid)
-                if staging_job is None:
-                    raise KeyError(f"staging job not found: {requested_staging_job_euid}")
-                stage_dir = self._stage_dir_from_completed_staging_job(
-                    analysis_job=job,
-                    staging_job=staging_job,
+            if bool(request.get("run_directory_trigger")):
+                self.resource_store.update_analysis_job_status(
+                    job_euid=job_euid,
+                    state="PREPARING",
+                    created_by=actor_user_id,
+                    started_at=started_at,
                 )
-                staging_job_euid = staging_job.job_euid
+                run_context_path = self._run_context_file_from_manifest(job=job)
+                request["run_context_file"] = str(run_context_path)
+                stage_dir = None
+                staging_job_euid = None
                 self.resource_store.add_analysis_job_event(
                     job_euid=job_euid,
-                    event_type="stage",
+                    event_type="run_context",
                     status="COMPLETED",
-                    summary=f"Using staged samples from {stage_dir}",
+                    summary=f"Prepared run context from manifest {job.manifest_euid}",
                     details={
-                        "staging_job_euid": staging_job_euid,
-                        "stage_dir": stage_dir,
+                        "manifest_euid": job.manifest_euid,
+                        "run_context_file": str(run_context_path),
                     },
                     created_by=actor_user_id,
                 )
             else:
-                staging_job, stage_dir = self._run_staging_job_for_analysis(
-                    job=job,
-                    request=request,
-                    aws_profile=aws_profile,
-                    actor_user_id=actor_user_id,
+                self.resource_store.update_analysis_job_status(
+                    job_euid=job_euid,
+                    state="STAGING",
+                    created_by=actor_user_id,
+                    started_at=started_at,
                 )
-                staging_job_euid = staging_job.job_euid
                 self.resource_store.add_analysis_job_event(
                     job_euid=job_euid,
                     event_type="stage",
-                    status="COMPLETED",
-                    summary=f"Staged samples to {stage_dir}",
-                    details={"staging_job_euid": staging_job_euid, "stage_dir": stage_dir},
+                    status="RUNNING",
+                    summary="Preparing analysis staging",
+                    details={"manifest_euid": job.manifest_euid},
                     created_by=actor_user_id,
                 )
+                requested_staging_job_euid = str(request.get("staging_job_euid") or "").strip()
+                if requested_staging_job_euid:
+                    staging_job = self.resource_store.get_staging_job(requested_staging_job_euid)
+                    if staging_job is None:
+                        raise KeyError(f"staging job not found: {requested_staging_job_euid}")
+                    stage_dir = self._stage_dir_from_completed_staging_job(
+                        analysis_job=job,
+                        staging_job=staging_job,
+                    )
+                    staging_job_euid = staging_job.job_euid
+                    self.resource_store.add_analysis_job_event(
+                        job_euid=job_euid,
+                        event_type="stage",
+                        status="COMPLETED",
+                        summary=f"Using staged samples from {stage_dir}",
+                        details={
+                            "staging_job_euid": staging_job_euid,
+                            "stage_dir": stage_dir,
+                        },
+                        created_by=actor_user_id,
+                    )
+                else:
+                    staging_job, stage_dir = self._run_staging_job_for_analysis(
+                        job=job,
+                        request=request,
+                        aws_profile=aws_profile,
+                        actor_user_id=actor_user_id,
+                    )
+                    staging_job_euid = staging_job.job_euid
+                    self.resource_store.add_analysis_job_event(
+                        job_euid=job_euid,
+                        event_type="stage",
+                        status="COMPLETED",
+                        summary=f"Staged samples to {stage_dir}",
+                        details={"staging_job_euid": staging_job_euid, "stage_dir": stage_dir},
+                        created_by=actor_user_id,
+                    )
             self.resource_store.update_analysis_job_status(
                 job_euid=job_euid,
                 state="LAUNCHING",
                 created_by=actor_user_id,
                 started_at=started_at,
-                launch={"stage_dir": stage_dir, "staging_job_euid": staging_job_euid},
+                launch={
+                    "stage_dir": stage_dir,
+                    "staging_job_euid": staging_job_euid,
+                    "run_context_file": request.get("run_context_file"),
+                },
             )
             launch_result, launch = self._launch_workflow(
                 job=job,
@@ -355,6 +456,11 @@ class AnalysisJobManager:
             details={**status_payload, "completion_source": completion_source},
             created_by=actor_user_id,
         )
+        if state == "COMPLETED":
+            self._launch_run_directory_successors(
+                completed_job=record,
+                actor_user_id=actor_user_id,
+            )
         return record
 
     def logs(self, job_euid: str, *, lines: int = 200) -> dict[str, Any]:

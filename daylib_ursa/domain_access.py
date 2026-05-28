@@ -73,17 +73,21 @@ def build_trusted_hosts(*, allow_local: bool, configured_hosts: str) -> list[str
     explicit_hosts = [_normalize_host(item) for item in raw_hosts if item]
     explicit_hosts = [item for item in explicit_hosts if item]
     if not explicit_hosts:
-        raise RuntimeError("Ursa requires explicit allowed_hosts; wildcard host filtering is disabled")
+        raise RuntimeError(
+            "Ursa requires explicit allowed_hosts; wildcard host filtering is disabled"
+        )
 
     hosts = list(explicit_hosts)
     if allow_local:
-        hosts.extend([
-            "localhost",
-            "127.0.0.1",
-            "::1",
-            "[::1]",
-            "testserver",
-        ])
+        hosts.extend(
+            [
+                "localhost",
+                "127.0.0.1",
+                "::1",
+                "[::1]",
+                "testserver",
+            ]
+        )
     return _ordered_unique(hosts)
 
 

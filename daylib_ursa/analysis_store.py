@@ -359,9 +359,7 @@ class AnalysisStore:
                 if str(value or "").strip()
             },
             created_at=str(payload.get("created_at") or utc_now_iso()),
-            updated_at=str(
-                payload.get("updated_at") or payload.get("created_at") or utc_now_iso()
-            ),
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
         )
 
     def _context_payload(self, session, analysis: generic_instance) -> dict[str, Any]:

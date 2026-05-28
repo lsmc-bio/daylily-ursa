@@ -119,6 +119,7 @@ def test_write_dayec_cluster_config_delegates_to_dayec_library(tmp_path: Path, m
         reference_s3_uri="s3://refs",
         control_data_s3_uri="s3://control",
         stage_s3_uri="s3://stage",
+        export_destination_s3_uri="s3://export",
         contact_email="ops@example.com",
         config_values={"fsx_fs_size": "4800"},
     )
@@ -130,6 +131,7 @@ def test_write_dayec_cluster_config_delegates_to_dayec_library(tmp_path: Path, m
         "reference_s3_uri": "s3://refs",
         "control_data_s3_uri": "s3://control",
         "stage_s3_uri": "s3://stage",
+        "export_destination_s3_uri": "s3://export",
         "contact_email": "ops@example.com",
     }
     assert captured["dest"] == tmp_path / "cluster.yaml"

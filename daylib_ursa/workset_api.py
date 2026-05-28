@@ -459,6 +459,61 @@ class DeweyRunAnalysisTriggerResponse(BaseModel):
     dewey_result: dict[str, Any] | None = None
 
 
+class DeweyRunDirectoryAnalysisTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dewey_run_artifact_euid: str
+    run_storage_uri: str
+    run_folder_name: str
+    platform: Literal["ILMN", "ONT", "ULTIMA"]
+    command_ids: list[str]
+    producer_system: str = "offwithyou"
+    producer_object_euid: str
+    owy_execution_id: str
+    run_metadata: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+
+    @model_validator(mode="after")
+    def validate_trigger_request(self) -> "DeweyRunDirectoryAnalysisTriggerRequest":
+        for field_name in (
+            "dewey_run_artifact_euid",
+            "run_storage_uri",
+            "run_folder_name",
+            "producer_system",
+            "producer_object_euid",
+            "owy_execution_id",
+        ):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        normalized_commands = [str(item or "").strip() for item in self.command_ids]
+        if not normalized_commands or any(not item for item in normalized_commands):
+            raise ValueError("command_ids must be a non-empty list of command IDs")
+        if len(set(normalized_commands)) != len(normalized_commands):
+            raise ValueError("command_ids must not contain duplicates")
+        self.command_ids = normalized_commands
+        return self
+
+
+class DeweyRunDirectoryAnalysisTriggerResponse(BaseModel):
+    trigger_euid: str
+    status: str
+    idempotency_key: str
+    dewey_run_artifact_euid: str
+    run_storage_uri: str
+    run_folder_name: str
+    platform: str
+    command_ids: list[str]
+    bloom_run_euid: str
+    workset_euid: str
+    manifest_euid: str
+    analysis_job_euids: list[str]
+    analysis_jobs: list[dict[str, Any]]
+    dewey_external_relations: list[dict[str, Any]]
+    request: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
 class LinkedBucketCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -555,6 +610,7 @@ class ClusterCreateRequest(BaseModel):
     reference_s3_uri: str
     control_data_s3_uri: str
     stage_s3_uri: str
+    export_destination_s3_uri: str
     owner_user_id: str | None = None
     aws_profile: str | None = None
     config_path: str | None = None
@@ -590,6 +646,7 @@ class ClusterAwsCheckAllRequest(BaseModel):
     reference_s3_uri: str | None = None
     control_data_s3_uri: str | None = None
     stage_s3_uri: str | None = None
+    export_destination_s3_uri: str | None = None
     aws_profile: str | None = None
     config_path: str | None = None
     contact_email: str | None = None
@@ -3007,6 +3064,7 @@ def create_app(
         reference_s3_uri: str,
         control_data_s3_uri: str,
         stage_s3_uri: str,
+        export_destination_s3_uri: str,
         contact_email: str | None,
         config_path: str | None,
         cluster_config_values: dict[str, str],
@@ -3024,6 +3082,7 @@ def create_app(
             "reference_s3_uri": reference_s3_uri,
             "control_data_s3_uri": control_data_s3_uri,
             "stage_s3_uri": stage_s3_uri,
+            "export_destination_s3_uri": export_destination_s3_uri,
         }
         for key, expected in explicit_fields.items():
             candidate = str(values.pop(key, "") or "").strip()
@@ -3038,6 +3097,7 @@ def create_app(
             reference_s3_uri=reference_s3_uri,
             control_data_s3_uri=control_data_s3_uri,
             stage_s3_uri=stage_s3_uri,
+            export_destination_s3_uri=export_destination_s3_uri,
             contact_email=contact_email,
             config_values=values,
         )
@@ -3051,6 +3111,7 @@ def create_app(
         reference_s3_uri: str,
         control_data_s3_uri: str,
         stage_s3_uri: str,
+        export_destination_s3_uri: str,
         aws_profile: str | None,
         contact_email: str | None,
     ) -> dict[str, Any]:
@@ -3062,6 +3123,7 @@ def create_app(
                 reference_s3_uri=reference_s3_uri,
                 control_data_s3_uri=control_data_s3_uri,
                 stage_s3_uri=stage_s3_uri,
+                export_destination_s3_uri=export_destination_s3_uri,
                 contact_email=contact_email,
                 config_path=request.config_path,
                 cluster_config_values=request.cluster_config_values,
@@ -3099,24 +3161,32 @@ def create_app(
                 config_path = Path(explicit_config).expanduser()
                 if not config_path.is_absolute():
                     config_path = (cluster_create_workspace_root() / config_path).resolve()
-            elif (
-                request.cluster_name
-                and request.ssh_key_name
-                and request.reference_s3_uri
-                and request.control_data_s3_uri
-                and request.stage_s3_uri
-            ):
-                config_path = write_cluster_request_config(
-                    scratch_dir=scratch_dir,
-                    cluster_name=str(request.cluster_name).strip(),
-                    ssh_key_name=str(request.ssh_key_name).strip(),
-                    reference_s3_uri=str(request.reference_s3_uri).strip(),
-                    control_data_s3_uri=str(request.control_data_s3_uri).strip(),
-                    stage_s3_uri=str(request.stage_s3_uri).strip(),
-                    contact_email=str(request.contact_email or "").strip() or None,
-                    config_path=None,
-                    cluster_config_values=request.cluster_config_values,
-                )
+            else:
+                config_inputs = {
+                    "cluster_name": request.cluster_name,
+                    "ssh_key_name": request.ssh_key_name,
+                    "reference_s3_uri": request.reference_s3_uri,
+                    "control_data_s3_uri": request.control_data_s3_uri,
+                    "stage_s3_uri": request.stage_s3_uri,
+                    "export_destination_s3_uri": request.export_destination_s3_uri,
+                }
+                provided = {key: str(value or "").strip() for key, value in config_inputs.items()}
+                if any(provided.values()):
+                    missing = [key for key, value in provided.items() if not value]
+                    if missing:
+                        raise ValueError("cluster config rendering requires: " + ", ".join(missing))
+                    config_path = write_cluster_request_config(
+                        scratch_dir=scratch_dir,
+                        cluster_name=provided["cluster_name"],
+                        ssh_key_name=provided["ssh_key_name"],
+                        reference_s3_uri=provided["reference_s3_uri"],
+                        control_data_s3_uri=provided["control_data_s3_uri"],
+                        stage_s3_uri=provided["stage_s3_uri"],
+                        export_destination_s3_uri=provided["export_destination_s3_uri"],
+                        contact_email=str(request.contact_email or "").strip() or None,
+                        config_path=None,
+                        cluster_config_values=request.cluster_config_values,
+                    )
             result = run_aws_validate_all_sync(
                 region_az=region_az,
                 aws_profile=aws_profile,
@@ -3791,6 +3861,196 @@ def create_app(
             raise HTTPException(status_code=500, detail="Dewey trigger record is missing response")
         return DeweyRunAnalysisTriggerResponse(**response_payload)
 
+    def _dewey_run_directory_trigger_response_from_record(
+        record,
+    ) -> DeweyRunDirectoryAnalysisTriggerResponse:
+        response_payload = dict(record.response or {})
+        if not response_payload:
+            raise HTTPException(
+                status_code=500, detail="Dewey run-directory trigger record is missing response"
+            )
+        return DeweyRunDirectoryAnalysisTriggerResponse(**response_payload)
+
+    def _normalize_s3_prefix_uri(value: str) -> str:
+        raw = str(value or "").strip()
+        parsed = urlparse(raw)
+        if parsed.scheme != "s3" or not parsed.netloc:
+            raise ValueError("S3 URI must be an absolute s3:// URI")
+        if parsed.query or parsed.fragment:
+            raise ValueError("S3 URI must not include query strings or fragments")
+        prefix = parsed.path.strip("/")
+        return f"s3://{parsed.netloc}/{prefix}/" if prefix else f"s3://{parsed.netloc}/"
+
+    def _run_directory_analysis_policy() -> dict[str, Any]:
+        settings_obj = app.state.settings
+        required = {
+            "tenant_id": "ursa_run_directory_analysis_tenant_id",
+            "owner_user_id": "ursa_run_directory_analysis_owner_user_id",
+            "cluster_name": "ursa_run_directory_analysis_cluster_name",
+            "region": "ursa_run_directory_analysis_region",
+            "reference_s3_uri": "ursa_run_directory_analysis_reference_s3_uri",
+            "stage_target": "ursa_run_directory_analysis_stage_target",
+            "destination_s3_uri": "ursa_run_directory_analysis_destination_s3_uri",
+        }
+        values = {
+            key: str(getattr(settings_obj, setting_name, "") or "").strip()
+            for key, setting_name in required.items()
+        }
+        missing = [key for key, value in values.items() if not value]
+        if missing:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ursa run-directory analysis policy is incomplete: "
+                    + ", ".join(sorted(missing))
+                ),
+            )
+        try:
+            tenant_id = uuid.UUID(values["tenant_id"])
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Ursa run-directory analysis policy has invalid tenant_id",
+            ) from exc
+        try:
+            values["reference_s3_uri"] = _normalize_s3_prefix_uri(values["reference_s3_uri"])
+            values["destination_s3_uri"] = _normalize_s3_prefix_uri(values["destination_s3_uri"])
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        aws_profile = str(
+            getattr(settings_obj, "ursa_run_directory_analysis_aws_profile", "") or ""
+        ).strip()
+        if not aws_profile:
+            raise HTTPException(
+                status_code=503,
+                detail="Ursa run-directory analysis policy is incomplete: aws_profile",
+            )
+        values["tenant_id"] = tenant_id
+        values["aws_profile"] = aws_profile
+        values["project"] = (
+            str(getattr(settings_obj, "ursa_run_directory_analysis_project", "") or "").strip()
+            or None
+        )
+        return values
+
+    def _validate_run_directory_commands(
+        command_ids: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        commands: list[dict[str, Any]] = []
+        for command_id in command_ids:
+            try:
+                command = analysis_command_payload(command_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            if command.get("command_class") != "run_analysis":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{command_id} is not a run_analysis command",
+                )
+            if command.get("input_contract") != "run_context":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{command_id} does not use run_context input",
+                )
+            commands.append(command)
+        return commands
+
+    def _run_context_tsv(
+        *,
+        run_folder_name: str,
+        platform: str,
+        storage_uri: str,
+        region: str,
+        aws_profile: str,
+        destination_s3_uri: str,
+    ) -> dict[str, Any]:
+        columns = [
+            "RUNID",
+            "PLATFORM",
+            "RUN_DIR",
+            "SOURCE_S3_URI",
+            "MOUNT_ID",
+            "SAMPLE_SHEET",
+            "BASECALLING_STATE",
+            "RUN_STATUS",
+            "OUTPUT_ROOT",
+            "REGION",
+            "PROFILE",
+        ]
+        row = {
+            "RUNID": run_folder_name,
+            "PLATFORM": platform,
+            "RUN_DIR": storage_uri,
+            "SOURCE_S3_URI": storage_uri,
+            "MOUNT_ID": "",
+            "SAMPLE_SHEET": "",
+            "BASECALLING_STATE": "",
+            "RUN_STATUS": "completed",
+            "OUTPUT_ROOT": destination_s3_uri,
+            "REGION": region,
+            "PROFILE": aws_profile,
+        }
+        content = (
+            "\t".join(columns) + "\n" + "\t".join(str(row[column]) for column in columns) + "\n"
+        )
+        return {
+            "schema": "ursa.run_context_manifest/1.0",
+            "filename": "config/runs.tsv",
+            "columns": columns,
+            "row_count": 1,
+            "rows": [row],
+            "content": content,
+            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        }
+
+    def _relation_idempotency_key(*parts: str) -> str:
+        digest = hashlib.sha256(
+            json.dumps(list(parts), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return f"ursa-run-directory-relation-{digest[:32]}"
+
+    def _attach_dewey_external_relation(
+        *,
+        dewey_client: DeweyClient,
+        dewey_artifact_euid: str,
+        external_system: str,
+        external_object_type: str,
+        external_object_id: str,
+        relation_type: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        object_key = _relation_idempotency_key(
+            "external-object", external_system, external_object_type, external_object_id
+        )
+        external_object = dewey_client.create_external_object(
+            external_system=external_system,
+            external_object_type=external_object_type,
+            external_object_id=external_object_id,
+            metadata=metadata,
+            idempotency_key=object_key,
+        )
+        external_object_euid = str(external_object["external_object_euid"])
+        relation_key = _relation_idempotency_key(
+            "external-relation",
+            dewey_artifact_euid,
+            external_object_euid,
+            relation_type,
+        )
+        relation = dewey_client.attach_external_object_relation(
+            target_type="artifact",
+            target_euid=dewey_artifact_euid,
+            external_object_euid=external_object_euid,
+            relation_type=relation_type,
+            metadata=metadata,
+            idempotency_key=relation_key,
+        )
+        return {
+            "external_object": external_object,
+            "relation": relation,
+        }
+
     def _register_dewey_result_if_terminal(
         *,
         trigger_request: DeweyRunAnalysisTriggerRequest,
@@ -4038,6 +4298,7 @@ def create_app(
             "analysis_command_id": trigger_request.command_id,
             "optional_features": list(execution.optional_features),
             "destination": execution.destination,
+            "export_trigger": "on-success" if execution.destination else "none",
             "reference_s3_uri": execution.reference_s3_uri,
             "session_name": execution.session_name,
             "project": execution.project,
@@ -4082,6 +4343,279 @@ def create_app(
             created_by=execution.owner_user_id,
         )
         return resources.get_analysis_job(record.job_euid) or record, staging_job_euid
+
+    @app.post(
+        "/api/v1/dewey/run-directory-analysis-triggers",
+        response_model=DeweyRunDirectoryAnalysisTriggerResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_dewey_run_directory_analysis_trigger(
+        request: DeweyRunDirectoryAnalysisTriggerRequest,
+        _api_key: str = Depends(require_write_api_key),
+        idempotency_key: str = Depends(require_idempotency_key),
+        resources: ResourceStore = Depends(require_resource_store),
+        manager: AnalysisJobManager = Depends(require_analysis_job_manager),
+    ) -> DeweyRunDirectoryAnalysisTriggerResponse:
+        _ = _api_key
+        policy = _run_directory_analysis_policy()
+        request_payload = request.model_dump(mode="json", exclude_none=True)
+        request_payload["run_storage_uri"] = _normalize_s3_prefix_uri(request.run_storage_uri)
+        fingerprint = _canonical_trigger_fingerprint(request_payload)
+        idempotency_lookup = str(idempotency_key)
+        existing = resources.get_dewey_run_trigger_by_idempotency(idempotency_lookup)
+        if existing is not None:
+            if existing.fingerprint != fingerprint:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key reuse with different request payload",
+                )
+            return _dewey_run_directory_trigger_response_from_record(existing)
+
+        commands = _validate_run_directory_commands(request.command_ids)
+        dewey_client = require_dewey_client()
+        try:
+            resolved_artifact = dewey_client.resolve_artifact(request.dewey_run_artifact_euid)
+        except DeweyClientError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        artifact_type = str(resolved_artifact.get("artifact_type") or "").strip()
+        if artifact_type != "sequencing_run_dir":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dewey artifact must be sequencing_run_dir, got {artifact_type or 'missing'}",
+            )
+        resolved_storage_uri = _normalize_s3_prefix_uri(
+            str(resolved_artifact.get("storage_uri") or "")
+        )
+        if resolved_storage_uri != request_payload["run_storage_uri"]:
+            raise HTTPException(
+                status_code=409,
+                detail="Dewey artifact storage_uri does not match requested run_storage_uri",
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        trigger_euid = f"URDT-{fingerprint[:16].upper()}"
+        try:
+            bloom_run = app.state.bloom_client.create_or_reuse_run_directory_run(
+                run_folder_name=request.run_folder_name,
+                platform=request.platform,
+                storage_uri=request_payload["run_storage_uri"],
+                dewey_artifact_euid=request.dewey_run_artifact_euid,
+                metadata={
+                    "source": "ursa_run_directory_analysis_trigger",
+                    "trigger_euid": trigger_euid,
+                    "producer_system": request.producer_system,
+                    "producer_object_euid": request.producer_object_euid,
+                    "owy_execution_id": request.owy_execution_id,
+                },
+                idempotency_key=f"{idempotency_lookup}:bloom-run",
+            )
+        except BloomResolverError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        bloom_run_euid = str(bloom_run["run_euid"])
+        run_context = _run_context_tsv(
+            run_folder_name=request.run_folder_name,
+            platform=request.platform,
+            storage_uri=request_payload["run_storage_uri"],
+            region=str(policy["region"]),
+            aws_profile=str(policy["aws_profile"]),
+            destination_s3_uri=str(policy["destination_s3_uri"]),
+        )
+        workset = resources.create_workset(
+            name=f"Run directory {request.run_folder_name}",
+            tenant_id=policy["tenant_id"],
+            owner_user_id=str(policy["owner_user_id"]),
+            artifact_set_euids=[],
+            metadata={
+                "source": "dewey_run_directory_analysis_trigger",
+                "trigger_euid": trigger_euid,
+                "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
+                "run_storage_uri": request_payload["run_storage_uri"],
+                "bloom_run_euid": bloom_run_euid,
+                "producer_system": request.producer_system,
+                "producer_object_euid": request.producer_object_euid,
+                "owy_execution_id": request.owy_execution_id,
+            },
+        )
+        manifest = resources.create_manifest(
+            workset_euid=workset.workset_euid,
+            name=f"Run directory {request.run_folder_name} run context",
+            artifact_set_euid=None,
+            artifact_euids=[request.dewey_run_artifact_euid],
+            input_references=[
+                {
+                    "reference_type": "dewey_artifact_euid",
+                    "value": request.dewey_run_artifact_euid,
+                    "storage_uri": request_payload["run_storage_uri"],
+                }
+            ],
+            metadata={
+                "run_context_manifest": run_context,
+                "dewey_run_artifact": resolved_artifact,
+                "bloom_run": bloom_run,
+                "trigger_euid": trigger_euid,
+                "command_ids": list(request.command_ids),
+            },
+        )
+        analysis_jobs: list[dict[str, Any]] = []
+        created_jobs: list[AnalysisJobRecord] = []
+        previous_job_euid: str | None = None
+        for index, command in enumerate(commands):
+            command_id = str(command["command_id"])
+            destination = (
+                str(policy["destination_s3_uri"]).rstrip("/")
+                + f"/{request.run_folder_name}/{index + 1:02d}-{command_id}/"
+            )
+            job_request = {
+                "analysis_command_id": command_id,
+                "optional_features": [],
+                "destination": destination,
+                "export_trigger": "on-success",
+                "reference_s3_uri": policy["reference_s3_uri"],
+                "session_name": f"{request.run_folder_name}-{command_id}"[:64],
+                "project": policy["project"],
+                "aws_profile": policy["aws_profile"],
+                "dry_run": bool(request.dry_run),
+                "stage_target": policy["stage_target"],
+                "staging_job_euid": None,
+                "command": command,
+                "run_directory_trigger": {
+                    "trigger_euid": trigger_euid,
+                    "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
+                    "run_storage_uri": request_payload["run_storage_uri"],
+                    "bloom_run_euid": bloom_run_euid,
+                    "pipeline_order": index + 1,
+                    "predecessor_analysis_job_euid": previous_job_euid,
+                },
+            }
+            record = resources.create_analysis_job(
+                job_name=f"{request.run_folder_name}:{index + 1:02d}:{command_id}",
+                workset_euid=workset.workset_euid,
+                manifest_euid=manifest.manifest_euid,
+                cluster_name=str(policy["cluster_name"]),
+                region=str(policy["region"]),
+                tenant_id=workset.tenant_id,
+                owner_user_id=str(policy["owner_user_id"]),
+                request=job_request,
+            )
+            resources.add_analysis_job_event(
+                job_euid=record.job_euid,
+                event_type="dewey-run-directory-trigger-defined",
+                status="DEFINED",
+                summary=f"Defined run-directory analysis job for {command_id}",
+                details={
+                    "manifest_euid": manifest.manifest_euid,
+                    "trigger_euid": trigger_euid,
+                    "pipeline_order": index + 1,
+                    "predecessor_analysis_job_euid": previous_job_euid,
+                },
+                created_by=str(policy["owner_user_id"]),
+            )
+            if index == 0:
+                try:
+                    record = manager.launch_job(
+                        record.job_euid,
+                        actor_user_id=str(policy["owner_user_id"]),
+                    )
+                except (KeyError, ValueError) as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
+                except RuntimeError as exc:
+                    raise HTTPException(status_code=503, detail=str(exc)) from exc
+            created_jobs.append(resources.get_analysis_job(record.job_euid) or record)
+            previous_job_euid = record.job_euid
+
+        relation_records: list[dict[str, Any]] = []
+        try:
+            relation_records.append(
+                _attach_dewey_external_relation(
+                    dewey_client=dewey_client,
+                    dewey_artifact_euid=request.dewey_run_artifact_euid,
+                    external_system="bloom",
+                    external_object_type="sequencing_run",
+                    external_object_id=bloom_run_euid,
+                    relation_type="bloom_run",
+                    metadata={
+                        "trigger_euid": trigger_euid,
+                        "run_folder_name": request.run_folder_name,
+                    },
+                )
+            )
+            relation_records.append(
+                _attach_dewey_external_relation(
+                    dewey_client=dewey_client,
+                    dewey_artifact_euid=request.dewey_run_artifact_euid,
+                    external_system="ursa",
+                    external_object_type="run_directory_analysis_trigger",
+                    external_object_id=trigger_euid,
+                    relation_type="ursa_run_directory_analysis_trigger",
+                    metadata={
+                        "run_folder_name": request.run_folder_name,
+                        "command_ids": list(request.command_ids),
+                    },
+                )
+            )
+            for job in created_jobs:
+                relation_records.append(
+                    _attach_dewey_external_relation(
+                        dewey_client=dewey_client,
+                        dewey_artifact_euid=request.dewey_run_artifact_euid,
+                        external_system="ursa",
+                        external_object_type="analysis_job",
+                        external_object_id=job.job_euid,
+                        relation_type="ursa_analysis_job",
+                        metadata={
+                            "trigger_euid": trigger_euid,
+                            "run_folder_name": request.run_folder_name,
+                            "command_id": job.request.get("analysis_command_id"),
+                        },
+                    )
+                )
+        except DeweyClientError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        for job in created_jobs:
+            analysis_jobs.append(
+                {
+                    "analysis_job_euid": job.job_euid,
+                    "command_id": job.request.get("analysis_command_id"),
+                    "status": job.state,
+                    "pipeline_order": job.request.get("run_directory_trigger", {}).get(
+                        "pipeline_order"
+                    ),
+                }
+            )
+        response_status = created_jobs[0].state if created_jobs else "QUEUED"
+        response = {
+            "trigger_euid": trigger_euid,
+            "status": response_status,
+            "idempotency_key": idempotency_lookup,
+            "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
+            "run_storage_uri": request_payload["run_storage_uri"],
+            "run_folder_name": request.run_folder_name,
+            "platform": request.platform,
+            "command_ids": list(request.command_ids),
+            "bloom_run_euid": bloom_run_euid,
+            "workset_euid": workset.workset_euid,
+            "manifest_euid": manifest.manifest_euid,
+            "analysis_job_euids": [job.job_euid for job in created_jobs],
+            "analysis_jobs": analysis_jobs,
+            "dewey_external_relations": relation_records,
+            "request": request_payload,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        resources.create_dewey_run_trigger(
+            trigger_euid=trigger_euid,
+            idempotency_key=idempotency_lookup,
+            fingerprint=fingerprint,
+            status=response_status,
+            command_id=",".join(request.command_ids),
+            request=request_payload,
+            response=response,
+            analysis_job_euid=created_jobs[0].job_euid if created_jobs else None,
+            staging_job_euid=None,
+            error=created_jobs[0].error if created_jobs else None,
+        )
+        return DeweyRunDirectoryAnalysisTriggerResponse(**response)
 
     @app.post(
         "/api/v1/dewey/run-analysis-triggers",
@@ -5492,6 +6026,7 @@ def create_app(
         reference_s3_uri = str(request.reference_s3_uri or "").strip()
         control_data_s3_uri = str(request.control_data_s3_uri or "").strip()
         stage_s3_uri = str(request.stage_s3_uri or "").strip()
+        export_destination_s3_uri = str(request.export_destination_s3_uri or "").strip()
         aws_profile = str(request.aws_profile or app.state.settings.aws_profile or "").strip()
         contact_email = str(request.contact_email or "").strip() or actor.email
         if (
@@ -5501,13 +6036,20 @@ def create_app(
             or not reference_s3_uri
             or not control_data_s3_uri
             or not stage_s3_uri
+            or not export_destination_s3_uri
         ):
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "cluster_name, region_az, ssh_key_name, reference_s3_uri, "
-                    "control_data_s3_uri, and stage_s3_uri are required"
+                    "control_data_s3_uri, stage_s3_uri, and export_destination_s3_uri "
+                    "are required"
                 ),
+            )
+        if not export_destination_s3_uri.startswith("s3://"):
+            raise HTTPException(
+                status_code=400,
+                detail="export_destination_s3_uri must be an s3:// URI",
             )
         try:
             selection = resolve_cluster_partition_selection(
@@ -5551,6 +6093,7 @@ def create_app(
                 reference_s3_uri=reference_s3_uri,
                 control_data_s3_uri=control_data_s3_uri,
                 stage_s3_uri=stage_s3_uri,
+                export_destination_s3_uri=export_destination_s3_uri,
                 aws_profile=aws_profile or None,
                 contact_email=contact_email,
             )
@@ -5575,6 +6118,7 @@ def create_app(
                 reference_s3_uri=reference_s3_uri,
                 control_data_s3_uri=control_data_s3_uri,
                 stage_s3_uri=stage_s3_uri,
+                export_destination_s3_uri=export_destination_s3_uri,
                 tenant_id=actor.tenant_id,
                 owner_user_id=owner_user_id,
                 sponsor_user_id=actor.user_id,
@@ -5595,6 +6139,7 @@ def create_app(
             reference_s3_uri=reference_s3_uri,
             control_data_s3_uri=control_data_s3_uri,
             stage_s3_uri=stage_s3_uri,
+            export_destination_s3_uri=export_destination_s3_uri,
             tenant_id=actor.tenant_id,
             owner_user_id=owner_user_id,
             sponsor_user_id=actor.user_id,

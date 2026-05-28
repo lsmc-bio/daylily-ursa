@@ -69,7 +69,8 @@ def test_build_stage_paths_without_prefix_uses_bucket_root(monkeypatch: pytest.M
 
     assert stage.remote_stage_name == "remote_stage_20260309T020304Z"
     assert (
-        stage.remote_s3_stage == "s3://bucket/staging/staged_external_sequencing_data/remote_stage_20260309T020304Z"
+        stage.remote_s3_stage
+        == "s3://bucket/staging/staged_external_sequencing_data/remote_stage_20260309T020304Z"
     )
 
 

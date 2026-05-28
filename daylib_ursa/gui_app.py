@@ -204,6 +204,7 @@ def mount_gui(app: FastAPI) -> None:
     gui_root = Path(__file__).resolve().parent / "gui"
     repo_root = Path(__file__).resolve().parents[1]
     templates = Jinja2Templates(directory=str(gui_root / "templates"))
+
     def _format_usd(value: Any) -> str:
         try:
             amount = float(value or 0)
@@ -571,7 +572,6 @@ def mount_gui(app: FastAPI) -> None:
             return get_current_user(request)
         except HTTPException:
             return None
-
 
     def _aws_usage_report_domains(*, require_configured: bool = True) -> set[str]:
         settings = getattr(app.state, "settings", None)
@@ -1367,10 +1367,11 @@ def mount_gui(app: FastAPI) -> None:
             "analyses": analyses[:20],
         }
 
-
     def _gui_payload_cache() -> GuiPayloadCache:
         settings = getattr(app.state, "settings", None)
-        ttl_seconds = int(getattr(settings, "ursa_gui_cache_ttl_seconds", _GUI_PAYLOAD_CACHE_TTL_SECONDS))
+        ttl_seconds = int(
+            getattr(settings, "ursa_gui_cache_ttl_seconds", _GUI_PAYLOAD_CACHE_TTL_SECONDS)
+        )
         cache = getattr(app.state, "gui_payload_cache", None)
         if not isinstance(cache, GuiPayloadCache) or cache.ttl_seconds != ttl_seconds:
             cache = GuiPayloadCache(ttl_seconds=ttl_seconds)
@@ -1418,9 +1419,7 @@ def mount_gui(app: FastAPI) -> None:
         cache = _gui_payload_cache()
         before = cache.status(key)
         served_from_cache = (
-            not force_refresh
-            and before.get("state") == "ready"
-            and not bool(before.get("stale"))
+            not force_refresh and before.get("state") == "ready" and not bool(before.get("stale"))
         )
         payload = cache.get(
             key,
@@ -1508,8 +1507,9 @@ def mount_gui(app: FastAPI) -> None:
         actor = _session_actor(request)
         if actor is None:
             raise HTTPException(status_code=401, detail="Authentication is required")
-        return _trigger_gui_payload_refresh("usage", actor, lambda: _usage_context(actor, refresh=True))
-
+        return _trigger_gui_payload_refresh(
+            "usage", actor, lambda: _usage_context(actor, refresh=True)
+        )
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request, next: str = "/", reason: str = ""):
@@ -1700,7 +1700,9 @@ def mount_gui(app: FastAPI) -> None:
                 status_code=403,
                 detail="AWS usage report access requires an lsmc.com account",
             )
-        return RedirectResponse(url="/aws_usage_report/", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        return RedirectResponse(
+            url="/aws_usage_report/", status_code=status.HTTP_307_TEMPORARY_REDIRECT
+        )
 
     @app.get("/aws_usage_report/", include_in_schema=False)
     async def aws_usage_report_index(request: Request):

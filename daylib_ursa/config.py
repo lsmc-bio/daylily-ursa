@@ -114,6 +114,33 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "dewey_base_url": cfg.dewey_base_url,
         "dewey_api_token": cfg.dewey_api_token,
         "dewey_verify_ssl": cfg.dewey_verify_ssl,
+        "ursa_run_directory_analysis_tenant_id": getattr(
+            cfg, "ursa_run_directory_analysis_tenant_id", ""
+        ),
+        "ursa_run_directory_analysis_owner_user_id": getattr(
+            cfg, "ursa_run_directory_analysis_owner_user_id", ""
+        ),
+        "ursa_run_directory_analysis_cluster_name": getattr(
+            cfg, "ursa_run_directory_analysis_cluster_name", ""
+        ),
+        "ursa_run_directory_analysis_region": getattr(
+            cfg, "ursa_run_directory_analysis_region", ""
+        ),
+        "ursa_run_directory_analysis_reference_s3_uri": getattr(
+            cfg, "ursa_run_directory_analysis_reference_s3_uri", ""
+        ),
+        "ursa_run_directory_analysis_stage_target": getattr(
+            cfg, "ursa_run_directory_analysis_stage_target", ""
+        ),
+        "ursa_run_directory_analysis_destination_s3_uri": getattr(
+            cfg, "ursa_run_directory_analysis_destination_s3_uri", ""
+        ),
+        "ursa_run_directory_analysis_project": getattr(
+            cfg, "ursa_run_directory_analysis_project", ""
+        ),
+        "ursa_run_directory_analysis_aws_profile": getattr(
+            cfg, "ursa_run_directory_analysis_aws_profile", ""
+        ),
         "ursa_observability_service_token": getattr(
             cfg,
             "ursa_observability_service_token",
@@ -283,6 +310,18 @@ dewey_enabled: false
 dewey_base_url: ""
 dewey_api_token: ""
 dewey_verify_ssl: true
+
+# OWY-triggered run-directory analysis policy. These must be explicit before
+# POST /api/v1/dewey/run-directory-analysis-triggers can launch jobs.
+ursa_run_directory_analysis_tenant_id: ""
+ursa_run_directory_analysis_owner_user_id: ""
+ursa_run_directory_analysis_cluster_name: ""
+ursa_run_directory_analysis_region: ""
+ursa_run_directory_analysis_reference_s3_uri: ""
+ursa_run_directory_analysis_stage_target: ""
+ursa_run_directory_analysis_destination_s3_uri: ""
+ursa_run_directory_analysis_project: ""
+ursa_run_directory_analysis_aws_profile: ""
 
 # Cognito configuration is read from this YAML file.
 # auth_mode: cognito
@@ -679,6 +718,42 @@ class Settings(BaseSettings):
     dewey_timeout_seconds: float = Field(
         default=10.0,
         description="Dewey API timeout in seconds",
+    )
+    ursa_run_directory_analysis_tenant_id: str = Field(
+        default="",
+        description="Tenant UUID used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_owner_user_id: str = Field(
+        default="",
+        description="Owner user ID used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_cluster_name: str = Field(
+        default="",
+        description="ParallelCluster name used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_region: str = Field(
+        default="",
+        description="AWS region used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_reference_s3_uri: str = Field(
+        default="",
+        description="Reference S3 URI used for OWY run-directory analysis trigger staging",
+    )
+    ursa_run_directory_analysis_stage_target: str = Field(
+        default="",
+        description="FSx stage target used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_destination_s3_uri: str = Field(
+        default="",
+        description="Destination S3 root for OWY run-directory analysis outputs",
+    )
+    ursa_run_directory_analysis_project: str = Field(
+        default="",
+        description="DayEC project value used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_aws_profile: str = Field(
+        default="",
+        description="AWS profile used for OWY run-directory analysis triggers",
     )
 
     # ========== Notifications ==========

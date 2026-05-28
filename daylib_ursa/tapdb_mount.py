@@ -107,7 +107,9 @@ class UrsaTapdbAdminGate:
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 4401})
             return
-        response = JSONResponse({"detail": "Invalid or missing TapDB admin service token"}, status_code=401)
+        response = JSONResponse(
+            {"detail": "Invalid or missing TapDB admin service token"}, status_code=401
+        )
         await response(scope, receive, send)
 
 

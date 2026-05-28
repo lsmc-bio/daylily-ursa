@@ -226,3 +226,102 @@ class DeweyClient:
                 "Dewey analysis-result registration response missing receipt artifact_set_euid"
             )
         return body
+
+    def create_external_object(
+        self,
+        *,
+        external_system: str,
+        external_object_type: str,
+        external_object_id: str,
+        external_uri: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        clean_key = str(idempotency_key or "").strip()
+        if not clean_key:
+            raise DeweyClientError("idempotency_key is required")
+        payload = {
+            "external_system": str(external_system or "").strip(),
+            "external_object_type": str(external_object_type or "").strip(),
+            "external_object_id": str(external_object_id or "").strip(),
+            "external_uri": str(external_uri or "").strip() or None,
+            "metadata": dict(metadata or {}),
+        }
+        for field_name in ("external_system", "external_object_type", "external_object_id"):
+            if not payload[field_name]:
+                raise DeweyClientError(f"{field_name} is required")
+        url = f"{_require_https_url(self.base_url, field_name='Dewey base URL')}/api/v1/external-objects"
+        client, close_client = self._http_client()
+        try:
+            response = client.post(
+                url,
+                json=payload,
+                headers=self._headers(idempotency_key=clean_key),
+            )
+        except httpx.HTTPError as exc:
+            raise DeweyClientError(f"Dewey external-object create failed: {exc}") from exc
+        finally:
+            if close_client:
+                client.close()
+        if response.status_code >= 400:
+            raise DeweyClientError(
+                f"Dewey external-object create returned {response.status_code}: {response.text}"
+            )
+        body = response.json()
+        if not isinstance(body, dict):
+            raise DeweyClientError("Dewey external-object response was not a JSON object")
+        if not str(body.get("external_object_euid") or "").strip():
+            raise DeweyClientError("Dewey external-object response missing external_object_euid")
+        return body
+
+    def attach_external_object_relation(
+        self,
+        *,
+        target_type: str,
+        target_euid: str,
+        external_object_euid: str,
+        relation_type: str,
+        metadata: dict[str, Any] | None = None,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        clean_key = str(idempotency_key or "").strip()
+        if not clean_key:
+            raise DeweyClientError("idempotency_key is required")
+        payload = {
+            "target_type": str(target_type or "").strip(),
+            "target_euid": str(target_euid or "").strip(),
+            "external_object_euid": str(external_object_euid or "").strip(),
+            "relation_type": str(relation_type or "").strip(),
+            "metadata": dict(metadata or {}),
+        }
+        for field_name in ("target_type", "target_euid", "external_object_euid", "relation_type"):
+            if not payload[field_name]:
+                raise DeweyClientError(f"{field_name} is required")
+        url = (
+            f"{_require_https_url(self.base_url, field_name='Dewey base URL')}"
+            "/api/v1/external-object-relations"
+        )
+        client, close_client = self._http_client()
+        try:
+            response = client.post(
+                url,
+                json=payload,
+                headers=self._headers(idempotency_key=clean_key),
+            )
+        except httpx.HTTPError as exc:
+            raise DeweyClientError(f"Dewey external-object relation failed: {exc}") from exc
+        finally:
+            if close_client:
+                client.close()
+        if response.status_code >= 400:
+            raise DeweyClientError(
+                f"Dewey external-object relation returned {response.status_code}: {response.text}"
+            )
+        body = response.json()
+        if not isinstance(body, dict):
+            raise DeweyClientError("Dewey external-object relation response was not a JSON object")
+        if not str(body.get("external_object_relation_euid") or "").strip():
+            raise DeweyClientError(
+                "Dewey external-object relation response missing external_object_relation_euid"
+            )
+        return body

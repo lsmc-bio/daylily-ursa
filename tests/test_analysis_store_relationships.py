@@ -339,15 +339,11 @@ def test_analysis_store_writes_explicit_tapdb_graph_refs_and_timestamps():
     assert isinstance(artifact_graph, list)
     assert artifact_graph[0]["relationship_type"] == "registered_result_artifact"
     assert artifact_graph[0]["target_euid"] == "AT-RESULT-1"
-    assert (
-        artifact_graph[0]["recorded_at"] == from_json_addl(artifact_instance)["created_at"]
-    )
+    assert artifact_graph[0]["recorded_at"] == from_json_addl(artifact_instance)["created_at"]
 
     atlas_return_graph = _graph_payload(atlas_return)
     assert isinstance(atlas_return_graph, list)
-    assert {
-        (ref["relationship_type"], ref["target_euid"]) for ref in atlas_return_graph
-    } >= {
+    assert {(ref["relationship_type"], ref["target_euid"]) for ref in atlas_return_graph} >= {
         ("returned_to_atlas", "ASR-4"),
         ("returned_to_atlas", "RES-4"),
         ("registered_result_artifact", "AT-RESULT-1"),

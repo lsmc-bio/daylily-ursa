@@ -18,7 +18,7 @@ def test_docker_runtime_files_use_foreground_uv_and_no_legacy_runtime() -> None:
     assert "uv sync --frozen --no-dev --no-install-project" in dockerfile
     assert "uv sync --frozen --no-dev" in dockerfile
     assert "USER lsmc" in dockerfile
-    assert "python\", \"-m\", \"daylib_ursa.container_entry" in dockerfile
+    assert 'python", "-m", "daylib_ursa.container_entry' in dockerfile
     assert ":latest" not in dockerfile
     assert "conda" not in dockerfile.lower()
     assert "tmux" not in entrypoint

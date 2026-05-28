@@ -161,6 +161,7 @@ def test_cluster_job_manager_spawns_dedicated_worker_process(monkeypatch, tmp_pa
         reference_s3_uri="s3://refs",
         control_data_s3_uri="s3://control",
         stage_s3_uri="s3://stage",
+        export_destination_s3_uri="s3://export",
         tenant_id=TENANT_ID,
         owner_user_id="user-1",
         sponsor_user_id="user-2",
@@ -227,8 +228,9 @@ def test_run_cluster_create_job_uses_fake_tools_and_leaves_no_home_state(
             "region_az": "us-west-2d",
             "ssh_key_name": "omics-key",
             "reference_s3_uri": "s3://refs",
-                "control_data_s3_uri": "s3://control",
-                "stage_s3_uri": "s3://stage",
+            "control_data_s3_uri": "s3://control",
+            "stage_s3_uri": "s3://stage",
+            "export_destination_s3_uri": "s3://export",
             "aws_profile": None,
             "contact_email": "ops@example.com",
             "pass_on_warn": False,
@@ -253,7 +255,9 @@ def test_run_cluster_create_job_uses_fake_tools_and_leaves_no_home_state(
     assert not (home_dir / ".ursa" / "cluster-create").exists()
 
 
-def test_cluster_job_manager_records_create_dry_run_without_spawning_worker(monkeypatch, tmp_path: Path) -> None:
+def test_cluster_job_manager_records_create_dry_run_without_spawning_worker(
+    monkeypatch, tmp_path: Path
+) -> None:
     store = MemoryResourceStore()
 
     def fail_popen(*_args, **_kwargs):
@@ -274,6 +278,7 @@ def test_cluster_job_manager_records_create_dry_run_without_spawning_worker(monk
         reference_s3_uri="s3://refs",
         control_data_s3_uri="s3://control",
         stage_s3_uri="s3://stage",
+        export_destination_s3_uri="s3://export",
         tenant_id=TENANT_ID,
         owner_user_id="user-1",
         sponsor_user_id="user-2",
@@ -281,7 +286,12 @@ def test_cluster_job_manager_records_create_dry_run_without_spawning_worker(monk
         contact_email="ops@example.com",
         pass_on_warn=False,
         debug=False,
-        dry_run_result={"return_code": 0, "summary": "Dry-run passed", "stdout": "ok", "stderr": ""},
+        dry_run_result={
+            "return_code": 0,
+            "summary": "Dry-run passed",
+            "stdout": "ok",
+            "stderr": "",
+        },
     )
 
     assert job.state == "COMPLETED"

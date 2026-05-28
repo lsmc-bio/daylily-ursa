@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import subprocess
 import uuid
 
 import httpx
 from fastapi.testclient import TestClient
 
 from daylib_ursa.config import Settings
+from daylib_ursa.analysis_jobs import AnalysisJobManager
 from daylib_ursa.integrations.dewey_client import DeweyClient
 from daylib_ursa.resource_store import (
     AnalysisJobEventRecord,
@@ -22,7 +24,16 @@ OWNER_USER_ID = "00000000-0000-0000-0000-000000000101"
 
 
 class _DummyBloomClient:
-    pass
+    def __init__(self) -> None:
+        self.run_directory_calls: list[dict] = []
+
+    def create_or_reuse_run_directory_run(self, **kwargs):
+        self.run_directory_calls.append(dict(kwargs))
+        return {
+            "run_euid": "BLOOM-RUN-1",
+            "status": "created",
+            "run_folder_name": kwargs["run_folder_name"],
+        }
 
 
 class _DummyClusterService:
@@ -295,6 +306,15 @@ class _DummyAnalysisJobManager:
 class _DummyDeweyClient:
     def __init__(self) -> None:
         self.result_calls: list[dict] = []
+        self.external_objects: list[dict] = []
+        self.external_relations: list[dict] = []
+
+    def resolve_artifact(self, artifact_euid: str):
+        return {
+            "artifact_euid": artifact_euid,
+            "artifact_type": "sequencing_run_dir",
+            "storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        }
 
     def register_analysis_results(self, *, payload, idempotency_key: str):
         self.result_calls.append({"payload": dict(payload), "idempotency_key": idempotency_key})
@@ -302,6 +322,22 @@ class _DummyDeweyClient:
             "receipt": {"artifact_set_euid": "AS-RESULT-1"},
             "artifact_set": {"artifact_set_euid": "AS-RESULT-1"},
         }
+
+    def create_external_object(self, **kwargs):
+        row = {
+            "external_object_euid": f"EXT-{len(self.external_objects) + 1}",
+            **kwargs,
+        }
+        self.external_objects.append(row)
+        return row
+
+    def attach_external_object_relation(self, **kwargs):
+        row = {
+            "external_object_relation_euid": f"REL-{len(self.external_relations) + 1}",
+            **kwargs,
+        }
+        self.external_relations.append(row)
+        return row
 
 
 def _settings() -> Settings:
@@ -322,6 +358,15 @@ def _settings() -> Settings:
         deployment_name="unit",
         allowed_hosts="testserver,localhost",
         ursa_tapdb_mount_enabled=False,
+        ursa_run_directory_analysis_tenant_id=str(TENANT_ID),
+        ursa_run_directory_analysis_owner_user_id=OWNER_USER_ID,
+        ursa_run_directory_analysis_cluster_name="cluster-1",
+        ursa_run_directory_analysis_region="us-west-2",
+        ursa_run_directory_analysis_reference_s3_uri="s3://refs/hg38/",
+        ursa_run_directory_analysis_stage_target="/staging/run-directories",
+        ursa_run_directory_analysis_destination_s3_uri="s3://analysis-results/run-directories/",
+        ursa_run_directory_analysis_project="daylily",
+        ursa_run_directory_analysis_aws_profile="lsmc",
     )
 
 
@@ -331,17 +376,26 @@ def _app(
     resource_store: _MemoryResourceStore | None = None,
     analysis_job_manager: _DummyAnalysisJobManager | None = None,
     dewey_client: _DummyDeweyClient | None = None,
+    bloom_client: _DummyBloomClient | None = None,
 ):
     resources = resource_store or _MemoryResourceStore()
     manager = analysis_job_manager or _DummyAnalysisJobManager(resources)
 
     def fake_analysis_command_payload(command_id: str, optional_features=None):
         _ = optional_features
-        if command_id != "illumina_snv_alignstats_relatedness_vep_multiqc":
+        if command_id not in {
+            "illumina_snv_alignstats_relatedness_vep_multiqc",
+            "illumina_run_qc",
+            "illumina_bclconvert",
+            "ont_run_qc",
+        }:
             raise ValueError(f"Unknown analysis command: {command_id}")
         return {
             "command_id": command_id,
             "workflow": "daylily-omics-analysis",
+            "command_class": "run_analysis"
+            if command_id in {"illumina_run_qc", "illumina_bclconvert", "ont_run_qc"}
+            else "sample_analysis",
             "input_contract": "run_context",
         }
 
@@ -351,7 +405,7 @@ def _app(
     )
     return create_app(
         _DummyStore(),
-        bloom_client=_DummyBloomClient(),
+        bloom_client=bloom_client or _DummyBloomClient(),
         atlas_client=None,
         dewey_client=dewey_client,
         resource_store=resources,
@@ -578,6 +632,282 @@ def test_dewey_trigger_terminal_launch_registers_results(monkeypatch) -> None:
     assert {"ref_type": "ursa_analysis_job_euid", "value": "AJ-1"} in call["payload"][
         "lineage_refs"
     ]
+
+
+def test_run_directory_trigger_creates_bloom_run_manifest_jobs_and_relations(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient()
+    bloom = _DummyBloomClient()
+    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey, bloom_client=bloom)
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+        "run_metadata": {"instrument_id": "LH01106"},
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-run-dir-1"},
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        payload = created.json()
+        assert payload["trigger_euid"].startswith("URDT-")
+        assert payload["bloom_run_euid"] == "BLOOM-RUN-1"
+        assert payload["analysis_job_euids"] == ["AJ-1"]
+        assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc"
+        assert payload["command_ids"] == ["illumina_run_qc"]
+        assert len(payload["dewey_external_relations"]) == 3
+
+        replay = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-run-dir-1"},
+            json=body,
+        )
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["trigger_euid"] == payload["trigger_euid"]
+
+    assert len(bloom.run_directory_calls) == 1
+    assert len(resources.worksets) == 1
+    manifest = next(iter(resources.manifests.values()))
+    run_context = manifest.metadata["run_context_manifest"]
+    assert run_context["filename"] == "config/runs.tsv"
+    assert "RUNID\tPLATFORM\tRUN_DIR" in run_context["content"]
+    assert (
+        "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/"
+        in run_context["content"]
+    )
+    assert resources.analysis_jobs["AJ-1"].request["run_directory_trigger"]["bloom_run_euid"] == (
+        "BLOOM-RUN-1"
+    )
+    assert len(dewey.external_objects) == 3
+    assert len(dewey.external_relations) == 3
+
+
+def test_run_directory_trigger_rejects_non_run_analysis_command(monkeypatch) -> None:
+    app = _app(monkeypatch, dewey_client=_DummyDeweyClient())
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_snv_alignstats_relatedness_vep_multiqc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-run-dir-bad"},
+            json=body,
+        )
+    assert rejected.status_code == 400
+    assert "not a run_analysis command" in rejected.text
+
+
+def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path) -> None:
+    resources = _MemoryResourceStore()
+    workset = resources.create_workset(
+        name="Run directory run-a",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        artifact_set_euids=[],
+        metadata={},
+    )
+    manifest = resources.create_manifest(
+        workset_euid=workset.workset_euid,
+        name="Run directory run-a run context",
+        artifact_set_euid=None,
+        artifact_euids=["AT-RUN-1"],
+        input_references=[],
+        metadata={
+            "run_context_manifest": {
+                "filename": "config/runs.tsv",
+                "content": (
+                    "RUNID\tPLATFORM\tRUN_DIR\n"
+                    "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/\n"
+                ),
+            }
+        },
+    )
+    job = resources.create_analysis_job(
+        job_name="run-a:01:illumina_run_qc",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="cluster-1",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        request={
+            "analysis_command_id": "illumina_run_qc",
+            "destination": "s3://analysis-results/run-a/01-illumina_run_qc/",
+            "export_trigger": "on-success",
+            "session_name": "run-a-illumina_run_qc",
+            "project": "daylily",
+            "aws_profile": "lsmc",
+            "run_directory_trigger": {"trigger_euid": "URDT-1"},
+        },
+    )
+    captured: dict[str, list[str]] = {}
+
+    class FakeDayEcClient:
+        aws_profile = "lsmc"
+
+        def workflow_launch(self, argv, *, cwd):  # noqa: ANN001
+            captured["argv"] = list(argv)
+            return subprocess.CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=(
+                    "__DAYLILY_SESSION__=run-a-illumina-run-qc\n"
+                    "__DAYLILY_RUN_DIR__=/fsx/analysis/run-a\n"
+                    "__DAYLILY_REPO_PATH__=/fsx/repos/daylily-omics-analysis\n"
+                ),
+                stderr="",
+            )
+
+    manager = AnalysisJobManager(
+        resource_store=resources,
+        client=FakeDayEcClient(),
+        workspace_root=tmp_path,
+    )
+
+    launched = manager.launch_job(job.job_euid, actor_user_id=OWNER_USER_ID)
+
+    assert launched.state == "RUNNING"
+    argv = captured["argv"]
+    assert "--run-context-file" in argv
+    assert "--stage-dir" not in argv
+    run_context_file = argv[argv.index("--run-context-file") + 1]
+    assert run_context_file.endswith(".ursa-run-contexts/AJ-1/config/runs.tsv")
+    assert "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/" in (
+        tmp_path / ".ursa-run-contexts" / "AJ-1" / "config" / "runs.tsv"
+    ).read_text(encoding="utf-8")
+
+
+def test_run_directory_analysis_refresh_launches_successor_job(tmp_path) -> None:
+    resources = _MemoryResourceStore()
+    workset = resources.create_workset(
+        name="Run directory run-a",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        artifact_set_euids=[],
+        metadata={},
+    )
+    manifest = resources.create_manifest(
+        workset_euid=workset.workset_euid,
+        name="Run directory run-a run context",
+        artifact_set_euid=None,
+        artifact_euids=["AT-RUN-1"],
+        input_references=[],
+        metadata={
+            "run_context_manifest": {
+                "filename": "config/runs.tsv",
+                "content": (
+                    "RUNID\tPLATFORM\tRUN_DIR\n"
+                    "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/\n"
+                ),
+            }
+        },
+    )
+    first = resources.create_analysis_job(
+        job_name="run-a:01:illumina_run_qc",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="cluster-1",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        request={
+            "analysis_command_id": "illumina_run_qc",
+            "destination": "s3://analysis-results/run-a/01-illumina_run_qc/",
+            "export_trigger": "on-success",
+            "session_name": "run-a-illumina_run_qc",
+            "project": "daylily",
+            "aws_profile": "lsmc",
+            "run_directory_trigger": {
+                "trigger_euid": "URDT-1",
+                "pipeline_order": 1,
+                "predecessor_analysis_job_euid": None,
+            },
+        },
+    )
+    second = resources.create_analysis_job(
+        job_name="run-a:02:illumina_bclconvert",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="cluster-1",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        request={
+            "analysis_command_id": "illumina_bclconvert",
+            "destination": "s3://analysis-results/run-a/02-illumina_bclconvert/",
+            "export_trigger": "on-success",
+            "session_name": "run-a-illumina_bclconvert",
+            "project": "daylily",
+            "aws_profile": "lsmc",
+            "run_directory_trigger": {
+                "trigger_euid": "URDT-1",
+                "pipeline_order": 2,
+                "predecessor_analysis_job_euid": first.job_euid,
+            },
+        },
+    )
+    launched_sessions: list[str] = []
+
+    class FakeDayEcClient:
+        aws_profile = "lsmc"
+
+        def workflow_launch(self, argv, *, cwd):  # noqa: ANN001
+            _ = cwd
+            args = list(argv)
+            session_name = args[args.index("--session-name") + 1]
+            launched_sessions.append(session_name)
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout=(
+                    f"__DAYLILY_SESSION__={session_name}\n"
+                    f"__DAYLILY_RUN_DIR__=/fsx/analysis/{session_name}\n"
+                    "__DAYLILY_REPO_PATH__=/fsx/repos/daylily-omics-analysis\n"
+                ),
+                stderr="",
+            )
+
+        def workflow_status(self, *, session_name, region, cluster_name):  # noqa: ANN001
+            _ = region, cluster_name
+            return {
+                "session_name": session_name,
+                "exit_code": 0,
+                "completed_at": "2026-05-27T00:10:00Z",
+            }
+
+    manager = AnalysisJobManager(
+        resource_store=resources,
+        client=FakeDayEcClient(),
+        workspace_root=tmp_path,
+    )
+
+    launched = manager.launch_job(first.job_euid, actor_user_id=OWNER_USER_ID)
+    assert launched.state == "RUNNING"
+    assert resources.analysis_jobs[second.job_euid].state == "DEFINED"
+
+    refreshed = manager.refresh_job(first.job_euid, actor_user_id=OWNER_USER_ID)
+
+    assert refreshed.state == "COMPLETED"
+    assert launched_sessions == ["run-a-illumina_run_qc", "run-a-illumina_bclconvert"]
+    assert resources.analysis_jobs[second.job_euid].state == "RUNNING"
+    assert resources.analysis_events[second.job_euid][0].event_type == ("run-directory-predecessor")
 
 
 def test_dewey_client_registers_analysis_results_with_bearer_and_idempotency() -> None:

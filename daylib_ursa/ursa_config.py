@@ -173,7 +173,10 @@ VALID_FIELDS = {
     "cognito_group_role_map": (dict, "Canonical Cognito group-to-role mapping"),
     "ursa_internal_output_bucket": (str, "Ursa-managed internal S3 bucket"),
     "aws_usage_report_dir": (str, "Explicit local directory containing AWS usage report files"),
-    "aws_usage_report_allowed_domains": (str, "Comma-separated email domains allowed to view the AWS usage report"),
+    "aws_usage_report_allowed_domains": (
+        str,
+        "Comma-separated email domains allowed to view the AWS usage report",
+    ),
     "tapdb_client_id": (str, "TapDB client identifier"),
     "tapdb_database_name": (str, "TapDB namespace / database name"),
     "tapdb_schema_name": (str, "Explicit PostgreSQL schema used by TapDB"),
@@ -219,6 +222,39 @@ VALID_FIELDS = {
     "dewey_base_url": (str, "Dewey base URL"),
     "dewey_api_token": (str, "Dewey API bearer token"),
     "dewey_verify_ssl": (bool, "Verify Dewey TLS certificates"),
+    "ursa_run_directory_analysis_tenant_id": (
+        str,
+        "Tenant UUID for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_owner_user_id": (
+        str,
+        "Owner user ID for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_cluster_name": (
+        str,
+        "Cluster name for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_region": (
+        str,
+        "AWS region for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_reference_s3_uri": (
+        str,
+        "Reference S3 URI for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_stage_target": (
+        str,
+        "Stage target for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_destination_s3_uri": (
+        str,
+        "Destination S3 root for OWY run-directory analysis outputs",
+    ),
+    "ursa_run_directory_analysis_project": (str, "Project for OWY run-directory analysis triggers"),
+    "ursa_run_directory_analysis_aws_profile": (
+        str,
+        "AWS profile for OWY run-directory analysis triggers",
+    ),
     "ursa_observability_service_token": (str, "Ursa read-only observability service token"),
     "ursa_write_service_token": (str, "Ursa scoped write service token"),
     "ursa_tapdb_admin_service_token": (str, "Ursa embedded TapDB admin service token"),
@@ -326,6 +362,15 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "bloom_base_url",
         "atlas_base_url",
         "dewey_base_url",
+        "ursa_run_directory_analysis_tenant_id",
+        "ursa_run_directory_analysis_owner_user_id",
+        "ursa_run_directory_analysis_cluster_name",
+        "ursa_run_directory_analysis_region",
+        "ursa_run_directory_analysis_reference_s3_uri",
+        "ursa_run_directory_analysis_stage_target",
+        "ursa_run_directory_analysis_destination_s3_uri",
+        "ursa_run_directory_analysis_project",
+        "ursa_run_directory_analysis_aws_profile",
         "whitelist_domains",
         "ursa_observability_service_token",
         "ursa_write_service_token",
@@ -510,6 +555,33 @@ class UrsaConfig:
     dewey_verify_ssl: Optional[bool] = None
     """Dewey TLS verification flag read from YAML config."""
 
+    ursa_run_directory_analysis_tenant_id: Optional[str] = None
+    """Tenant UUID for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_owner_user_id: Optional[str] = None
+    """Owner user ID for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_cluster_name: Optional[str] = None
+    """Cluster name for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_region: Optional[str] = None
+    """AWS region for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_reference_s3_uri: Optional[str] = None
+    """Reference S3 URI for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_stage_target: Optional[str] = None
+    """Stage target for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_destination_s3_uri: Optional[str] = None
+    """Destination S3 root for OWY run-directory analysis outputs."""
+
+    ursa_run_directory_analysis_project: Optional[str] = None
+    """Project for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_aws_profile: Optional[str] = None
+    """AWS profile for OWY run-directory analysis triggers."""
+
     ursa_observability_service_token: Optional[str] = None
     """Scoped read-only observability service token read from YAML config."""
 
@@ -665,6 +737,27 @@ class UrsaConfig:
         dewey_base_url = data.get("dewey_base_url")
         dewey_api_token = data.get("dewey_api_token")
         dewey_verify_ssl = data.get("dewey_verify_ssl")
+        ursa_run_directory_analysis_tenant_id = data.get("ursa_run_directory_analysis_tenant_id")
+        ursa_run_directory_analysis_owner_user_id = data.get(
+            "ursa_run_directory_analysis_owner_user_id"
+        )
+        ursa_run_directory_analysis_cluster_name = data.get(
+            "ursa_run_directory_analysis_cluster_name"
+        )
+        ursa_run_directory_analysis_region = data.get("ursa_run_directory_analysis_region")
+        ursa_run_directory_analysis_reference_s3_uri = data.get(
+            "ursa_run_directory_analysis_reference_s3_uri"
+        )
+        ursa_run_directory_analysis_stage_target = data.get(
+            "ursa_run_directory_analysis_stage_target"
+        )
+        ursa_run_directory_analysis_destination_s3_uri = data.get(
+            "ursa_run_directory_analysis_destination_s3_uri"
+        )
+        ursa_run_directory_analysis_project = data.get("ursa_run_directory_analysis_project")
+        ursa_run_directory_analysis_aws_profile = data.get(
+            "ursa_run_directory_analysis_aws_profile"
+        )
         ursa_observability_service_token = data.get("ursa_observability_service_token")
         ursa_write_service_token = data.get("ursa_write_service_token")
         ursa_tapdb_admin_service_token = data.get("ursa_tapdb_admin_service_token")
@@ -724,6 +817,15 @@ class UrsaConfig:
             dewey_base_url=dewey_base_url,
             dewey_api_token=dewey_api_token,
             dewey_verify_ssl=dewey_verify_ssl,
+            ursa_run_directory_analysis_tenant_id=ursa_run_directory_analysis_tenant_id,
+            ursa_run_directory_analysis_owner_user_id=ursa_run_directory_analysis_owner_user_id,
+            ursa_run_directory_analysis_cluster_name=ursa_run_directory_analysis_cluster_name,
+            ursa_run_directory_analysis_region=ursa_run_directory_analysis_region,
+            ursa_run_directory_analysis_reference_s3_uri=ursa_run_directory_analysis_reference_s3_uri,
+            ursa_run_directory_analysis_stage_target=ursa_run_directory_analysis_stage_target,
+            ursa_run_directory_analysis_destination_s3_uri=ursa_run_directory_analysis_destination_s3_uri,
+            ursa_run_directory_analysis_project=ursa_run_directory_analysis_project,
+            ursa_run_directory_analysis_aws_profile=ursa_run_directory_analysis_aws_profile,
             ursa_observability_service_token=ursa_observability_service_token,
             ursa_write_service_token=ursa_write_service_token,
             ursa_tapdb_admin_service_token=ursa_tapdb_admin_service_token,

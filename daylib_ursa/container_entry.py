@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
 def _required_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:

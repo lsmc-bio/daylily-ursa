@@ -1789,8 +1789,8 @@ wheels = [
 
 [[package]]
 name = "daylily-ephemeral-cluster"
-version = "5.0.0"
-source = { git = "https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git?rev=5.0.0#84ab9110b0e6697cbc87e141b9389a401b3080c0" }
+version = "5.0.14"
+source = { git = "https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git?rev=5.0.14#28cbc61c0754b096fc74f4beb6d9ea404f43bbec" }
 dependencies = [
     { name = "aws-parallelcluster" },
     { name = "black" },
@@ -1885,7 +1885,7 @@ requires-dist = [
     { name = "boto3-stubs", extras = ["cloudwatch", "s3", "sns"], specifier = ">=1.28.0" },
     { name = "cli-core-yo", specifier = "==2.1.1" },
     { name = "daylily-auth-cognito", specifier = "==2.1.5" },
-    { name = "daylily-ephemeral-cluster", git = "https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git?rev=5.0.0" },
+    { name = "daylily-ephemeral-cluster", git = "https://github.com/Daylily-Informatics/daylily-ephemeral-cluster.git?rev=5.0.14" },
     { name = "daylily-tapdb", specifier = ">=7.0.7,<8.0.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },

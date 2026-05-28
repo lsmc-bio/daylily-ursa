@@ -137,7 +137,9 @@ def test_default_config_template_emits_secret_and_domain_defaults() -> None:
     assert "session_secret_key:" in template
     assert "generated-on-init" not in template
     assert "whitelist_domains: lsmc.com,lsmc.bio,lsmc.life,daylilyinformatics.com" in template
-    assert "tapdb_config_path: ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml" in template
+    assert (
+        "tapdb_config_path: ~/.config/tapdb/local/ursa-<deployment>/tapdb-config.yaml" in template
+    )
     assert 'name: "<deployment>"' in template
     assert "ui_show_environment_chrome: true" in template
 
@@ -149,7 +151,9 @@ def _app_with_gui(settings, *, config_path: Path | None = None):
         app, build_web_session_config(settings, app.state.server_instance_id)
     )
     app.state.settings = settings
-    app.state.ursa_config = SimpleNamespace(config_path=config_path or Path("/tmp/ursa-test-config.yaml"))
+    app.state.ursa_config = SimpleNamespace(
+        config_path=config_path or Path("/tmp/ursa-test-config.yaml")
+    )
     app.state.identity_client = SimpleNamespace(resolve_access_token=lambda _token: None)
     app.state.auth_provider = SimpleNamespace(
         resolve_access_token=lambda _token, **_kwargs: CurrentUser(
