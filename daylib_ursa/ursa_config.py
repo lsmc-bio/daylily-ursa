@@ -241,10 +241,6 @@ VALID_FIELDS = {
         str,
         "Owner user ID for OWY run-directory analysis triggers",
     ),
-    "ursa_run_directory_analysis_cluster_name": (
-        str,
-        "Cluster name for OWY run-directory analysis triggers",
-    ),
     "ursa_run_directory_analysis_region": (
         str,
         "AWS region for OWY run-directory analysis triggers",
@@ -265,6 +261,30 @@ VALID_FIELDS = {
     "ursa_run_directory_analysis_aws_profile": (
         str,
         "AWS profile for OWY run-directory analysis triggers",
+    ),
+    "ursa_run_directory_analysis_dewey_token_env": (
+        str,
+        "Dewey token environment variable for OWY export registration",
+    ),
+    "ursa_run_directory_analysis_cluster_create_name": (
+        str,
+        "Cluster name used only when OWY analysis cluster creation is required",
+    ),
+    "ursa_run_directory_analysis_cluster_create_region_az": (
+        str,
+        "Region/AZ used only when OWY analysis cluster creation is required",
+    ),
+    "ursa_run_directory_analysis_cluster_create_config_path": (
+        str,
+        "Explicit DYEC request config path for OWY analysis cluster creation",
+    ),
+    "ursa_run_directory_analysis_cluster_create_timeout_seconds": (
+        int,
+        "Seconds to wait for OWY analysis cluster creation",
+    ),
+    "ursa_run_directory_analysis_cluster_create_poll_interval_seconds": (
+        int,
+        "Seconds between OWY analysis cluster creation polls",
     ),
     "ursa_observability_service_token": (str, "Ursa read-only observability service token"),
     "ursa_write_service_token": (str, "Ursa scoped write service token"),
@@ -375,13 +395,18 @@ def validate_config_file(path: Path) -> Tuple[bool, List[str], List[str]]:
         "dewey_base_url",
         "ursa_run_directory_analysis_tenant_id",
         "ursa_run_directory_analysis_owner_user_id",
-        "ursa_run_directory_analysis_cluster_name",
         "ursa_run_directory_analysis_region",
         "ursa_run_directory_analysis_reference_s3_uri",
         "ursa_run_directory_analysis_stage_target",
         "ursa_run_directory_analysis_destination_s3_uri",
         "ursa_run_directory_analysis_project",
         "ursa_run_directory_analysis_aws_profile",
+        "ursa_run_directory_analysis_dewey_token_env",
+        "ursa_run_directory_analysis_cluster_create_name",
+        "ursa_run_directory_analysis_cluster_create_region_az",
+        "ursa_run_directory_analysis_cluster_create_config_path",
+        "ursa_run_directory_analysis_cluster_create_timeout_seconds",
+        "ursa_run_directory_analysis_cluster_create_poll_interval_seconds",
         "whitelist_domains",
         "ursa_observability_service_token",
         "ursa_write_service_token",
@@ -584,9 +609,6 @@ class UrsaConfig:
     ursa_run_directory_analysis_owner_user_id: Optional[str] = None
     """Owner user ID for OWY run-directory analysis triggers."""
 
-    ursa_run_directory_analysis_cluster_name: Optional[str] = None
-    """Cluster name for OWY run-directory analysis triggers."""
-
     ursa_run_directory_analysis_region: Optional[str] = None
     """AWS region for OWY run-directory analysis triggers."""
 
@@ -604,6 +626,24 @@ class UrsaConfig:
 
     ursa_run_directory_analysis_aws_profile: Optional[str] = None
     """AWS profile for OWY run-directory analysis triggers."""
+
+    ursa_run_directory_analysis_dewey_token_env: Optional[str] = None
+    """Dewey token environment variable for OWY export registration."""
+
+    ursa_run_directory_analysis_cluster_create_name: Optional[str] = None
+    """Cluster name used only when OWY analysis cluster creation is required."""
+
+    ursa_run_directory_analysis_cluster_create_region_az: Optional[str] = None
+    """Region/AZ used only when OWY analysis cluster creation is required."""
+
+    ursa_run_directory_analysis_cluster_create_config_path: Optional[str] = None
+    """Explicit DYEC request config path for OWY analysis cluster creation."""
+
+    ursa_run_directory_analysis_cluster_create_timeout_seconds: Optional[int] = None
+    """Seconds to wait for OWY analysis cluster creation."""
+
+    ursa_run_directory_analysis_cluster_create_poll_interval_seconds: Optional[int] = None
+    """Seconds between OWY analysis cluster creation polls."""
 
     ursa_observability_service_token: Optional[str] = None
     """Scoped read-only observability service token read from YAML config."""
@@ -770,9 +810,6 @@ class UrsaConfig:
         ursa_run_directory_analysis_owner_user_id = data.get(
             "ursa_run_directory_analysis_owner_user_id"
         )
-        ursa_run_directory_analysis_cluster_name = data.get(
-            "ursa_run_directory_analysis_cluster_name"
-        )
         ursa_run_directory_analysis_region = data.get("ursa_run_directory_analysis_region")
         ursa_run_directory_analysis_reference_s3_uri = data.get(
             "ursa_run_directory_analysis_reference_s3_uri"
@@ -786,6 +823,24 @@ class UrsaConfig:
         ursa_run_directory_analysis_project = data.get("ursa_run_directory_analysis_project")
         ursa_run_directory_analysis_aws_profile = data.get(
             "ursa_run_directory_analysis_aws_profile"
+        )
+        ursa_run_directory_analysis_dewey_token_env = data.get(
+            "ursa_run_directory_analysis_dewey_token_env"
+        )
+        ursa_run_directory_analysis_cluster_create_name = data.get(
+            "ursa_run_directory_analysis_cluster_create_name"
+        )
+        ursa_run_directory_analysis_cluster_create_region_az = data.get(
+            "ursa_run_directory_analysis_cluster_create_region_az"
+        )
+        ursa_run_directory_analysis_cluster_create_config_path = data.get(
+            "ursa_run_directory_analysis_cluster_create_config_path"
+        )
+        ursa_run_directory_analysis_cluster_create_timeout_seconds = data.get(
+            "ursa_run_directory_analysis_cluster_create_timeout_seconds"
+        )
+        ursa_run_directory_analysis_cluster_create_poll_interval_seconds = data.get(
+            "ursa_run_directory_analysis_cluster_create_poll_interval_seconds"
         )
         ursa_observability_service_token = data.get("ursa_observability_service_token")
         ursa_write_service_token = data.get("ursa_write_service_token")
@@ -852,13 +907,28 @@ class UrsaConfig:
             dewey_verify_ssl=dewey_verify_ssl,
             ursa_run_directory_analysis_tenant_id=ursa_run_directory_analysis_tenant_id,
             ursa_run_directory_analysis_owner_user_id=ursa_run_directory_analysis_owner_user_id,
-            ursa_run_directory_analysis_cluster_name=ursa_run_directory_analysis_cluster_name,
             ursa_run_directory_analysis_region=ursa_run_directory_analysis_region,
             ursa_run_directory_analysis_reference_s3_uri=ursa_run_directory_analysis_reference_s3_uri,
             ursa_run_directory_analysis_stage_target=ursa_run_directory_analysis_stage_target,
             ursa_run_directory_analysis_destination_s3_uri=ursa_run_directory_analysis_destination_s3_uri,
             ursa_run_directory_analysis_project=ursa_run_directory_analysis_project,
             ursa_run_directory_analysis_aws_profile=ursa_run_directory_analysis_aws_profile,
+            ursa_run_directory_analysis_dewey_token_env=ursa_run_directory_analysis_dewey_token_env,
+            ursa_run_directory_analysis_cluster_create_name=(
+                ursa_run_directory_analysis_cluster_create_name
+            ),
+            ursa_run_directory_analysis_cluster_create_region_az=(
+                ursa_run_directory_analysis_cluster_create_region_az
+            ),
+            ursa_run_directory_analysis_cluster_create_config_path=(
+                ursa_run_directory_analysis_cluster_create_config_path
+            ),
+            ursa_run_directory_analysis_cluster_create_timeout_seconds=(
+                ursa_run_directory_analysis_cluster_create_timeout_seconds
+            ),
+            ursa_run_directory_analysis_cluster_create_poll_interval_seconds=(
+                ursa_run_directory_analysis_cluster_create_poll_interval_seconds
+            ),
             ursa_observability_service_token=ursa_observability_service_token,
             ursa_write_service_token=ursa_write_service_token,
             ursa_tapdb_admin_service_token=ursa_tapdb_admin_service_token,

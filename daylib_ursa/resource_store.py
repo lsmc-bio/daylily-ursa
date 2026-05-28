@@ -1498,6 +1498,36 @@ class ResourceStore:
             )
             return self._analysis_job_from_instance(session, job)
 
+    def update_analysis_job_assignment(
+        self,
+        *,
+        job_euid: str,
+        cluster_name: str,
+        region: str,
+        created_by: str,
+    ) -> AnalysisJobRecord:
+        with self.backend.session_scope(commit=True) as session:
+            job = self.backend.find_instance_by_euid(
+                session,
+                template_code=ANALYSIS_JOB_TEMPLATE,
+                value=job_euid,
+                for_update=True,
+            )
+            if job is None:
+                raise KeyError(f"analysis job not found: {job_euid}")
+            updated_at = utc_now_iso()
+            self.backend.update_instance_json(
+                session,
+                job,
+                {
+                    "cluster_name": str(cluster_name or "").strip(),
+                    "region": str(region or "").strip(),
+                    "updated_by": created_by,
+                    "updated_at": updated_at,
+                },
+            )
+            return self._analysis_job_from_instance(session, job)
+
     def add_analysis_job_event(
         self,
         *,

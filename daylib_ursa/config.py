@@ -132,9 +132,6 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "ursa_run_directory_analysis_owner_user_id": getattr(
             cfg, "ursa_run_directory_analysis_owner_user_id", ""
         ),
-        "ursa_run_directory_analysis_cluster_name": getattr(
-            cfg, "ursa_run_directory_analysis_cluster_name", ""
-        ),
         "ursa_run_directory_analysis_region": getattr(
             cfg, "ursa_run_directory_analysis_region", ""
         ),
@@ -152,6 +149,24 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         ),
         "ursa_run_directory_analysis_aws_profile": getattr(
             cfg, "ursa_run_directory_analysis_aws_profile", ""
+        ),
+        "ursa_run_directory_analysis_dewey_token_env": getattr(
+            cfg, "ursa_run_directory_analysis_dewey_token_env", ""
+        ),
+        "ursa_run_directory_analysis_cluster_create_name": getattr(
+            cfg, "ursa_run_directory_analysis_cluster_create_name", ""
+        ),
+        "ursa_run_directory_analysis_cluster_create_region_az": getattr(
+            cfg, "ursa_run_directory_analysis_cluster_create_region_az", ""
+        ),
+        "ursa_run_directory_analysis_cluster_create_config_path": getattr(
+            cfg, "ursa_run_directory_analysis_cluster_create_config_path", ""
+        ),
+        "ursa_run_directory_analysis_cluster_create_timeout_seconds": getattr(
+            cfg, "ursa_run_directory_analysis_cluster_create_timeout_seconds", None
+        ),
+        "ursa_run_directory_analysis_cluster_create_poll_interval_seconds": getattr(
+            cfg, "ursa_run_directory_analysis_cluster_create_poll_interval_seconds", None
         ),
         "ursa_observability_service_token": getattr(
             cfg,
@@ -327,13 +342,18 @@ dewey_verify_ssl: true
 # POST /api/v1/dewey/run-directory-analysis-triggers can launch jobs.
 ursa_run_directory_analysis_tenant_id: ""
 ursa_run_directory_analysis_owner_user_id: ""
-ursa_run_directory_analysis_cluster_name: ""
 ursa_run_directory_analysis_region: ""
 ursa_run_directory_analysis_reference_s3_uri: ""
 ursa_run_directory_analysis_stage_target: ""
 ursa_run_directory_analysis_destination_s3_uri: ""
 ursa_run_directory_analysis_project: ""
 ursa_run_directory_analysis_aws_profile: ""
+ursa_run_directory_analysis_dewey_token_env: ""
+ursa_run_directory_analysis_cluster_create_name: ""
+ursa_run_directory_analysis_cluster_create_region_az: ""
+ursa_run_directory_analysis_cluster_create_config_path: ""
+ursa_run_directory_analysis_cluster_create_timeout_seconds: 3600
+ursa_run_directory_analysis_cluster_create_poll_interval_seconds: 30
 
 # Cognito configuration is read from this YAML file.
 # auth_mode: cognito
@@ -739,13 +759,6 @@ class Settings(BaseSettings):
         default="",
         description="Owner user ID used for OWY run-directory analysis triggers",
     )
-    ursa_run_directory_analysis_cluster_name: str = Field(
-        default="",
-        description=(
-            "ParallelCluster name used for OWY run-directory analysis triggers and "
-            "as the DayEC executing entity"
-        ),
-    )
     ursa_run_directory_analysis_region: str = Field(
         default="",
         description="AWS region used for OWY run-directory analysis triggers",
@@ -769,6 +782,30 @@ class Settings(BaseSettings):
     ursa_run_directory_analysis_aws_profile: str = Field(
         default="",
         description="AWS profile used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_dewey_token_env: str = Field(
+        default="",
+        description="Environment variable name holding the Dewey token for DAY-EC export links",
+    )
+    ursa_run_directory_analysis_cluster_create_name: str = Field(
+        default="",
+        description="Cluster name used only when Ursa must create a new OWY analysis cluster",
+    )
+    ursa_run_directory_analysis_cluster_create_region_az: str = Field(
+        default="",
+        description="Region/AZ used only when Ursa must create a new OWY analysis cluster",
+    )
+    ursa_run_directory_analysis_cluster_create_config_path: str = Field(
+        default="",
+        description="Explicit DYEC cluster request config path used for OWY cluster creation",
+    )
+    ursa_run_directory_analysis_cluster_create_timeout_seconds: int = Field(
+        default=3600,
+        description="Seconds to wait for a newly created OWY analysis cluster",
+    )
+    ursa_run_directory_analysis_cluster_create_poll_interval_seconds: int = Field(
+        default=30,
+        description="Seconds between cluster create wait polls",
     )
 
     # ========== Notifications ==========

@@ -77,13 +77,18 @@ dewey_verify_ssl: true
 # POST /api/v1/dewey/run-directory-analysis-triggers can launch jobs.
 ursa_run_directory_analysis_tenant_id: ""
 ursa_run_directory_analysis_owner_user_id: ""
-ursa_run_directory_analysis_cluster_name: ""
 ursa_run_directory_analysis_region: ""
 ursa_run_directory_analysis_reference_s3_uri: ""
 ursa_run_directory_analysis_stage_target: ""
 ursa_run_directory_analysis_destination_s3_uri: ""
 ursa_run_directory_analysis_project: ""
 ursa_run_directory_analysis_aws_profile: ""
+ursa_run_directory_analysis_dewey_token_env: ""
+ursa_run_directory_analysis_cluster_create_name: ""
+ursa_run_directory_analysis_cluster_create_region_az: ""
+ursa_run_directory_analysis_cluster_create_config_path: ""
+ursa_run_directory_analysis_cluster_create_timeout_seconds: 3600
+ursa_run_directory_analysis_cluster_create_poll_interval_seconds: 30
 
 # Admin-controlled idle cluster cleanup defaults. Cleanup is disabled by default.
 # When enabled, Ursa exports FSx analysis output to S3 before any delete.

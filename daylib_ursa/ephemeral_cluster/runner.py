@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "5.0.22"
+REQUIRED_DAYLILY_EC_VERSION = "5.0.23"
 MINIMUM_DAYLILY_EC_VERSION = REQUIRED_DAYLILY_EC_VERSION
 DAYLILY_EC_VERSION_REQUIREMENT = f"=={REQUIRED_DAYLILY_EC_VERSION}"
 DAYLILY_EC_INSTALL_SPEC = f"{DAYLILY_EC_DISTRIBUTION}{DAYLILY_EC_VERSION_REQUIREMENT}"
@@ -170,7 +170,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster ==5.0.22 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster ==5.0.23 contract."""
 
     def __init__(
         self,
@@ -265,6 +265,33 @@ class DaylilyEcClient:
             args.extend(["--profile", self.aws_profile])
         return self.run_json(args)
 
+    def cluster_wait(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        status: str = "CREATE_COMPLETE",
+        timeout: int = 3600,
+        poll_interval: int = 30,
+    ) -> Dict[str, Any]:
+        args = [
+            "cluster",
+            "wait",
+            "--region",
+            region,
+            "--cluster",
+            cluster_name,
+            "--status",
+            status,
+            "--timeout",
+            str(timeout),
+            "--poll-interval",
+            str(poll_interval),
+        ]
+        if self.aws_profile:
+            args.extend(["--profile", self.aws_profile])
+        return self.run_json(args)
+
     def workflow_status(
         self, *, session_name: str, region: str, cluster_name: str
     ) -> Dict[str, Any]:
@@ -305,6 +332,89 @@ class DaylilyEcClient:
         if self.aws_profile:
             args.extend(["--profile", self.aws_profile])
         return self.run(args)
+
+    def mounts_create(
+        self,
+        *,
+        source_s3_uri: str,
+        cluster_name: str,
+        region: str,
+        mount_id: str,
+        run_id: str,
+        platform: str,
+        timeout_seconds: int = 900,
+    ) -> Dict[str, Any]:
+        args = [
+            "mounts",
+            "create",
+            source_s3_uri,
+            "--cluster",
+            cluster_name,
+            "--region",
+            region,
+            "--mount-id",
+            mount_id,
+            "--run-id",
+            run_id,
+            "--platform",
+            platform,
+            "--timeout-seconds",
+            str(timeout_seconds),
+        ]
+        if self.aws_profile:
+            args.extend(["--profile", self.aws_profile])
+        return self.run_json(args)
+
+    def mounts_verify(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        mount_id: str,
+        platform: str,
+        timeout_seconds: int = 300,
+    ) -> Dict[str, Any]:
+        args = [
+            "mounts",
+            "verify",
+            "--cluster",
+            cluster_name,
+            "--region",
+            region,
+            "--mount-id",
+            mount_id,
+            "--platform",
+            platform,
+            "--timeout-seconds",
+            str(timeout_seconds),
+        ]
+        if self.aws_profile:
+            args.extend(["--profile", self.aws_profile])
+        return self.run_json(args)
+
+    def mounts_delete(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        mount_id: str,
+        timeout_seconds: int = 900,
+    ) -> Dict[str, Any]:
+        args = [
+            "mounts",
+            "delete",
+            "--cluster",
+            cluster_name,
+            "--region",
+            region,
+            "--mount-id",
+            mount_id,
+            "--timeout-seconds",
+            str(timeout_seconds),
+        ]
+        if self.aws_profile:
+            args.extend(["--profile", self.aws_profile])
+        return self.run_json(args)
 
     def stage_samples(
         self,

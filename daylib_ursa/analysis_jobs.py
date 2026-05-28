@@ -74,7 +74,7 @@ def _snakemake_log_reports_success(text: str) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.22."""
+    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.23."""
 
     def __init__(
         self,
@@ -193,6 +193,21 @@ class AnalysisJobManager:
             executing_entity=str(request.get("executing_entity") or job.owner_user_id),
             export_destination_s3_uri=destination,
             export_trigger=str(request.get("export_trigger") or "none"),
+            delete_on_export_success=bool(request.get("delete_on_export_success")),
+            artifact_registration_command_id=(
+                str(request.get("artifact_registration_command_id") or "").strip() or None
+            ),
+            dewey_url=str(request.get("dewey_url") or "").strip() or None,
+            dewey_token_env=str(request.get("dewey_token_env") or "").strip() or None,
+            dewey_analysis_dir_external_object_id=(
+                str(request.get("dewey_analysis_dir_external_object_id") or "").strip() or None
+            ),
+            dewey_run_artifact_euid=(
+                str(request.get("dewey_run_artifact_euid") or "").strip() or None
+            ),
+            dewey_ursa_analysis_euid=(
+                str(request.get("dewey_ursa_analysis_euid") or "").strip() or None
+            ),
             profile=aws_profile,
             region=job.region,
             cluster=job.cluster_name,

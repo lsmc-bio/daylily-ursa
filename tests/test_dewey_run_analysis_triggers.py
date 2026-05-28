@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from daylib_ursa.config import Settings
 from daylib_ursa.analysis_jobs import AnalysisJobManager
 from daylib_ursa.integrations.dewey_client import DeweyClient
+from daylib_ursa.run_directory_orchestrator import RunDirectoryOrchestrator, RunDirectoryPolicy
 from daylib_ursa.resource_store import (
     AnalysisJobEventRecord,
     AnalysisJobRecord,
@@ -222,6 +223,25 @@ class _MemoryResourceStore:
         self.analysis_jobs[job_euid] = updated
         return updated
 
+    def update_analysis_job_assignment(
+        self,
+        *,
+        job_euid: str,
+        cluster_name: str,
+        region: str,
+        created_by: str,
+    ):
+        _ = created_by
+        record = self.analysis_jobs[job_euid]
+        updated = replace(
+            record,
+            cluster_name=cluster_name,
+            region=region,
+            updated_at="2026-05-27T00:03:45Z",
+        )
+        self.analysis_jobs[job_euid] = updated
+        return updated
+
     def get_analysis_job(self, job_euid: str):
         return self.analysis_jobs.get(job_euid)
 
@@ -402,6 +422,54 @@ class _DummyAnalysisJobManager:
         )
 
 
+class _DummyRunDirectoryOrchestrator:
+    def __init__(self) -> None:
+        self.start_calls: list[str] = []
+
+    def start_trigger(self, trigger_euid: str):
+        self.start_calls.append(trigger_euid)
+        return {"pid": 1234, "command": ["fake-worker", trigger_euid]}
+
+
+class _FakeRunAnalysisCommand:
+    command_id = "illumina_run_qc"
+    command_class = "run_analysis"
+    input_contract = "run_context"
+
+    def launch_argv(self, **kwargs):
+        argv = [
+            "workflow",
+            "launch",
+            "--analysis-id",
+            kwargs["analysis_id"],
+            "--executing-entity",
+            kwargs["executing_entity"],
+            "--run-context-file",
+            kwargs["run_context_file"],
+            "--session-name",
+            kwargs["session_name"],
+        ]
+        for flag, key in (
+            ("--export-destination-s3-uri", "export_destination_s3_uri"),
+            ("--export-trigger", "export_trigger"),
+            ("--artifact-registration-command-id", "artifact_registration_command_id"),
+            ("--dewey-url", "dewey_url"),
+            ("--dewey-token-env", "dewey_token_env"),
+            (
+                "--dewey-analysis-dir-external-object-id",
+                "dewey_analysis_dir_external_object_id",
+            ),
+            ("--dewey-run-artifact-euid", "dewey_run_artifact_euid"),
+            ("--dewey-ursa-analysis-euid", "dewey_ursa_analysis_euid"),
+        ):
+            value = kwargs.get(key)
+            if value:
+                argv.extend([flag, value])
+        if kwargs.get("delete_on_export_success"):
+            argv.append("--delete-on-export-success")
+        return argv
+
+
 class _DummyDeweyClient:
     def __init__(
         self,
@@ -466,7 +534,6 @@ def _settings() -> Settings:
         ursa_tapdb_mount_enabled=False,
         ursa_run_directory_analysis_tenant_id=str(TENANT_ID),
         ursa_run_directory_analysis_owner_user_id=OWNER_USER_ID,
-        ursa_run_directory_analysis_cluster_name="cluster-1",
         ursa_run_directory_analysis_region="us-west-2",
         ursa_run_directory_analysis_reference_s3_uri="s3://refs/hg38/",
         ursa_run_directory_analysis_stage_target="/staging/run-directories",
@@ -483,6 +550,7 @@ def _app(
     analysis_job_manager: _DummyAnalysisJobManager | None = None,
     dewey_client: _DummyDeweyClient | None = None,
     bloom_client: _DummyBloomClient | None = None,
+    run_directory_orchestrator: _DummyRunDirectoryOrchestrator | None = None,
     settings: Settings | None = None,
 ):
     resources = resource_store or _MemoryResourceStore()
@@ -521,6 +589,8 @@ def _app(
         resource_store=resources,
         cluster_service=_DummyClusterService(),
         analysis_job_manager=manager,
+        run_directory_orchestrator=run_directory_orchestrator
+        or _DummyRunDirectoryOrchestrator(),
         settings=settings or _settings(),
     )
 
@@ -748,7 +818,14 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()
     bloom = _DummyBloomClient()
-    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey, bloom_client=bloom)
+    orchestrator = _DummyRunDirectoryOrchestrator()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        dewey_client=dewey,
+        bloom_client=bloom,
+        run_directory_orchestrator=orchestrator,
+    )
     body = {
         "dewey_run_artifact_euid": "AT-RUN-1",
         "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
@@ -771,9 +848,11 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
         assert created.status_code == 202, created.text
         payload = created.json()
         assert payload["trigger_euid"].startswith("URDT-")
+        assert payload["status"] == "QUEUED"
         assert payload["bloom_run_euid"] == "BLOOM-RUN-1"
         assert payload["analysis_job_euids"] == ["AJ-1"]
         assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc"
+        assert payload["analysis_jobs"][0]["status"] == "DEFINED"
         assert payload["command_ids"] == ["illumina_run_qc"]
         assert payload["ursa_external_objects"][0]["external_system"] == "bloom"
         assert payload["ursa_external_objects"][0]["external_object_id"] == "BLOOM-RUN-1"
@@ -801,9 +880,9 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     assert resources.analysis_jobs["AJ-1"].request["run_directory_trigger"]["bloom_run_euid"] == (
         "BLOOM-RUN-1"
     )
-    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
-    )
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] is None
+    assert resources.analysis_jobs["AJ-1"].request["destination"] is None
+    assert orchestrator.start_calls == [payload["trigger_euid"]]
     assert len(resources.external_objects) == 1
     assert len(dewey.external_objects) == 3
     assert len(dewey.external_relations) == 3
@@ -880,11 +959,13 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
     resources = _MemoryResourceStore()
     manager = _DummyAnalysisJobManager(resources, terminal_state="PRELAUNCH_FAILED")
     dewey = _DummyDeweyClient()
+    orchestrator = _DummyRunDirectoryOrchestrator()
     app = _app(
         monkeypatch,
         resource_store=resources,
         analysis_job_manager=manager,
         dewey_client=dewey,
+        run_directory_orchestrator=orchestrator,
     )
     body = {
         "dewey_run_artifact_euid": "AT-RUN-1",
@@ -908,15 +989,16 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
             json=body,
         )
         assert created.status_code == 202, created.text
-        assert created.json()["status"] == "FAILED"
-        assert "AnalysisIdentityError" in resources.analysis_jobs["AJ-1"].error
-        assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-            "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
-        )
+        assert created.json()["status"] == "QUEUED"
+        assert resources.analysis_jobs["AJ-1"].state == "DEFINED"
+        assert resources.analysis_jobs["AJ-1"].request["destination"] is None
 
         stale_job = resources.analysis_jobs["AJ-1"]
         resources.analysis_jobs["AJ-1"] = replace(
             stale_job,
+            state="FAILED",
+            error="AnalysisIdentityError: executing_entity must be path-safe",
+            launch={},
             request={
                 **stale_job.request,
                 "destination": (
@@ -925,7 +1007,6 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
             },
         )
 
-        manager.terminal_state = "RUNNING"
         replay = client.post(
             "/api/v1/dewey/run-directory-analysis-triggers",
             headers={
@@ -937,18 +1018,16 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
 
     assert replay.status_code == 202, replay.text
     payload = replay.json()
-    assert payload["status"] == "RUNNING"
-    assert payload["analysis_jobs"][0]["status"] == "RUNNING"
+    assert payload["status"] == "QUEUED"
+    assert payload["analysis_jobs"][0]["status"] == "DEFINED"
     assert payload["analysis_job_euids"] == ["AJ-1"]
-    assert manager.launch_calls[1]["request_overrides"] == {
-        "executing_entity": "cluster-1",
-        "destination": "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/",
-    }
-    assert resources.triggers_by_idempotency["idem-run-dir-prelaunch-failure"].status == "RUNNING"
-    assert resources.analysis_jobs["AJ-1"].state == "RUNNING"
+    assert manager.launch_calls == []
+    assert resources.triggers_by_idempotency["idem-run-dir-prelaunch-failure"].status == "QUEUED"
+    assert resources.analysis_jobs["AJ-1"].state == "DEFINED"
     assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
+        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/01-illumina_run_qc/"
     )
+    assert orchestrator.start_calls == [payload["trigger_euid"], payload["trigger_euid"]]
     assert len(resources.worksets) == 1
     assert len(resources.analysis_jobs) == 1
 
@@ -980,15 +1059,12 @@ def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> No
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == "illumina_run_qc_bclconvert"
-    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "cluster-1"
-    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/analysis_results/cluster-1/AJ-1/"
-    )
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] is None
+    assert resources.analysis_jobs["AJ-1"].request["destination"] is None
 
 
-def test_run_directory_trigger_requires_path_safe_cluster_name(monkeypatch) -> None:
+def test_run_directory_trigger_does_not_require_default_cluster_name(monkeypatch) -> None:
     settings = _settings()
-    settings.ursa_run_directory_analysis_cluster_name = "johnm@lsmc.com"
     app = _app(monkeypatch, dewey_client=_DummyDeweyClient(), settings=settings)
     body = {
         "dewey_run_artifact_euid": "AT-RUN-1",
@@ -1002,17 +1078,17 @@ def test_run_directory_trigger_requires_path_safe_cluster_name(monkeypatch) -> N
     }
 
     with TestClient(app) as client:
-        rejected = client.post(
+        created = client.post(
             "/api/v1/dewey/run-directory-analysis-triggers",
             headers={
                 "X-API-Key": "ursa-write-token",
-                "Idempotency-Key": "idem-run-dir-invalid-executor",
+                "Idempotency-Key": "idem-run-dir-no-default-cluster",
             },
             json=body,
         )
 
-    assert rejected.status_code == 503
-    assert "invalid cluster_name" in rejected.text
+    assert created.status_code == 202, created.text
+    assert created.json()["status"] == "QUEUED"
 
 
 def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeypatch) -> None:
@@ -1066,11 +1142,8 @@ def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeyp
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert payload["request"]["owy_execution_id"] == "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9"
-    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "cluster-1"
-    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
-        "s3://lsmc-ssf-sequencing-data/derived/lsmc/ssf-hq/lh01121/2026/"
-        "20260520_LH01121_0001_A23WW7FLT4/analysis_results/cluster-1/AJ-1/"
-    )
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] is None
+    assert resources.analysis_jobs["AJ-1"].request["destination"] is None
     assert payload["ursa_external_objects"][0]["external_object_id"] == "M-BRM-4Z"
     assert resources.external_object_parent_lookups == [
         {
@@ -1192,7 +1265,311 @@ def test_run_directory_trigger_rejects_non_run_analysis_command(monkeypatch) -> 
     assert "not a run_analysis command" in rejected.text
 
 
-def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path) -> None:
+def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_sidecars(
+    tmp_path, monkeypatch
+) -> None:
+    import daylib_ursa.run_directory_orchestrator as orchestrator_module
+
+    monkeypatch.setattr(
+        "daylib_ursa.analysis_jobs.get_analysis_command",
+        lambda _command_id, optional_features=None: _FakeRunAnalysisCommand(),
+    )
+    sidecars: list[dict] = []
+    lifecycle_events: list[str] = []
+
+    def fake_write_sidecar(**kwargs):
+        sidecars.append(dict(kwargs))
+        lifecycle_events.append(f"sidecar:{kwargs['payload']['state']}")
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_write_sidecar_cli",
+        fake_write_sidecar,
+    )
+    monkeypatch.setenv("DEWEY_TOKEN", "token-1")
+    resources = _MemoryResourceStore()
+    workset = resources.create_workset(
+        name="Run directory run-a",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        artifact_set_euids=[],
+        metadata={},
+    )
+    manifest = resources.create_manifest(
+        workset_euid=workset.workset_euid,
+        name="Run directory run-a run context",
+        artifact_set_euid=None,
+        artifact_euids=["AT-RUN-1"],
+        input_references=[],
+        metadata={
+            "run_context_manifest": {
+                "filename": "config/runs.tsv",
+                "content": (
+                    "RUNID\tPLATFORM\tRUN_DIR\tOUTPUT_ROOT\n"
+                    "run-a\tILMN\ts3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/"
+                    "\ts3://old-output/\n"
+                ),
+            }
+        },
+    )
+    job = resources.create_analysis_job(
+        job_name="run-a:01:illumina_run_qc",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        request={
+            "analysis_command_id": "illumina_run_qc",
+            "destination": None,
+            "export_trigger": "on-success",
+            "executing_entity": None,
+            "reference_s3_uri": "s3://refs/hg38/",
+            "session_name": "run-a-illumina_run_qc",
+            "project": "daylily",
+            "aws_profile": "lsmc",
+            "dry_run": False,
+            "stage_target": "/staging/run-directories",
+            "run_directory_trigger": {
+                "trigger_euid": "URDT-1",
+                "dewey_run_artifact_euid": "AT-RUN-1",
+                "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+                "bloom_run_euid": "BLOOM-RUN-1",
+                "pipeline_order": 1,
+                "predecessor_analysis_job_euid": None,
+            },
+        },
+    )
+    resources.create_dewey_run_trigger(
+        trigger_euid="URDT-1",
+        idempotency_key="idem-1",
+        fingerprint="fp-1",
+        status="QUEUED",
+        command_id="illumina_run_qc",
+        request={
+            "dewey_run_artifact_euid": "AT-RUN-1",
+            "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+            "run_folder_name": "run-a",
+            "platform": "ILMN",
+            "command_ids": ["illumina_run_qc"],
+            "bloom_run_euid": "BLOOM-RUN-1",
+            "producer_system": "offwithyou",
+            "producer_object_euid": "exec-1:run-a",
+            "owy_execution_id": "exec-1",
+        },
+        response={
+            "trigger_euid": "URDT-1",
+            "status": "QUEUED",
+            "idempotency_key": "idem-1",
+            "dewey_run_artifact_euid": "AT-RUN-1",
+            "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+            "run_folder_name": "run-a",
+            "platform": "ILMN",
+            "command_ids": ["illumina_run_qc"],
+            "bloom_run_euid": "BLOOM-RUN-1",
+            "workset_euid": workset.workset_euid,
+            "manifest_euid": manifest.manifest_euid,
+            "analysis_job_euids": [job.job_euid],
+            "analysis_jobs": [
+                {
+                    "analysis_job_euid": job.job_euid,
+                    "command_id": "illumina_run_qc",
+                    "status": "DEFINED",
+                    "pipeline_order": 1,
+                }
+            ],
+            "ursa_external_objects": [],
+            "dewey_external_relations": [],
+            "request": {},
+            "created_at": "2026-05-27T00:00:00Z",
+            "updated_at": "2026-05-27T00:00:00Z",
+        },
+        analysis_job_euid=job.job_euid,
+    )
+    captured: dict[str, object] = {"deleted_mounts": []}
+
+    class FakeDayEcClient:
+        aws_profile = "lsmc"
+
+        def cluster_list(self, *, region, details):  # noqa: ANN001
+            captured["cluster_list"] = {"region": region, "details": details}
+            return {
+                "clusters": [
+                    {
+                        "name": "cluster-a",
+                        "region": "us-west-2",
+                        "status": "CREATE_COMPLETE",
+                        "headnode_configured": True,
+                        "details": {"computeFleetStatus": "RUNNING"},
+                    }
+                ]
+            }
+
+        def mounts_create(self, **kwargs):  # noqa: ANN001
+            captured["mounts_create"] = dict(kwargs)
+            return {"status": "created"}
+
+        def mounts_verify(self, **kwargs):  # noqa: ANN001
+            captured["mounts_verify"] = dict(kwargs)
+            return {"status": "verified"}
+
+        def mounts_delete(self, **kwargs):  # noqa: ANN001
+            captured["deleted_mounts"].append(dict(kwargs))
+            lifecycle_events.append("mount_delete")
+            return {"status": "deleted"}
+
+        def workflow_launch(self, argv, *, cwd):  # noqa: ANN001
+            captured["argv"] = list(argv)
+            captured["cwd"] = cwd
+            return subprocess.CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=(
+                    "__DAYLILY_SESSION__=run-a-illumina-run-qc\n"
+                    "__DAYLILY_RUN_DIR__=/fsx/analysis/run-a\n"
+                    "__DAYLILY_REPO_PATH__=/fsx/repos/daylily-omics-analysis\n"
+                ),
+                stderr="",
+            )
+
+        def workflow_status(self, *, session_name, region, cluster_name):  # noqa: ANN001
+            captured["workflow_status"] = {
+                "session_name": session_name,
+                "region": region,
+                "cluster_name": cluster_name,
+            }
+            return {
+                "session_name": session_name,
+                "exit_code": 0,
+                "completed_at": "2026-05-27T00:10:00Z",
+            }
+
+    settings = _settings()
+    settings.dewey_base_url = "https://dewey.example"
+    settings.ursa_run_directory_analysis_dewey_token_env = "DEWEY_TOKEN"
+    orchestrator = RunDirectoryOrchestrator(
+        resource_store=resources,
+        client=FakeDayEcClient(),
+        settings=settings,
+        workspace_root=tmp_path,
+    )
+
+    orchestrator.run_trigger("URDT-1", poll_interval_seconds=1)
+
+    updated = resources.analysis_jobs[job.job_euid]
+    expected_destination = (
+        "s3://bucket/derived/lsmc/ssf-hq/LH01106/2026/run-a/"
+        "analysis_results/cluster-a/AJ-1/"
+    )
+    assert updated.cluster_name == "cluster-a"
+    assert updated.region == "us-west-2"
+    assert updated.request["analysis_id"] == "AJ-1"
+    assert updated.request["executing_entity"] == "cluster-a"
+    assert updated.request["destination"] == expected_destination
+    assert updated.request["delete_on_export_success"] is True
+    assert updated.request["artifact_registration_command_id"] == "illumina_run_qc"
+    assert updated.request["dewey_url"] == "https://dewey.example"
+    assert updated.request["dewey_token_env"] == "DEWEY_TOKEN"
+    assert updated.request["dewey_analysis_dir_external_object_id"] == (
+        expected_destination + "daylily-omics-analysis/"
+    )
+    assert updated.request["dewey_run_artifact_euid"] == "AT-RUN-1"
+    assert updated.request["dewey_ursa_analysis_euid"] == "AJ-1"
+    argv = captured["argv"]
+    assert "--analysis-id" in argv and "AJ-1" in argv
+    assert "--executing-entity" in argv and "cluster-a" in argv
+    assert "--delete-on-export-success" in argv
+    assert "--dewey-analysis-dir-external-object-id" in argv
+    assert expected_destination + "daylily-omics-analysis/" in argv
+    assert "--dewey-run-artifact-euid" in argv and "AT-RUN-1" in argv
+    assert "--dewey-ursa-analysis-euid" in argv and "AJ-1" in argv
+    assert sidecars[0]["payload"]["state"] == "inprog"
+    assert sidecars[-1]["payload"]["state"] == "complete"
+    assert lifecycle_events == ["sidecar:inprog", "mount_delete", "sidecar:complete"]
+    assert resources.triggers_by_euid["URDT-1"].status == "COMPLETED"
+    assert captured["deleted_mounts"] == [
+        {"cluster_name": "cluster-a", "region": "us-west-2", "mount_id": "run-a"}
+    ]
+
+
+def test_run_directory_orchestrator_creates_cluster_when_no_match(tmp_path) -> None:
+    calls: list[dict] = []
+
+    class FakeDayEcClient:
+        def run(self, args, *, cwd):  # noqa: ANN001
+            calls.append({"method": "run", "args": list(args), "cwd": cwd})
+            return subprocess.CompletedProcess(args=list(args), returncode=0, stdout="", stderr="")
+
+        def cluster_wait(self, **kwargs):  # noqa: ANN001
+            calls.append({"method": "cluster_wait", **dict(kwargs)})
+            return {
+                "cluster_name": kwargs["cluster_name"],
+                "status": kwargs.get("status", "CREATE_COMPLETE"),
+            }
+
+    policy = RunDirectoryPolicy(
+        tenant_id=str(TENANT_ID),
+        owner_user_id=OWNER_USER_ID,
+        regions=("us-west-2",),
+        reference_s3_uri="s3://refs/hg38/",
+        stage_target="/staging/run-directories",
+        destination_s3_uri="s3://bucket/derived/",
+        project="daylily",
+        aws_profile="lsmc",
+        dewey_url="https://dewey.example",
+        dewey_token_env="DEWEY_TOKEN",
+        cluster_create_name="owy-auto-1",
+        cluster_create_region_az="us-west-2d",
+        cluster_create_config_path="/tmp/owy-auto-1.yaml",
+        cluster_create_timeout_seconds=1200,
+        cluster_create_poll_interval_seconds=15,
+    )
+    orchestrator = RunDirectoryOrchestrator(
+        resource_store=_MemoryResourceStore(),
+        client=FakeDayEcClient(),
+        settings=_settings(),
+        workspace_root=tmp_path,
+    )
+
+    selected = orchestrator.create_and_wait_cluster(policy)
+
+    assert selected.name == "owy-auto-1"
+    assert selected.region == "us-west-2"
+    assert calls[0]["args"] == [
+        "preflight",
+        "--region-az",
+        "us-west-2d",
+        "--config",
+        "/tmp/owy-auto-1.yaml",
+        "--non-interactive",
+        "--profile",
+        "lsmc",
+    ]
+    assert calls[1]["args"] == [
+        "create",
+        "--region-az",
+        "us-west-2d",
+        "--config",
+        "/tmp/owy-auto-1.yaml",
+        "--non-interactive",
+        "--profile",
+        "lsmc",
+    ]
+    assert calls[2] == {
+        "method": "cluster_wait",
+        "cluster_name": "owy-auto-1",
+        "region": "us-west-2",
+        "timeout": 1200,
+        "poll_interval": 15,
+    }
+
+
+def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "daylib_ursa.analysis_jobs.get_analysis_command",
+        lambda _command_id, optional_features=None: _FakeRunAnalysisCommand(),
+    )
     resources = _MemoryResourceStore()
     workset = resources.create_workset(
         name="Run directory run-a",
@@ -1278,7 +1655,11 @@ def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path) -> No
     assert "s3://old-output/" not in run_context_content
 
 
-def test_run_directory_analysis_refresh_launches_successor_job(tmp_path) -> None:
+def test_run_directory_analysis_refresh_launches_successor_job(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "daylib_ursa.analysis_jobs.get_analysis_command",
+        lambda _command_id, optional_features=None: _FakeRunAnalysisCommand(),
+    )
     resources = _MemoryResourceStore()
     workset = resources.create_workset(
         name="Run directory run-a",

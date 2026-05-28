@@ -87,6 +87,7 @@ from daylib_ursa.domain_access import (
     is_allowed_origin,
 )
 from daylib_ursa.integrations.dewey_client import DeweyClient, DeweyClientError
+from daylib_ursa.run_directory_orchestrator import RunDirectoryOrchestrator
 from daylib_ursa.ephemeral_cluster.runner import (
     DAYEC_CLUSTER_CONFIG_FIELDS,
     DAYLILY_EC_VERSION_REQUIREMENT,
@@ -2262,6 +2263,7 @@ def create_app(
     cluster_service: ClusterService | None = None,
     analysis_job_manager: AnalysisJobManager | None = None,
     staging_job_manager: StagingJobManager | None = None,
+    run_directory_orchestrator: RunDirectoryOrchestrator | None = None,
     settings: Settings | None = None,
     require_api_key: bool | None = None,
     s3_client: Any | None = None,
@@ -2364,6 +2366,16 @@ def create_app(
         StagingJobManager(
             resource_store=resource_store,
             client=cluster_service.client,
+            workspace_root=Path.cwd(),
+        )
+        if resource_store is not None and hasattr(cluster_service, "client")
+        else None
+    )
+    app.state.run_directory_orchestrator = run_directory_orchestrator or (
+        RunDirectoryOrchestrator(
+            resource_store=resource_store,
+            client=cluster_service.client,
+            settings=settings,
             workspace_root=Path.cwd(),
         )
         if resource_store is not None and hasattr(cluster_service, "client")
@@ -2727,6 +2739,15 @@ def create_app(
         if manager is None:
             raise HTTPException(status_code=503, detail="Staging job manager is not configured")
         return manager
+
+    def require_run_directory_orchestrator() -> RunDirectoryOrchestrator:
+        orchestrator = getattr(app.state, "run_directory_orchestrator", None)
+        if orchestrator is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Run-directory orchestrator is not configured",
+            )
+        return orchestrator
 
     def require_dewey_client() -> DeweyClient:
         client = getattr(app.state, "dewey_client", None)
@@ -3964,7 +3985,6 @@ def create_app(
         required = {
             "tenant_id": "ursa_run_directory_analysis_tenant_id",
             "owner_user_id": "ursa_run_directory_analysis_owner_user_id",
-            "cluster_name": "ursa_run_directory_analysis_cluster_name",
             "region": "ursa_run_directory_analysis_region",
             "reference_s3_uri": "ursa_run_directory_analysis_reference_s3_uri",
             "stage_target": "ursa_run_directory_analysis_stage_target",
@@ -4010,100 +4030,6 @@ def create_app(
             or None
         )
         return values
-
-    def _run_directory_analysis_destination(
-        *,
-        policy: dict[str, Any],
-        analysis_job_euid: str,
-        run_storage_uri: str,
-    ) -> str:
-        executing_entity = str(policy["cluster_name"]).strip()
-        job_euid = str(analysis_job_euid or "").strip()
-        if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(executing_entity):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Ursa run-directory analysis policy has invalid cluster_name; "
-                    "expected a path-safe segment matching ^[A-Za-z0-9][A-Za-z0-9._-]*$"
-                ),
-            )
-        if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(job_euid):
-            raise HTTPException(
-                status_code=500,
-                detail="Ursa analysis job EUID is not path-safe for DAY-EC export identity",
-            )
-        destination = urlparse(str(policy["destination_s3_uri"]))
-        source = urlparse(str(run_storage_uri))
-        if destination.scheme != "s3" or not destination.netloc:
-            raise HTTPException(
-                status_code=503,
-                detail="Ursa run-directory destination_s3_uri must be an s3:// URI",
-            )
-        if source.scheme != "s3" or not source.netloc:
-            raise HTTPException(status_code=400, detail="run_storage_uri must be an s3:// URI")
-        if destination.netloc != source.netloc:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Ursa run-directory destination_s3_uri bucket must match "
-                    "run_storage_uri bucket"
-                ),
-            )
-        destination_parts = [
-            part for part in destination.path.strip("/").split("/") if part
-        ]
-        if destination_parts != ["derived"]:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Ursa run-directory destination_s3_uri must be the explicit "
-                    "s3://<sequencing-bucket>/derived/ root"
-                ),
-            )
-        source_parts = [part for part in source.path.strip("/").split("/") if part]
-        if len(source_parts) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="run_storage_uri must include a collection prefix and run-relative path",
-            )
-        if any(part in {"", ".", ".."} or "/" in part for part in source_parts):
-            raise HTTPException(status_code=400, detail="run_storage_uri contains unsafe path parts")
-        derived_parts = [
-            "derived",
-            *source_parts[1:],
-            "analysis_results",
-            executing_entity,
-            job_euid,
-        ]
-        return (
-            f"s3://{destination.netloc}/"
-            + "/".join(derived_parts)
-            + "/"
-        )
-
-    def _with_run_directory_analysis_destination(
-        *,
-        resources: ResourceStore,
-        job: AnalysisJobRecord,
-        policy: dict[str, Any],
-        actor_user_id: str,
-        run_storage_uri: str,
-    ) -> AnalysisJobRecord:
-        destination = _run_directory_analysis_destination(
-            policy=policy,
-            analysis_job_euid=job.job_euid,
-            run_storage_uri=run_storage_uri,
-        )
-        request_payload = {
-            **dict(job.request or {}),
-            "executing_entity": str(policy["cluster_name"]),
-            "destination": destination,
-        }
-        return resources.update_analysis_job_request(
-            job_euid=job.job_euid,
-            request=request_payload,
-            created_by=actor_user_id,
-        )
 
     def _validate_run_directory_commands(
         command_ids: Sequence[str],
@@ -4526,7 +4452,7 @@ def create_app(
         _api_key: str = Depends(require_write_api_key),
         idempotency_key: str = Depends(require_idempotency_key),
         resources: ResourceStore = Depends(require_resource_store),
-        manager: AnalysisJobManager = Depends(require_analysis_job_manager),
+        orchestrator: RunDirectoryOrchestrator = Depends(require_run_directory_orchestrator),
     ) -> DeweyRunDirectoryAnalysisTriggerResponse:
         _ = _api_key
         policy = _run_directory_analysis_policy()
@@ -4554,34 +4480,28 @@ def create_app(
             if existing_job is not None and _analysis_job_failed_before_workflow_launch(
                 existing_job
             ):
-                existing_job = _with_run_directory_analysis_destination(
-                    resources=resources,
-                    job=existing_job,
-                    policy=policy,
-                    actor_user_id=str(policy["owner_user_id"]),
-                    run_storage_uri=str(existing.request.get("run_storage_uri") or ""),
+                existing_job = resources.update_analysis_job_status(
+                    job_euid=existing_job.job_euid,
+                    state="DEFINED",
+                    created_by=str(policy["owner_user_id"]),
+                    started_at=None,
+                    completed_at=None,
+                    return_code=None,
+                    error=None,
+                    output_summary=None,
+                    launch={},
                 )
-                relaunched = manager.launch_job(
-                    existing_job.job_euid,
-                    actor_user_id=str(policy["owner_user_id"]),
-                    request_overrides={
-                        "executing_entity": str(policy["cluster_name"]),
-                        "destination": _run_directory_analysis_destination(
-                            policy=policy,
-                            analysis_job_euid=existing_job.job_euid,
-                            run_storage_uri=str(existing.request.get("run_storage_uri") or ""),
-                        ),
-                    },
-                )
-                response = _run_directory_response_with_job(record=existing, job=relaunched)
+                response = _run_directory_response_with_job(record=existing, job=existing_job)
+                response["status"] = "QUEUED"
                 updated = resources.update_dewey_run_trigger(
                     trigger_euid=existing.trigger_euid,
-                    status=relaunched.state,
+                    status="QUEUED",
                     response=response,
-                    analysis_job_euid=relaunched.job_euid,
+                    analysis_job_euid=existing_job.job_euid,
                     staging_job_euid=existing.staging_job_euid,
-                    error=relaunched.error,
+                    error=None,
                 )
+                orchestrator.start_trigger(existing.trigger_euid)
                 return _dewey_run_directory_trigger_response_from_record(updated)
             return _dewey_run_directory_trigger_response_from_record(existing)
 
@@ -4669,7 +4589,7 @@ def create_app(
                 "optional_features": [],
                 "destination": None,
                 "export_trigger": "on-success",
-                "executing_entity": policy["cluster_name"],
+                "executing_entity": None,
                 "reference_s3_uri": policy["reference_s3_uri"],
                 "session_name": f"{request.run_folder_name}-{command_id}"[:64],
                 "project": policy["project"],
@@ -4691,18 +4611,11 @@ def create_app(
                 job_name=f"{request.run_folder_name}:{index + 1:02d}:{command_id}",
                 workset_euid=workset.workset_euid,
                 manifest_euid=manifest.manifest_euid,
-                cluster_name=str(policy["cluster_name"]),
+                cluster_name="",
                 region=str(policy["region"]),
                 tenant_id=workset.tenant_id,
                 owner_user_id=str(policy["owner_user_id"]),
                 request=job_request,
-            )
-            record = _with_run_directory_analysis_destination(
-                resources=resources,
-                job=record,
-                policy=policy,
-                actor_user_id=str(policy["owner_user_id"]),
-                run_storage_uri=request_payload["run_storage_uri"],
             )
             resources.add_analysis_job_event(
                 job_euid=record.job_euid,
@@ -4714,20 +4627,10 @@ def create_app(
                     "trigger_euid": trigger_euid,
                     "pipeline_order": index + 1,
                     "predecessor_analysis_job_euid": previous_job_euid,
-                    "destination_s3_uri": record.request.get("destination"),
+                    "placement": "pending_cluster_selection",
                 },
                 created_by=str(policy["owner_user_id"]),
             )
-            if index == 0:
-                try:
-                    record = manager.launch_job(
-                        record.job_euid,
-                        actor_user_id=str(policy["owner_user_id"]),
-                    )
-                except (KeyError, ValueError) as exc:
-                    raise HTTPException(status_code=409, detail=str(exc)) from exc
-                except RuntimeError as exc:
-                    raise HTTPException(status_code=503, detail=str(exc)) from exc
             created_jobs.append(resources.get_analysis_job(record.job_euid) or record)
             previous_job_euid = record.job_euid
 
@@ -4792,7 +4695,7 @@ def create_app(
                     ),
                 }
             )
-        response_status = created_jobs[0].state if created_jobs else "QUEUED"
+        response_status = "QUEUED"
         response = {
             "trigger_euid": trigger_euid,
             "status": response_status,
@@ -4857,6 +4760,10 @@ def create_app(
                 staging_job_euid=None,
                 error=created_jobs[0].error if created_jobs else None,
             )
+        try:
+            orchestrator.start_trigger(trigger_euid)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return DeweyRunDirectoryAnalysisTriggerResponse(**response)
 
     @app.post(

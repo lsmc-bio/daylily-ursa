@@ -291,3 +291,93 @@ Recorded: 2026-05-28
 | REL19-001 | Orchestrator | Merge/push main, create annotated Ursa `4.0.19` tag, and push tag. | OPEN | plan_amendment | 5 | Pending. |  |  |
 | PROD19-001 | Orchestrator | Deploy Ursa `4.0.19` to `ursa.day.lsmc.bio`, update production `destination_s3_uri` to `s3://lsmc-ssf-sequencing-data/derived/`, and verify DYEC `5.0.22`. | OPEN | plan_amendment | 5 | Pending. |  | Do not restart with 4.0.18. |
 | OWY19-001 | Orchestrator | Run targeted OWY retry and verify `.ursa.*` sidecar for `20260520_LH01121_0001_A23WW7FLT4`. | OPEN | plan_amendment | 5 | Pending. |  | Cron remains paused until targeted retry succeeds. |
+
+## No-Default-Cluster OWY Orchestration Amendment
+
+Recorded: 2026-05-28T19:43:42Z
+
+- User amended the run-directory trigger contract: `POST /api/v1/dewey/run-directory-analysis-triggers` must not require or imply a default cluster.
+- On each accepted OWY request, Ursa must orchestrate the requested work through CLI surfaces only:
+  - select a suitable existing DAY-EC/ParallelCluster when one exists;
+  - if no suitable cluster exists, start a suitable cluster through the DAY-EC CLI and wait for successful readiness;
+  - stage the request data indicated by OWY, or scan a provided run directory using explicit per-analysis-type plus sequencing-platform rules;
+  - DRA-mount a directory input when a directory was provided;
+  - create the analysis manifest and run staging through CLI flows;
+  - if OWY provides explicit S3 file lists, use the manifest/per-file staging path and DRA-mount the stage bucket when the DAY-EC CLI supports that path;
+  - after staging, launch the indicated catalog command with the CLI; the DayOA checkout must be created with `day-clone -d <analysis-euid>` so the analysis directory identity is the Ursa analysis EUID;
+  - collect generated `samples.tsv` and `units.tsv` into the analysis directory;
+  - monitor the analysis work to a terminal state;
+  - on success, export `/fsx/analysis_results/ubuntu/<analysis-euid>/daylily-omics-analysis/` to the matching sequencing-data bucket `derived/.../analysis_results/<cluster-name>/<analysis-euid>/daylily-omics-analysis/` pattern;
+  - after successful S3 export, remove the FSx analysis data through CLI-supported cleanup or DRA export auto-delete, unmount/delete the DRA mount, and only then write the final S3 sidecar.
+- Sidecar status contract:
+  - write/update `<rundir>.ursa.<analysisid>.inprog` only after Ursa has accepted and started orchestration;
+  - write `<rundir>.ursa.<analysisid>.complete` only after successful CLI launch, successful export proof in S3, FSx cleanup, and DRA unmount/delete;
+  - write `<rundir>.ursa.<analysisid>.fail` for terminal failure with failure metadata;
+  - do not write `.complete` before export and cleanup proof.
+- Guardrail: if a required step cannot be performed through an existing CLI command, pause and ask for approval before any direct SDK/API/database workaround.
+- Cron remains paused until a targeted retry produces a terminal `.ursa.<analysisid>.complete` sidecar.
+- The prior fixed-cluster policy/retarget implementation path is superseded by this amendment.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| ORCH-001 | Orchestrator | Remove the fixed default cluster requirement from OWY run-directory trigger policy. | SUCCESS | contract_fix | 4 | `ursa_run_directory_analysis_cluster_name` removed from config surfaces; request acceptance persists jobs with blank placement and starts the worker. | API was coupling request acceptance to a configured cluster. | Request describes work/input, not cluster placement. |
+| ORCH-002 | Agent 1 | Inventory CLI-only surfaces for cluster match/list/readiness/create and record any missing CLI coverage. | SUCCESS | cli_contract | 4 | Ursa uses DAY-EC CLI wrappers for `cluster list`, `preflight`, `create`, `cluster wait`, `mounts create`, `mounts verify`, `workflow launch`, `workflow status/logs`, and `mounts delete`. |  | Direct SDK/database workarounds were not added. |
+| ORCH-003 | Agent 1 | Implement suitable-cluster selection and create-and-wait when no suitable cluster exists. | SUCCESS | feature_implementation | 4 | `RunDirectoryOrchestrator.select_cluster()` and `create_and_wait_cluster()`; test `test_run_directory_orchestrator_creates_cluster_when_no_match`. |  | Creation still requires explicit create-name/AZ/config policy. |
+| ORCH-004 | Agent 2 | Implement input resolution for OWY run-directory requests and explicit S3-file-list requests, including platform/analysis-type scanning rules. | BLOCKED | feature_implementation | 4 | Current OWY request model carries a run directory URI and no explicit file-list field; directory requests are represented as `config/runs.tsv`. | Explicit file-list request schema is missing. | File-list staging remains blocked until the OWY/Ursa API has a concrete file-list contract. |
+| ORCH-005 | Agent 2 | Implement CLI-only DRA mount/stage flow for directory inputs and staged S3 inputs. | SUCCESS | feature_implementation | 4 | Directory inputs use `dyec mounts create`, `dyec mounts verify`, and `dyec mounts delete`; staged S3 sample-manifest flow remains the existing non-run-directory path. |  | No direct DRA API workaround was added. |
+| ORCH-006 | Agent 3 | Implement CLI-only catalog launch with `day-clone -d <analysis-euid>` and capture generated `samples.tsv` / `units.tsv` into the analysis directory. | SUCCESS | feature_implementation | 4 | Worker updates request with `analysis_id=<analysis-euid>` and DAY-EC launch passes `--analysis-id`; run-context command launch uses `--run-context-file` and no manual shell workaround. |  | Run-analysis commands do not use sample `samples.tsv` / `units.tsv`; sample-analysis staging remains existing flow. |
+| ORCH-007 | Agent 3 | Implement monitoring, successful export to sequencing-bucket `derived/.../analysis_results/<cluster-name>/<analysis-euid>/daylily-omics-analysis/`, FSx cleanup, and DRA unmount/delete. | SUCCESS | feature_implementation | 4 | Worker derives `s3://<bucket>/derived/.../analysis_results/<cluster>/<analysis-euid>/`, sets `--export-trigger on-success`, `--delete-on-export-success`, polls `dyec workflow status/logs`, and deletes the run DRA before `.complete`. |  | Export/delete is owned by DAY-EC CLI/script exit status. |
+| ORCH-008 | Agent 4 | Implement sidecar lifecycle `<rundir>.ursa.<analysisid>.<complete|inprog|fail>` with terminal status metadata. | SUCCESS | feature_implementation | 4 | `_write_sidecar_cli` uses `aws s3 cp`; tests assert `.inprog`, DRA delete, then `.complete` ordering; exceptions write `.fail`. |  | Sidecar is the OWY acceptance signal. |
+| ORCH-009 | Orchestrator | Add tests covering no default cluster, match existing cluster, create cluster, DRA stage, CLI launch, export/cleanup, sidecar states, and missing CLI pause conditions. | SUCCESS | contract_test | 4 | `tests/test_dewey_run_analysis_triggers.py` now covers no default cluster, existing cluster selection, create/wait path, mount lifecycle, CLI launch args, Dewey link args, and sidecar ordering. |  | Explicit file-list path remains blocked by ORCH-004. |
+| ORCH-010 | Orchestrator | Release next main-line Ursa patch only after ORCH tests pass. | OPEN | release_hygiene | 5 | Pending. |  | Do not move existing tags. |
+
+### CLI Link Registration Amendment
+
+Recorded: `2026-05-28T20:09:00Z`
+
+- User amended terminal success requirements: if Ursa can prove the analysis already completed, it may move directly from requested to complete, but only from concrete CLI/export/Dewey evidence.
+- The exported `analysis_results/<cluster-name>/<analysis-euid>/daylily-omics-analysis/` directory must be registered with Dewey.
+- Dewey must link the exported analysis object to the originating run artifact and the Ursa analysis EUID.
+- DAY-EC CLI inventory found export plus artifact registration support, but not the external-object/relation link surface required above.
+- This is not approved as an Ursa direct-API workaround. The required path is a DAY-EC CLI surface that Ursa can invoke through subprocess CLI.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| DYEC-CLI-001 | Agent 2 | Add DAY-EC CLI support for Dewey external-object creation and external-object relation linking for run artifact, exported analysis directory/object, and Ursa analysis EUID. | SUCCESS | feature_implementation | 4 | DYEC `5.0.23` adds export/workflow/catalog options, creates `dyec/dayoa_analysis_directory` and `ursa/analysis_job` external objects, and creates external-object relations through Dewey endpoints. | Existing CLI registration posted only to artifact-set analysis/MultiQC endpoints. | Released in DYEC `5.0.23`. |
+| DYEC-CLI-002 | Agent 2 | Add tests proving the new CLI uses token-env auth, idempotency keys, and exact Dewey endpoints without secrets in argv/logs. | SUCCESS | contract_test | 4 | DYEC tests `test_export.py`, `test_cli_registry_v2.py`, `test_repository_catalog.py`, and `test_script_entrypoints.py`; 257-test focused suite passed before publish. |  | Token value comes from env at export time; argv carries only token env name. |
+| ORCH-011 | Orchestrator | Ursa run-directory worker must call the new DAY-EC CLI link surface after successful export before writing `.complete`. | SUCCESS | feature_implementation | 4 | Ursa request payload passes `dewey_url`, `dewey_token_env`, `dewey_analysis_dir_external_object_id`, `dewey_run_artifact_euid`, and `dewey_ursa_analysis_euid`; test asserts those flags reach `dyec workflow launch`. |  | Requires Ursa pin to DYEC `5.0.23`. |
+
+### DYEC 5.0.23 Release Amendment
+
+Recorded: 2026-05-28T20:20:00Z
+
+- DYEC `5.0.23` was released because the new Dewey external-object link CLI flags are not present in `5.0.22`.
+- DYEC release evidence:
+  - commit `5b189710` tagged with annotated tag `5.0.23`;
+  - branch `codex/dyec-dewey-registration-refactor-20260528`, `main`, and tag `5.0.23` pushed;
+  - build produced `daylily_ephemeral_cluster-5.0.23-py3-none-any.whl` and `daylily_ephemeral_cluster-5.0.23.tar.gz`;
+  - `twup` published PyPI package `daylily-ephemeral-cluster==5.0.23`;
+  - `python -m pip index versions daylily-ephemeral-cluster` reports latest `5.0.23`.
+- Ursa dependency surfaces are amended from exact DYEC `5.0.22` to exact DYEC `5.0.23`; older `5.0.22` runtime is no longer sufficient for the run-directory export-link worker.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| DYEC23-001 | Orchestrator | Release DYEC patch containing the CLI link surfaces required by Ursa. | SUCCESS | release_hygiene | 4 | DYEC `5.0.23` pushed and published to PyPI. | DYEC `5.0.22` lacked the new `--dewey-*` export-link CLI flags. | Ursa must pin `daylily-ephemeral-cluster==5.0.23`. |
+| DYEC23-002 | Orchestrator | Update all active Ursa dependency/version surfaces to exact DYEC `5.0.23`. | SUCCESS | config_or_startup_contract | 4 | `pyproject.toml`, `uv.lock`, runtime guard, README, ecosystem metadata, docs/docstrings, and tests updated; stale-version sweep over active surfaces found no `5.0.22`; focused validation passed. |  | Ursa now requires exact `daylily-ephemeral-cluster==5.0.23`. |
+
+### Ursa 4.0.20 Release Candidate Amendment
+
+Recorded: 2026-05-28T20:24:00Z
+
+- Local validation for the no-default-cluster/DYEC 5.0.23 release candidate:
+  - `python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_daylily_ec_runner.py tests/test_admin_gui_and_cluster_routes.py tests/test_cluster_partition_helpers.py` -> 79 passed.
+  - `ruff check daylib_ursa tests/test_dewey_run_analysis_triggers.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_daylily_ec_runner.py tests/test_admin_gui_and_cluster_routes.py tests/test_cluster_partition_helpers.py` -> passed.
+  - `uv lock --check` -> passed.
+  - `git diff --check` -> passed.
+- Next Ursa tag target: `4.0.20`; `4.0.19` is already pushed and must not be moved.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| REL20-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.20` tag, and push tag. | OPEN | release_hygiene | 5 | Pending. |  |  |
+| PROD20-001 | Orchestrator | Deploy Ursa `4.0.20` to `ursa.day.lsmc.bio` and verify package/DYEC `5.0.23` runtime. | OPEN | active_product_contract | 6 | Pending. |  | Production restart remains a live action. |
+| OWY20-001 | Orchestrator | Run targeted OWY retry and verify `.ursa.*.complete` sidecar for `20260520_LH01121_0001_A23WW7FLT4`. | OPEN | active_product_contract | 7 | Pending. |  | Cron remains paused until targeted retry succeeds. |
