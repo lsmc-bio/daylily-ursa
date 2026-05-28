@@ -329,7 +329,7 @@ Recorded: 2026-05-28T19:43:42Z
 | ORCH-007 | Agent 3 | Implement monitoring, successful export to sequencing-bucket `derived/.../analysis_results/<cluster-name>/<analysis-euid>/daylily-omics-analysis/`, FSx cleanup, and DRA unmount/delete. | SUCCESS | feature_implementation | 4 | Worker derives `s3://<bucket>/derived/.../analysis_results/<cluster>/<analysis-euid>/`, sets `--export-trigger on-success`, `--delete-on-export-success`, polls `dyec workflow status/logs`, and deletes the run DRA before `.complete`. |  | Export/delete is owned by DAY-EC CLI/script exit status. |
 | ORCH-008 | Agent 4 | Implement sidecar lifecycle `<rundir>.ursa.<analysisid>.<complete|inprog|fail>` with terminal status metadata. | SUCCESS | feature_implementation | 4 | `_write_sidecar_cli` uses `aws s3 cp`; tests assert `.inprog`, DRA delete, then `.complete` ordering; exceptions write `.fail`. |  | Sidecar is the OWY acceptance signal. |
 | ORCH-009 | Orchestrator | Add tests covering no default cluster, match existing cluster, create cluster, DRA stage, CLI launch, export/cleanup, sidecar states, and missing CLI pause conditions. | SUCCESS | contract_test | 4 | `tests/test_dewey_run_analysis_triggers.py` now covers no default cluster, existing cluster selection, create/wait path, mount lifecycle, CLI launch args, Dewey link args, and sidecar ordering. |  | Explicit file-list path remains blocked by ORCH-004. |
-| ORCH-010 | Orchestrator | Release next main-line Ursa patch only after ORCH tests pass. | OPEN | release_hygiene | 5 | Pending. |  | Do not move existing tags. |
+| ORCH-010 | Orchestrator | Release next main-line Ursa patch only after ORCH tests pass. | SUCCESS | release_hygiene | 5 | Ursa `4.0.20` was committed from `origin/main`, annotated-tagged, pushed, built, and published after the focused ORCH/DYEC test suite passed. |  | Existing tags were not moved. |
 
 ### CLI Link Registration Amendment
 
@@ -378,6 +378,21 @@ Recorded: 2026-05-28T20:24:00Z
 
 | ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
 |---|---|---|---|---|---|---|---|---|
-| REL20-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.20` tag, and push tag. | OPEN | release_hygiene | 5 | Pending. |  |  |
+| REL20-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.20` tag, and push tag. | SUCCESS | release_hygiene | 5 | Commit `04cdb00` (`Release Ursa run-directory orchestration with DYEC 5.0.23`) is on `origin/main`; annotated tag `4.0.20` is pushed; `python -m pip index versions daylily-ursa` reports latest `4.0.20`. |  | PyPI package `daylily-ursa==4.0.20` published. |
 | PROD20-001 | Orchestrator | Deploy Ursa `4.0.20` to `ursa.day.lsmc.bio` and verify package/DYEC `5.0.23` runtime. | OPEN | active_product_contract | 6 | Pending. |  | Production restart remains a live action. |
 | OWY20-001 | Orchestrator | Run targeted OWY retry and verify `.ursa.*.complete` sidecar for `20260520_LH01121_0001_A23WW7FLT4`. | OPEN | active_product_contract | 7 | Pending. |  | Cron remains paused until targeted retry succeeds. |
+
+### Ursa 4.0.20 Release Evidence
+
+Recorded: 2026-05-28T20:48:00Z
+
+- Ursa commit/tag:
+  - `04cdb00` on `origin/main` and `origin/codex/ursa-4-0-16-owy-idempotency-20260528`.
+  - annotated tag `4.0.20` on `04cdb00`.
+- PyPI:
+  - `python -m pip index versions daylily-ursa` reports `daylily-ursa (4.0.20)` and `LATEST: 4.0.20`.
+- Dependency:
+  - Ursa `4.0.20` pins exact `daylily-ephemeral-cluster==5.0.23`.
+- Remaining live rows:
+  - `PROD20-001`: deploy/restart `ursa.day.lsmc.bio` on production runtime with the new package.
+  - `OWY20-001`: targeted OWY retry for `20260520_LH01121_0001_A23WW7FLT4` and `.ursa.*.complete` sidecar proof.
