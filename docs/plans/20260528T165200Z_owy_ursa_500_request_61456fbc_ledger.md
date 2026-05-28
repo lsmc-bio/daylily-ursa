@@ -197,3 +197,49 @@ Recorded: 2026-05-28
   - Production deploy remains blocked until exact approval phrase: `APPROVE URSA PROD OWY FIX DEPLOY us-west-2 ursa.day.lsmc.bio`.
   - OWY acceptance retry remains blocked until fixed Ursa is deployed and a retry is approved/coordinated.
   - Production verification of DYEC `5.0.22` remains blocked until the approved deploy occurs.
+
+## Post-Approval 4.0.17 Amendment
+
+Recorded: 2026-05-28
+
+- Production Ursa `4.0.16` was deployed and verified live on
+  `ursa.day.lsmc.bio`:
+  - EC2 instance `i-09126000eb19643b0`, service PID `513773`.
+  - `https://ursa.day.lsmc.bio/healthz` -> HTTP 200, build `4.0.16`.
+  - `https://ursa.day.lsmc.bio/readyz` -> HTTP 200, DB ready.
+  - `/openapi.json` -> version `4.0.16`; route
+    `/api/v1/dewey/run-directory-analysis-triggers` present.
+  - Production package proof: `daylily-ursa=4.0.16` and
+    `daylily-ephemeral-cluster=5.0.22`.
+- The approved OWY retry after `4.0.16` cleared the HTTP 409 blocker:
+  - OWY execution `f37b6f97-4f01-425c-9fa7-94e52c111495`.
+  - Ursa returned HTTP 202 for the replay.
+  - OWY still failed closed because the existing trigger response had
+    `status=FAILED`.
+- Production resource-store evidence for the existing trigger:
+  - trigger `URDT-0C6B582935602401`;
+  - idempotency key `owy-ursa-752a55b2a17b4b958d668cbdd19651af`;
+  - analysis job `M-RGX-9S3G`;
+  - job error:
+    `AnalysisIdentityError: executing_entity must be a single path-safe segment matching '^[A-Za-z0-9][A-Za-z0-9._-]*$'; got 'johnm@lsmc.com'.`
+  - job launch metadata had no DayEC workflow markers
+    (`session_name`, `run_dir`, `repo_path` absent), proving the failure
+    occurred before a workflow was submitted.
+- Ursa `4.0.17` fix scope:
+  - add explicit `ursa_run_directory_analysis_executing_entity`;
+  - fail the run-directory policy hard when it is missing or not path-safe;
+  - write that explicit value into DayEC launch requests instead of reusing the
+    owner email;
+  - on idempotent replay, relaunch an existing `FAILED` analysis job only when
+    the previous failure happened before any DayEC workflow session was
+    launched; launched failures are not retried silently.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| POST16-001 | Orchestrator | Record 4.0.16 production deploy and OWY retry result. | SUCCESS | plan_amendment | 5 | EC2 package proof, health/ready/openapi checks, OWY execution `f37b6f97-4f01-425c-9fa7-94e52c111495`; trigger `URDT-0C6B582935602401` and job `M-RGX-9S3G` inspected through ResourceStore. |  | 4.0.16 cleared HTTP 409 but exposed a stored pre-launch analysis identity failure. |
+| IDENTITY-001 | Agent 1 | Add explicit path-safe run-directory DayEC execution identity. | SUCCESS | config_or_startup_contract | 4 | `daylib_ursa/config.py`, `config/ursa-config.example.yaml`, `daylib_ursa/workset_api.py`; tests require `ursa_run_directory_analysis_executing_entity`. |  | Owner email remains audit owner; DayEC launch identity is now explicit and path-safe. |
+| IDEMP-002 | Agent 1 | Permit idempotent replay to recover an existing pre-launch failed job without deleting trigger data or changing OWY keys. | SUCCESS | legitimate_safety_handling | 4 | `daylib_ursa/workset_api.py`, `daylib_ursa/analysis_jobs.py`, `tests/test_dewey_run_analysis_triggers.py::test_run_directory_trigger_replay_relaunches_prelaunch_failure`. |  | Replay only relaunches when no workflow markers exist; real launched failures remain stable. |
+| VALID17-001 | Orchestrator | Validate 4.0.17 source before release. | SUCCESS | contract_test | 4 | `python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py` -> `34 passed`; `ruff check daylib_ursa tests/test_dewey_run_analysis_triggers.py` -> passed; `git diff --check` -> passed. |  | Focused local validation passed. |
+| REL17-001 | Orchestrator | Merge/push main, create annotated Ursa `4.0.17` tag, and push tag. | OPEN | plan_amendment | 5 | Pending. |  |  |
+| PROD17-001 | Orchestrator | Deploy Ursa `4.0.17` to `ursa.day.lsmc.bio`, update explicit production runtime config, and verify DYEC `5.0.22`. | OPEN | plan_amendment | 5 | Pending. |  |  |
+| OWY17-001 | Orchestrator | Run targeted OWY retry and verify `.ursa.*` sidecar for `20260520_LH01121_0001_A23WW7FLT4`. | OPEN | plan_amendment | 5 | Pending. |  | Cron remains paused until targeted retry succeeds. |

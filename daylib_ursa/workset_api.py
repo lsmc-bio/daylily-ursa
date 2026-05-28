@@ -8,6 +8,7 @@ import hmac
 import io
 import json
 import logging
+import re
 import secrets
 import tarfile
 import time
@@ -146,6 +147,7 @@ from daylib_ursa.tapdb_mount import mount_tapdb_admin
 from daylib_ursa.ursa_config import get_ursa_config, parse_regions_csv, update_config_regions
 
 LOGGER = logging.getLogger("daylily.ursa.api")
+DAYEC_EXECUTING_ENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class AnalysisInputReferenceRequest(BaseModel):
@@ -2633,6 +2635,57 @@ def create_app(
             return True
         return _canonical_run_directory_trigger_fingerprint(existing.request) == fingerprint
 
+    def _analysis_job_failed_before_workflow_launch(job: AnalysisJobRecord | None) -> bool:
+        if job is None or job.state != "FAILED":
+            return False
+        launch = dict(job.launch or {})
+        launched_markers = ("session_name", "run_dir", "repo_path")
+        return not any(str(launch.get(marker) or "").strip() for marker in launched_markers)
+
+    def _run_directory_response_with_job(
+        *,
+        record: DeweyRunTriggerRecord,
+        job: AnalysisJobRecord,
+    ) -> dict[str, Any]:
+        response = dict(record.response or {})
+        updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        response["status"] = job.state
+        response["updated_at"] = updated_at
+        job_euids = [
+            str(item)
+            for item in list(response.get("analysis_job_euids") or [])
+            if str(item or "").strip()
+        ]
+        if job.job_euid not in job_euids:
+            job_euids.append(job.job_euid)
+        response["analysis_job_euids"] = job_euids
+        rows: list[dict[str, Any]] = []
+        for row in list(response.get("analysis_jobs") or []):
+            candidate = dict(row or {})
+            if str(candidate.get("analysis_job_euid") or "").strip() == job.job_euid:
+                candidate["status"] = job.state
+                candidate["command_id"] = job.request.get(
+                    "analysis_command_id",
+                    candidate.get("command_id"),
+                )
+                candidate["pipeline_order"] = job.request.get(
+                    "run_directory_trigger", {}
+                ).get("pipeline_order", candidate.get("pipeline_order"))
+            rows.append(candidate)
+        if not rows:
+            rows.append(
+                {
+                    "analysis_job_euid": job.job_euid,
+                    "command_id": job.request.get("analysis_command_id"),
+                    "status": job.state,
+                    "pipeline_order": job.request.get("run_directory_trigger", {}).get(
+                        "pipeline_order"
+                    ),
+                }
+            )
+        response["analysis_jobs"] = rows
+        return response
+
     def require_resource_store() -> ResourceStore:
         resource_backend = getattr(app.state, "resource_store", None)
         if resource_backend is None:
@@ -3911,6 +3964,7 @@ def create_app(
         required = {
             "tenant_id": "ursa_run_directory_analysis_tenant_id",
             "owner_user_id": "ursa_run_directory_analysis_owner_user_id",
+            "executing_entity": "ursa_run_directory_analysis_executing_entity",
             "cluster_name": "ursa_run_directory_analysis_cluster_name",
             "region": "ursa_run_directory_analysis_region",
             "reference_s3_uri": "ursa_run_directory_analysis_reference_s3_uri",
@@ -3937,6 +3991,14 @@ def create_app(
                 status_code=503,
                 detail="Ursa run-directory analysis policy has invalid tenant_id",
             ) from exc
+        if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(values["executing_entity"]):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ursa run-directory analysis policy has invalid executing_entity; "
+                    "expected a path-safe segment matching ^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                ),
+            )
         try:
             values["reference_s3_uri"] = _normalize_s3_prefix_uri(values["reference_s3_uri"])
             values["destination_s3_uri"] = _normalize_s3_prefix_uri(values["destination_s3_uri"])
@@ -4399,6 +4461,29 @@ def create_app(
                     status_code=409,
                     detail="Idempotency-Key reuse with different request payload",
                 )
+            existing_job = (
+                resources.get_analysis_job(existing.analysis_job_euid)
+                if existing.analysis_job_euid
+                else None
+            )
+            if existing_job is not None and _analysis_job_failed_before_workflow_launch(
+                existing_job
+            ):
+                relaunched = manager.launch_job(
+                    existing_job.job_euid,
+                    actor_user_id=str(policy["owner_user_id"]),
+                    request_overrides={"executing_entity": str(policy["executing_entity"])},
+                )
+                response = _run_directory_response_with_job(record=existing, job=relaunched)
+                updated = resources.update_dewey_run_trigger(
+                    trigger_euid=existing.trigger_euid,
+                    status=relaunched.state,
+                    response=response,
+                    analysis_job_euid=relaunched.job_euid,
+                    staging_job_euid=existing.staging_job_euid,
+                    error=relaunched.error,
+                )
+                return _dewey_run_directory_trigger_response_from_record(updated)
             return _dewey_run_directory_trigger_response_from_record(existing)
 
         commands = _validate_run_directory_commands(request.command_ids)
@@ -4489,6 +4574,7 @@ def create_app(
                 "optional_features": [],
                 "destination": destination,
                 "export_trigger": "on-success",
+                "executing_entity": policy["executing_entity"],
                 "reference_s3_uri": policy["reference_s3_uri"],
                 "session_name": f"{request.run_folder_name}-{command_id}"[:64],
                 "project": policy["project"],

@@ -132,6 +132,9 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "ursa_run_directory_analysis_owner_user_id": getattr(
             cfg, "ursa_run_directory_analysis_owner_user_id", ""
         ),
+        "ursa_run_directory_analysis_executing_entity": getattr(
+            cfg, "ursa_run_directory_analysis_executing_entity", ""
+        ),
         "ursa_run_directory_analysis_cluster_name": getattr(
             cfg, "ursa_run_directory_analysis_cluster_name", ""
         ),
@@ -327,6 +330,7 @@ dewey_verify_ssl: true
 # POST /api/v1/dewey/run-directory-analysis-triggers can launch jobs.
 ursa_run_directory_analysis_tenant_id: ""
 ursa_run_directory_analysis_owner_user_id: ""
+ursa_run_directory_analysis_executing_entity: ""
 ursa_run_directory_analysis_cluster_name: ""
 ursa_run_directory_analysis_region: ""
 ursa_run_directory_analysis_reference_s3_uri: ""
@@ -738,6 +742,10 @@ class Settings(BaseSettings):
     ursa_run_directory_analysis_owner_user_id: str = Field(
         default="",
         description="Owner user ID used for OWY run-directory analysis triggers",
+    )
+    ursa_run_directory_analysis_executing_entity: str = Field(
+        default="",
+        description="Path-safe DayEC executing entity used for OWY run-directory analysis launches",
     )
     ursa_run_directory_analysis_cluster_name: str = Field(
         default="",

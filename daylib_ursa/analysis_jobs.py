@@ -249,11 +249,17 @@ class AnalysisJobManager:
             )
             self.launch_job(candidate.job_euid, actor_user_id=actor_user_id)
 
-    def launch_job(self, job_euid: str, *, actor_user_id: str) -> AnalysisJobRecord:
+    def launch_job(
+        self,
+        job_euid: str,
+        *,
+        actor_user_id: str,
+        request_overrides: dict[str, Any] | None = None,
+    ) -> AnalysisJobRecord:
         job = self.resource_store.get_analysis_job(job_euid)
         if job is None:
             raise KeyError(f"analysis job not found: {job_euid}")
-        request = dict(job.request or {})
+        request = {**dict(job.request or {}), **dict(request_overrides or {})}
         aws_profile = (
             str(request.get("aws_profile") or self.client.aws_profile or "").strip() or None
         )

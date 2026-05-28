@@ -335,8 +335,28 @@ class _DummyAnalysisJobManager:
     def __init__(self, resources: _MemoryResourceStore, terminal_state: str = "RUNNING") -> None:
         self.resources = resources
         self.terminal_state = terminal_state
+        self.launch_calls: list[dict] = []
 
-    def launch_job(self, job_euid: str, *, actor_user_id: str):
+    def launch_job(self, job_euid: str, *, actor_user_id: str, request_overrides=None):
+        self.launch_calls.append(
+            {
+                "job_euid": job_euid,
+                "actor_user_id": actor_user_id,
+                "request_overrides": dict(request_overrides or {}),
+            }
+        )
+        if self.terminal_state == "PRELAUNCH_FAILED":
+            return self.resources.update_analysis_job_status(
+                job_euid=job_euid,
+                state="FAILED",
+                created_by=actor_user_id,
+                started_at="2026-05-27T00:03:00Z",
+                completed_at="2026-05-27T00:04:00Z",
+                return_code=1,
+                error="AnalysisIdentityError: executing_entity must be path-safe",
+                output_summary="AnalysisIdentityError: executing_entity must be path-safe",
+                launch={"run_context_file": ".ursa-run-contexts/AJ-1/config/runs.tsv"},
+            )
         if self.terminal_state == "COMPLETED":
             return self.resources.update_analysis_job_status(
                 job_euid=job_euid,
@@ -435,6 +455,7 @@ def _settings() -> Settings:
         ursa_tapdb_mount_enabled=False,
         ursa_run_directory_analysis_tenant_id=str(TENANT_ID),
         ursa_run_directory_analysis_owner_user_id=OWNER_USER_ID,
+        ursa_run_directory_analysis_executing_entity="ursa-run-directory",
         ursa_run_directory_analysis_cluster_name="cluster-1",
         ursa_run_directory_analysis_region="us-west-2",
         ursa_run_directory_analysis_reference_s3_uri="s3://refs/hg38/",
@@ -452,6 +473,7 @@ def _app(
     analysis_job_manager: _DummyAnalysisJobManager | None = None,
     dewey_client: _DummyDeweyClient | None = None,
     bloom_client: _DummyBloomClient | None = None,
+    settings: Settings | None = None,
 ):
     resources = resource_store or _MemoryResourceStore()
     manager = analysis_job_manager or _DummyAnalysisJobManager(resources)
@@ -489,7 +511,7 @@ def _app(
         resource_store=resources,
         cluster_service=_DummyClusterService(),
         analysis_job_manager=manager,
-        settings=_settings(),
+        settings=settings or _settings(),
     )
 
 
@@ -841,6 +863,65 @@ def test_run_directory_trigger_replay_allows_new_owy_attempt_fields(monkeypatch)
     assert len(resources.analysis_jobs) == 1
 
 
+def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    manager = _DummyAnalysisJobManager(resources, terminal_state="PRELAUNCH_FAILED")
+    dewey = _DummyDeweyClient()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        analysis_job_manager=manager,
+        dewey_client=dewey,
+    )
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+        "bloom_run_euid": "BLOOM-RUN-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-prelaunch-failure",
+            },
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        assert created.json()["status"] == "FAILED"
+        assert "AnalysisIdentityError" in resources.analysis_jobs["AJ-1"].error
+
+        manager.terminal_state = "RUNNING"
+        replay = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-prelaunch-failure",
+            },
+            json={**body, "producer_object_euid": "exec-2:run-a", "owy_execution_id": "exec-2"},
+        )
+
+    assert replay.status_code == 202, replay.text
+    payload = replay.json()
+    assert payload["status"] == "RUNNING"
+    assert payload["analysis_jobs"][0]["status"] == "RUNNING"
+    assert payload["analysis_job_euids"] == ["AJ-1"]
+    assert manager.launch_calls[1]["request_overrides"] == {
+        "executing_entity": "ursa-run-directory"
+    }
+    assert resources.triggers_by_idempotency["idem-run-dir-prelaunch-failure"].status == "RUNNING"
+    assert resources.analysis_jobs["AJ-1"].state == "RUNNING"
+    assert len(resources.worksets) == 1
+    assert len(resources.analysis_jobs) == 1
+
+
 def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> None:
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()
@@ -868,6 +949,36 @@ def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> No
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == "illumina_run_qc_bclconvert"
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "ursa-run-directory"
+
+
+def test_run_directory_trigger_requires_explicit_path_safe_executing_entity(monkeypatch) -> None:
+    settings = _settings()
+    settings.ursa_run_directory_analysis_executing_entity = "johnm@lsmc.com"
+    app = _app(monkeypatch, dewey_client=_DummyDeweyClient(), settings=settings)
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc_bclconvert"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-invalid-executor",
+            },
+            json=body,
+        )
+
+    assert rejected.status_code == 503
+    assert "invalid executing_entity" in rejected.text
 
 
 def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeypatch) -> None:
@@ -912,6 +1023,7 @@ def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeyp
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert payload["request"]["owy_execution_id"] == "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9"
+    assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "ursa-run-directory"
     assert payload["ursa_external_objects"][0]["external_object_id"] == "M-BRM-4Z"
     assert resources.external_object_parent_lookups == [
         {
