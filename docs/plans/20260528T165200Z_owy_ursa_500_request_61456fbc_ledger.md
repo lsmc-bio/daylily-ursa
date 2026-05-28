@@ -475,3 +475,23 @@ Recorded: 2026-05-28T21:42:00Z
 | REL23-001 | Orchestrator | Commit, push main, annotated-tag `4.0.23`, build, publish. | OPEN | release_hygiene | 8 | Pending. |  | Existing tags must not be moved. |
 | PROD23-001 | Orchestrator | Deploy Ursa `4.0.23` to `ursa.day.lsmc.bio` with DYEC `5.0.25`. | OPEN | active_product_contract | 9 | Pending. |  | Check for active workflow/controller processes before restart. |
 | OWY23-001 | Orchestrator | Replay original OWY request and verify export, Dewey links, cleanup, and `.ursa.M-RGX-9S3G.complete`. | OPEN | active_product_contract | 9 | Pending. |  | Must reuse original idempotency key and analysis EUID `M-RGX-9S3G`. |
+
+### DYEC 5.0.28 / Ursa 4.0.25 Headnode Retry Flag Amendment
+
+Recorded: 2026-05-28T22:46:00Z
+
+- Ursa `4.0.23` was installed and restarted on `ursa.day.lsmc.bio`; `/healthz` and `/readyz` reported build `4.0.23`.
+- Exact OWY replay returned HTTP `202` and relaunched worker PID `519879`.
+- The worker selected `xfer-cluster`, created run DRA association `dra-048f39204f9f42ab2`, and waited through the DAY-EC CLI path.
+- DAY-EC `5.0.25` then failed before tmux launch with SSM command `06ddc28f-5395-40e8-92e2-00a646cefe06`: `/tmp/daylily-ssm-j12NWk.sh: line 62: REPLACE_EXISTING_ANALYSIS_DIR: unbound variable`.
+- DAY-EC `5.0.28` fixes the `set -u` failure by defining `REPLACE_EXISTING_ANALYSIS_DIR` in the outer headnode SSM script as well as the tmux payload.
+- Tags `5.0.26`, `5.0.27`, and Ursa `4.0.24` already existed after `git fetch --tags`, so the next release targets are DAY-EC `5.0.28` and Ursa `4.0.25`.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| DYEC28-001 | Orchestrator | Release DAY-EC `5.0.28` with the outer-script retry flag fix. | SUCCESS | release_hygiene | 9 | DAY-EC commit `ea58ba5d`; annotated tag `5.0.28`; branch/main/tag pushed; `twup` uploaded wheel/sdist; PyPI reports latest `5.0.28`. | DAY-EC `5.0.25` referenced `REPLACE_EXISTING_ANALYSIS_DIR` before assignment in the outer SSM script. | Default replacement behavior remains fail-hard unless the explicit flag is present. |
+| URSA25-001 | Orchestrator | Update Ursa to exact DAY-EC `5.0.28`. | SUCCESS | config_or_startup_contract | 9 | `pyproject.toml`, `uv.lock`, runtime guard/docs/tests, `config/ecosystem-versions.json`, and README updated; stale-version sweep over active surfaces found no `5.0.25`. | Ursa `4.0.23` installed DAY-EC `5.0.25`, which still had the headnode `set -u` bug. | Existing tags must not be moved; next tag is `4.0.25`. |
+| VALID25-001 | Orchestrator | Validate Ursa `4.0.25` locally before release. | SUCCESS | contract_test | 9 | `uv run --python 3.12 python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py tests/test_cluster_partition_helpers.py` -> `82 passed`; `ruff check ...`, `uv lock --check`, and `git diff --check` passed. |  | Ready for release tag `4.0.25`. |
+| REL25-001 | Orchestrator | Commit, push main, annotated-tag `4.0.25`, build, publish. | OPEN | release_hygiene | 9 | Pending. |  | Existing tags must not be moved. |
+| PROD25-001 | Orchestrator | Deploy Ursa `4.0.25` to `ursa.day.lsmc.bio` with DYEC `5.0.28`. | OPEN | active_product_contract | 9 | Pending. |  | Check for active workflow/controller processes before restart. |
+| OWY25-001 | Orchestrator | Replay original OWY request and verify export, Dewey links, cleanup, and `.ursa.M-RGX-9S3G.complete`. | OPEN | active_product_contract | 9 | Pending. |  | Must reuse original idempotency key and analysis EUID `M-RGX-9S3G`. |
