@@ -17,6 +17,7 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+COPY config ./config
 COPY daylib_ursa ./daylib_ursa
 RUN uv sync --frozen --no-dev
 
