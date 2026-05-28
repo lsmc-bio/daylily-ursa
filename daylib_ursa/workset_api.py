@@ -8,6 +8,7 @@ import hmac
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import tarfile
@@ -2654,6 +2655,31 @@ def create_app(
         launched_markers = ("session_name", "run_dir", "repo_path")
         return not any(str(launch.get(marker) or "").strip() for marker in launched_markers)
 
+    def _worker_pid_is_running(response: dict[str, Any]) -> bool:
+        worker = response.get("worker")
+        if not isinstance(worker, dict):
+            return False
+        try:
+            pid = int(worker.get("pid") or 0)
+        except (TypeError, ValueError):
+            return False
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def _worker_payload(worker: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "pid": int(worker.get("pid") or 0),
+            "command": list(worker.get("command") or []),
+            "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+
     def _run_directory_response_with_job(
         *,
         record: DeweyRunTriggerRecord,
@@ -4477,6 +4503,26 @@ def create_app(
                 if existing.analysis_job_euid
                 else None
             )
+            existing_response = dict(existing.response or {})
+            if (
+                existing_job is not None
+                and existing.status == "QUEUED"
+                and existing_job.state == "DEFINED"
+            ):
+                if _worker_pid_is_running(existing_response):
+                    return _dewey_run_directory_trigger_response_from_record(existing)
+                response = _run_directory_response_with_job(record=existing, job=existing_job)
+                response["status"] = "QUEUED"
+                response["worker"] = _worker_payload(orchestrator.start_trigger(existing.trigger_euid))
+                updated = resources.update_dewey_run_trigger(
+                    trigger_euid=existing.trigger_euid,
+                    status="QUEUED",
+                    response=response,
+                    analysis_job_euid=existing_job.job_euid,
+                    staging_job_euid=existing.staging_job_euid,
+                    error=None,
+                )
+                return _dewey_run_directory_trigger_response_from_record(updated)
             if existing_job is not None and _analysis_job_failed_before_workflow_launch(
                 existing_job
             ):
@@ -4493,6 +4539,7 @@ def create_app(
                 )
                 response = _run_directory_response_with_job(record=existing, job=existing_job)
                 response["status"] = "QUEUED"
+                response["worker"] = _worker_payload(orchestrator.start_trigger(existing.trigger_euid))
                 updated = resources.update_dewey_run_trigger(
                     trigger_euid=existing.trigger_euid,
                     status="QUEUED",
@@ -4501,7 +4548,6 @@ def create_app(
                     staging_job_euid=existing.staging_job_euid,
                     error=None,
                 )
-                orchestrator.start_trigger(existing.trigger_euid)
                 return _dewey_run_directory_trigger_response_from_record(updated)
             return _dewey_run_directory_trigger_response_from_record(existing)
 
@@ -4761,10 +4807,18 @@ def create_app(
                 error=created_jobs[0].error if created_jobs else None,
             )
         try:
-            orchestrator.start_trigger(trigger_euid)
+            response["worker"] = _worker_payload(orchestrator.start_trigger(trigger_euid))
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return DeweyRunDirectoryAnalysisTriggerResponse(**response)
+        trigger_record = resources.update_dewey_run_trigger(
+            trigger_euid=trigger_euid,
+            status=response_status,
+            response=response,
+            analysis_job_euid=created_jobs[0].job_euid if created_jobs else None,
+            staging_job_euid=None,
+            error=created_jobs[0].error if created_jobs else None,
+        )
+        return _dewey_run_directory_trigger_response_from_record(trigger_record)
 
     @app.post(
         "/api/v1/dewey/run-analysis-triggers",

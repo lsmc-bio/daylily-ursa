@@ -396,3 +396,28 @@ Recorded: 2026-05-28T20:48:00Z
 - Remaining live rows:
   - `PROD20-001`: deploy/restart `ursa.day.lsmc.bio` on production runtime with the new package.
   - `OWY20-001`: targeted OWY retry for `20260520_LH01121_0001_A23WW7FLT4` and `.ursa.*.complete` sidecar proof.
+
+### DYEC 5.0.24 / Ursa 4.0.21 Amendment
+
+Recorded: 2026-05-28T21:06:00Z
+
+- Production replay of the exact stored OWY request no longer hit the old Ursa HTTP 500 and no longer hit the HTTP 409 payload mismatch once the exact original request body was used.
+- The replay reached the worker and selected existing cluster `xfer-cluster` because no `goodole3` cluster existed.
+- The worker created/reused run DRA mount `dra-08847d14e08478c49` for `s3://lsmc-ssf-sequencing-data/basecalls/lsmc/ssf-hq/lh01121/2026/20260520_LH01121_0001_A23WW7FLT4/`, mounted at `/run_dir_mounts/20260520_LH01121_0001_A23WW7FLT4/`.
+- The worker then exposed a DAY-EC `mounts describe --mount-id` production bug when an existing one-segment custom mount path `/data/` was present on the cluster; DAY-EC attempted to parse `/data/` as an invalid headnode DRA path while listing cluster mounts.
+- DAY-EC `5.0.24` fixes that one-segment custom-path DRA parsing bug and is published.
+- Ursa is amended from exact `daylily-ephemeral-cluster==5.0.23` to exact `daylily-ephemeral-cluster==5.0.24`.
+- Ursa idempotent replay behavior is amended so a repeated identical OWY trigger can relaunch the worker when the trigger is still `QUEUED`, the analysis job is still `DEFINED`, and the recorded worker process is absent/stale.
+- Ursa mount behavior is amended so an already-available, exact-matching run DRA mount is described/reused before any create attempt.
+- The user approved a shortcut only if it remains evidence-grounded: completed export evidence may move the analysis from requested to complete, but the accepted path still requires the CLI-owned export, Dewey registration/linking, and `.ursa.<analysis>.complete` sidecar.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| DYEC24-001 | Orchestrator | Release DAY-EC patch for one-segment custom DRA path parsing. | SUCCESS | release_hygiene | 4 | DAY-EC `5.0.24` is committed, annotated-tagged, pushed, built, published, and visible from `python -m pip index versions daylily-ephemeral-cluster`. | Existing cluster had `/data/`, which triggered invalid empty-segment parsing during mount inventory. | Required by Ursa `4.0.21`. |
+| URSA21-001 | Orchestrator | Update all active Ursa dependency/version surfaces to exact DAY-EC `5.0.24`. | SUCCESS | config_or_startup_contract | 4 | `pyproject.toml`, `uv.lock`, runtime guard, README, ecosystem metadata, and tests now reference `5.0.24`; stale sweep over active surfaces found no `5.0.23` requirement. | Ursa `4.0.20` pinned DAY-EC `5.0.23`, which still contained the production mount-list bug. | No fallback to older DAY-EC versions is allowed. |
+| URSA21-002 | Orchestrator | Add Ursa idempotent replay recovery for stale `QUEUED` / `DEFINED` worker records. | SUCCESS | feature_implementation | 4 | `workset_api.py` persists worker payload and relaunches the worker when the previous PID is absent/stale; focused tests cover the replay case. | The first production retry created `.inprog` then exited before launch, leaving no live worker to continue the already-accepted request. | Identical replay remains idempotent; changed payloads still return HTTP 409. |
+| URSA21-003 | Orchestrator | Reuse an exact-matching `AVAILABLE` run DRA before creating a new DRA. | SUCCESS | feature_implementation | 4 | `RunDirectoryOrchestrator.ensure_run_mount()` describes the mount and reuses it only when cluster, region, mount ID, lifecycle, and source S3 URI match; mismatches fail hard. | The existing production mount is valid and should not be recreated or treated as a fallback. | Keeps the retry on the CLI path without manual DRA workarounds. |
+| VALID21-001 | Orchestrator | Validate the Ursa patch locally before release. | SUCCESS | contract_test | 5 | `uv run --python 3.12 python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py tests/test_cluster_partition_helpers.py` -> 81 passed; `uv run --python 3.12 ruff check ...`, `uv lock --check`, and `git diff --check` passed. | Global Python has a stale editable DAY-EC checkout; release validation must use the locked exact `5.0.24` environment. | Release candidate ready for tag `4.0.21`. |
+| REL21-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.21` tag, push tag, build, and publish. | OPEN | release_hygiene | 5 | Pending. |  | Existing tags must not be moved. |
+| PROD21-001 | Orchestrator | Deploy Ursa `4.0.21` to `ursa.day.lsmc.bio` with exact DAY-EC `5.0.24`. | OPEN | active_product_contract | 6 | Pending. |  | Production restart must avoid interrupting active analysis/workflow processes. |
+| OWY21-001 | Orchestrator | Replay the exact stored OWY request and verify CLI launch, export, Dewey registration/linking, cleanup, and `.ursa.M-RGX-9S3G.complete`. | OPEN | active_product_contract | 7 | Pending. |  | Cron remains paused until targeted retry succeeds. |

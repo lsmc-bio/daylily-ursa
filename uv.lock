@@ -1789,7 +1789,7 @@ wheels = [
 
 [[package]]
 name = "daylily-ephemeral-cluster"
-version = "5.0.23"
+version = "5.0.24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-parallelcluster" },
@@ -1816,9 +1816,9 @@ dependencies = [
     { name = "typer" },
     { name = "yamllint" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/63/44aa9c0f1d9df8b48d6689debccd221a0dc336c9a4ce035dcc70afab3419/daylily_ephemeral_cluster-5.0.23.tar.gz", hash = "sha256:c0a9a047ed98766f1272d040fe8eaaf80242310fd47b11790bd7130ddf53afce", size = 50390260, upload-time = "2026-05-28T20:16:21.59Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/0c/b4fda635c309e9a92fff3a56a163257a613e602e5b5c7fae00fb5ac4739d/daylily_ephemeral_cluster-5.0.24.tar.gz", hash = "sha256:952573a1ad7546133a0399f8815aa4b730c21de9ad4297726a3ba4a3c11d17cd", size = 50233571, upload-time = "2026-05-28T20:57:44.681Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/af/4291417ff7055ad145541371d69ee733a5fbabdd69895f4977a55435588b/daylily_ephemeral_cluster-5.0.23-py3-none-any.whl", hash = "sha256:c928c33106a1dbbb2b9c12f8ad9f653f486eb30756927329e673e3f1448302bf", size = 1725986, upload-time = "2026-05-28T20:16:17.379Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/54/8f0f571a58635a6eb0a6434da5079e5add2774069a45c48aa5a24bdaf335/daylily_ephemeral_cluster-5.0.24-py3-none-any.whl", hash = "sha256:deb9fb9e65d9fcdcb69d3276ecdbdf386d384d0be6382aadfa74586dd818a127", size = 1538425, upload-time = "2026-05-28T20:57:41.227Z" },
 ]
 
 [[package]]
@@ -1890,7 +1890,7 @@ requires-dist = [
     { name = "boto3-stubs", extras = ["cloudwatch", "s3", "sns"], specifier = ">=1.28.0" },
     { name = "cli-core-yo", specifier = "==2.1.1" },
     { name = "daylily-auth-cognito", specifier = "==2.1.5" },
-    { name = "daylily-ephemeral-cluster", specifier = "==5.0.23" },
+    { name = "daylily-ephemeral-cluster", specifier = "==5.0.24" },
     { name = "daylily-tapdb", specifier = "==7.0.9" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },

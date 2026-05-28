@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "5.0.23"
+REQUIRED_DAYLILY_EC_VERSION = "5.0.24"
 MINIMUM_DAYLILY_EC_VERSION = REQUIRED_DAYLILY_EC_VERSION
 DAYLILY_EC_VERSION_REQUIREMENT = f"=={REQUIRED_DAYLILY_EC_VERSION}"
 DAYLILY_EC_INSTALL_SPEC = f"{DAYLILY_EC_DISTRIBUTION}{DAYLILY_EC_VERSION_REQUIREMENT}"
@@ -170,7 +170,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster ==5.0.23 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster ==5.0.24 contract."""
 
     def __init__(
         self,
@@ -360,6 +360,27 @@ class DaylilyEcClient:
             platform,
             "--timeout-seconds",
             str(timeout_seconds),
+        ]
+        if self.aws_profile:
+            args.extend(["--profile", self.aws_profile])
+        return self.run_json(args)
+
+    def mounts_describe(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        mount_id: str,
+    ) -> Dict[str, Any]:
+        args = [
+            "mounts",
+            "describe",
+            "--mount-id",
+            mount_id,
+            "--cluster",
+            cluster_name,
+            "--region",
+            region,
         ]
         if self.aws_profile:
             args.extend(["--profile", self.aws_profile])

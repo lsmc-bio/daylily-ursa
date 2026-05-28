@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import os
 import subprocess
 import uuid
 
@@ -10,7 +11,11 @@ from fastapi.testclient import TestClient
 from daylib_ursa.config import Settings
 from daylib_ursa.analysis_jobs import AnalysisJobManager
 from daylib_ursa.integrations.dewey_client import DeweyClient
-from daylib_ursa.run_directory_orchestrator import RunDirectoryOrchestrator, RunDirectoryPolicy
+from daylib_ursa.run_directory_orchestrator import (
+    RunDirectoryOrchestrator,
+    RunDirectoryPolicy,
+    SelectedCluster,
+)
 from daylib_ursa.resource_store import (
     AnalysisJobEventRecord,
     AnalysisJobRecord,
@@ -428,7 +433,7 @@ class _DummyRunDirectoryOrchestrator:
 
     def start_trigger(self, trigger_euid: str):
         self.start_calls.append(trigger_euid)
-        return {"pid": 1234, "command": ["fake-worker", trigger_euid]}
+        return {"pid": os.getpid(), "command": ["fake-worker", trigger_euid]}
 
 
 class _FakeRunAnalysisCommand:
@@ -1032,6 +1037,64 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
     assert len(resources.analysis_jobs) == 1
 
 
+def test_run_directory_trigger_replay_relaunches_queued_defined_without_live_worker(
+    monkeypatch,
+) -> None:
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient()
+    orchestrator = _DummyRunDirectoryOrchestrator()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        dewey_client=dewey,
+        run_directory_orchestrator=orchestrator,
+    )
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+        "bloom_run_euid": "BLOOM-RUN-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-stale-queued",
+            },
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        first_payload = created.json()
+        record = resources.triggers_by_idempotency["idem-run-dir-stale-queued"]
+        resources.triggers_by_idempotency["idem-run-dir-stale-queued"] = replace(
+            record,
+            response={key: value for key, value in record.response.items() if key != "worker"},
+        )
+
+        replay = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-stale-queued",
+            },
+            json=body,
+        )
+
+    assert replay.status_code == 202, replay.text
+    assert replay.json()["status"] == "QUEUED"
+    assert replay.json()["trigger_euid"] == first_payload["trigger_euid"]
+    assert orchestrator.start_calls == [first_payload["trigger_euid"], first_payload["trigger_euid"]]
+    assert len(resources.worksets) == 1
+    assert len(resources.analysis_jobs) == 1
+
+
 def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> None:
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()
@@ -1406,6 +1469,10 @@ def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_
                 ]
             }
 
+        def mounts_describe(self, **kwargs):  # noqa: ANN001
+            captured["mounts_describe"] = dict(kwargs)
+            raise RuntimeError("Run mount not found: run-a")
+
         def mounts_create(self, **kwargs):  # noqa: ANN001
             captured["mounts_create"] = dict(kwargs)
             return {"status": "created"}
@@ -1487,6 +1554,11 @@ def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_
     assert sidecars[0]["payload"]["state"] == "inprog"
     assert sidecars[-1]["payload"]["state"] == "complete"
     assert lifecycle_events == ["sidecar:inprog", "mount_delete", "sidecar:complete"]
+    assert captured["mounts_describe"] == {
+        "cluster_name": "cluster-a",
+        "region": "us-west-2",
+        "mount_id": "run-a",
+    }
     assert resources.triggers_by_euid["URDT-1"].status == "COMPLETED"
     assert captured["deleted_mounts"] == [
         {"cluster_name": "cluster-a", "region": "us-west-2", "mount_id": "run-a"}
@@ -1563,6 +1635,50 @@ def test_run_directory_orchestrator_creates_cluster_when_no_match(tmp_path) -> N
         "timeout": 1200,
         "poll_interval": 15,
     }
+
+
+def test_run_directory_orchestrator_reuses_matching_available_mount(tmp_path) -> None:
+    class FakeDayEcClient:
+        def __init__(self) -> None:
+            self.create_called = False
+
+        def mounts_describe(self, **kwargs):  # noqa: ANN001
+            assert kwargs == {
+                "cluster_name": "cluster-a",
+                "region": "us-west-2",
+                "mount_id": "run-a",
+            }
+            return {
+                "association_id": "dra-existing",
+                "cluster_name": "cluster-a",
+                "region": "us-west-2",
+                "mount_id": "run-a",
+                "lifecycle": "AVAILABLE",
+                "source_s3_uri": "s3://bucket/basecalls/run-a/",
+            }
+
+        def mounts_create(self, **kwargs):  # noqa: ANN001
+            self.create_called = True
+            raise AssertionError("matching available mount must not be recreated")
+
+    client = FakeDayEcClient()
+    orchestrator = RunDirectoryOrchestrator(
+        resource_store=_MemoryResourceStore(),
+        client=client,
+        settings=_settings(),
+        workspace_root=tmp_path,
+    )
+
+    record = orchestrator.ensure_run_mount(
+        source_s3_uri="s3://bucket/basecalls/run-a/",
+        selected=SelectedCluster(name="cluster-a", region="us-west-2"),
+        mount_id="run-a",
+        run_id="run-a",
+        platform="ILMN",
+    )
+
+    assert record["association_id"] == "dra-existing"
+    assert client.create_called is False
 
 
 def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path, monkeypatch) -> None:

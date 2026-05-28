@@ -20,7 +20,7 @@ _REAL_METADATA_VERSION = importlib_metadata.version
 
 def _test_metadata_version(distribution_name: str) -> str:
     if distribution_name == "daylily-ephemeral-cluster":
-        return "5.0.23"
+        return "5.0.24"
     return _REAL_METADATA_VERSION(distribution_name)
 
 

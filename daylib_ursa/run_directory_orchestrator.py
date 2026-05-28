@@ -319,6 +319,50 @@ class RunDirectoryOrchestrator:
         )
         return SelectedCluster(name=policy.cluster_create_name, region=region)
 
+    def ensure_run_mount(
+        self,
+        *,
+        source_s3_uri: str,
+        selected: SelectedCluster,
+        mount_id: str,
+        run_id: str,
+        platform: str,
+    ) -> dict[str, Any]:
+        try:
+            existing = self.client.mounts_describe(
+                cluster_name=selected.name,
+                region=selected.region,
+                mount_id=mount_id,
+            )
+        except RuntimeError as exc:
+            if "Run mount not found" not in str(exc):
+                raise
+        else:
+            expected_source = _normalize_s3_prefix_uri(source_s3_uri)
+            observed_source = _normalize_s3_prefix_uri(
+                _clean(existing.get("source_s3_uri") or existing.get("data_repository_path"))
+            )
+            if (
+                _clean(existing.get("cluster_name")) == selected.name
+                and _clean(existing.get("region")) == selected.region
+                and _clean(existing.get("mount_id")) == mount_id
+                and _clean(existing.get("lifecycle")).upper() == "AVAILABLE"
+                and observed_source == expected_source
+            ):
+                return existing
+            raise RuntimeError(
+                "Existing run-directory mount does not match requested run input: "
+                f"mount_id={mount_id}"
+            )
+        return self.client.mounts_create(
+            source_s3_uri=source_s3_uri,
+            cluster_name=selected.name,
+            region=selected.region,
+            mount_id=mount_id,
+            run_id=run_id,
+            platform=platform,
+        )
+
     def run_trigger(self, trigger_euid: str, *, poll_interval_seconds: int = 60) -> None:
         policy = _policy_from_settings(self.settings)
         trigger = self.resource_store.get_dewey_run_trigger(trigger_euid)
@@ -365,10 +409,9 @@ class RunDirectoryOrchestrator:
         mount_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", run_folder_name).strip("-")[:80]
         if not mount_id:
             raise RuntimeError("run_folder_name did not produce a safe mount id")
-        self.client.mounts_create(
+        self.ensure_run_mount(
             source_s3_uri=run_storage_uri,
-            cluster_name=selected.name,
-            region=selected.region,
+            selected=selected,
             mount_id=mount_id,
             run_id=run_folder_name,
             platform=platform,
