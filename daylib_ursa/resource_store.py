@@ -1821,6 +1821,7 @@ class ResourceStore:
         *,
         parent_template_code: str,
         parent_euid: str,
+        parent_external_id_key: str | None = None,
         external_system: str,
         external_object_type: str,
         external_object_id: str,
@@ -1845,6 +1846,13 @@ class ResourceStore:
                 str(parent_euid),
                 for_update=True,
             )
+            if parent is None and parent_external_id_key is not None:
+                parent = self.backend.find_instance_by_external_id(
+                    session,
+                    parent_template_code,
+                    str(parent_external_id_key),
+                    str(parent_euid),
+                )
             if parent is None:
                 raise KeyError(f"Parent instance not found: {parent_euid}")
             for child in self.backend.list_children(

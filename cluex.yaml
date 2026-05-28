@@ -282,7 +282,7 @@ Tags:  # TAGs necessary for per-user/project/job cost tracking
 - Key: aws-parallelcluster-enforce-budget
   Value: skip
 - Key: aws-parallelcluster-daylily-git-deets
-  Value: daylily-ephemeral-cluster-main-63b0b38996be3f51a63fe150f0e14f4227a496d2-0.7.375
+  Value: daylily-ephemeral-cluster-pypi-5.0.22
 DevSettings:
   Timeouts:
     HeadNodeBootstrapTimeout: 3600

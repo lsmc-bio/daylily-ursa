@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-MINIMUM_DAYLILY_EC_VERSION = "5.0.19"
-DAYLILY_EC_VERSION_REQUIREMENT = f">={MINIMUM_DAYLILY_EC_VERSION}"
-REQUIRED_DAYLILY_EC_VERSION = MINIMUM_DAYLILY_EC_VERSION
+REQUIRED_DAYLILY_EC_VERSION = "5.0.22"
+MINIMUM_DAYLILY_EC_VERSION = REQUIRED_DAYLILY_EC_VERSION
+DAYLILY_EC_VERSION_REQUIREMENT = f"=={REQUIRED_DAYLILY_EC_VERSION}"
 DAYLILY_EC_INSTALL_SPEC = f"{DAYLILY_EC_DISTRIBUTION}{DAYLILY_EC_VERSION_REQUIREMENT}"
 
 
@@ -42,7 +42,7 @@ def require_daylily_ec_version() -> str:
             f"{DAYLILY_EC_DISTRIBUTION} version mismatch: expected "
             f"{DAYLILY_EC_VERSION_REQUIREMENT}, found invalid version {installed!r}."
         ) from exc
-    if installed_version < Version(MINIMUM_DAYLILY_EC_VERSION):
+    if installed_version != Version(REQUIRED_DAYLILY_EC_VERSION):
         raise RuntimeError(
             f"{DAYLILY_EC_DISTRIBUTION} version mismatch: expected "
             f"{DAYLILY_EC_VERSION_REQUIREMENT}, found {installed}."
@@ -170,7 +170,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster >=5.0.19 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster ==5.0.22 contract."""
 
     def __init__(
         self,

@@ -50,7 +50,7 @@ def _snakemake_log_reports_success(text: str) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec >=5.0.19."""
+    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.22."""
 
     def __init__(
         self,

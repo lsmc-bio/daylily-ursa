@@ -4364,7 +4364,12 @@ def create_app(
         _ = _api_key
         policy = _run_directory_analysis_policy()
         request_payload = request.model_dump(mode="json", exclude_none=True)
-        request_payload["run_storage_uri"] = _normalize_s3_prefix_uri(request.run_storage_uri)
+        try:
+            request_payload["run_storage_uri"] = _normalize_s3_prefix_uri(
+                request.run_storage_uri
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         fingerprint = _canonical_trigger_fingerprint(request_payload)
         idempotency_lookup = str(idempotency_key)
         existing = resources.get_dewey_run_trigger_by_idempotency(idempotency_lookup)
@@ -4388,9 +4393,15 @@ def create_app(
                 status_code=400,
                 detail=f"Dewey artifact must be sequencing_run_dir, got {artifact_type or 'missing'}",
             )
-        resolved_storage_uri = _normalize_s3_prefix_uri(
-            str(resolved_artifact.get("storage_uri") or "")
-        )
+        try:
+            resolved_storage_uri = _normalize_s3_prefix_uri(
+                str(resolved_artifact.get("storage_uri") or "")
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Dewey artifact storage_uri is invalid: {exc}",
+            ) from exc
         if resolved_storage_uri != request_payload["run_storage_uri"]:
             raise HTTPException(
                 status_code=409,
@@ -4606,19 +4617,26 @@ def create_app(
             error=created_jobs[0].error if created_jobs else None,
         )
         if bloom_run_euid is not None:
-            external_record = resources.create_external_object_child(
-                parent_template_code=DEWEY_RUN_TRIGGER_TEMPLATE,
-                parent_euid=trigger_record.trigger_euid,
-                external_system="bloom",
-                external_object_type="sequencing_run",
-                external_object_id=bloom_run_euid,
-                relation_type="bloom_run",
-                metadata={
-                    "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
-                    "run_folder_name": request.run_folder_name,
-                    "trigger_euid": trigger_euid,
-                },
-            )
+            try:
+                external_record = resources.create_external_object_child(
+                    parent_template_code=DEWEY_RUN_TRIGGER_TEMPLATE,
+                    parent_euid=trigger_record.trigger_euid,
+                    parent_external_id_key="trigger_euid",
+                    external_system="bloom",
+                    external_object_type="sequencing_run",
+                    external_object_id=bloom_run_euid,
+                    relation_type="bloom_run",
+                    metadata={
+                        "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
+                        "run_folder_name": request.run_folder_name,
+                        "trigger_euid": trigger_euid,
+                    },
+                )
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Ursa run-directory trigger persistence failed: {exc}",
+                ) from exc
             response["ursa_external_objects"] = [
                 resources.external_object_payload(external_record)
             ]

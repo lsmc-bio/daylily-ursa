@@ -54,6 +54,7 @@ class _MemoryResourceStore:
         self.triggers_by_euid: dict[str, DeweyRunTriggerRecord] = {}
         self.triggers_by_idempotency: dict[str, DeweyRunTriggerRecord] = {}
         self.external_objects: list[dict] = []
+        self.external_object_parent_lookups: list[dict] = []
         self._workset_seq = 0
         self._manifest_seq = 0
         self._analysis_job_seq = 0
@@ -286,6 +287,7 @@ class _MemoryResourceStore:
         *,
         parent_template_code: str,
         parent_euid: str,
+        parent_external_id_key: str | None = None,
         external_system: str,
         external_object_type: str,
         external_object_id: str,
@@ -293,6 +295,12 @@ class _MemoryResourceStore:
         metadata=None,
     ):
         _ = parent_template_code
+        self.external_object_parent_lookups.append(
+            {
+                "parent_euid": parent_euid,
+                "parent_external_id_key": parent_external_id_key,
+            }
+        )
         row = {
             "external_object_euid": f"URXO-{len(self.external_objects) + 1}",
             "parent_euid": parent_euid,
@@ -316,6 +324,11 @@ class _MemoryResourceStore:
 
     def get_dewey_run_trigger_by_idempotency(self, idempotency_key: str):
         return self.triggers_by_idempotency.get(idempotency_key)
+
+
+class _MissingParentResourceStore(_MemoryResourceStore):
+    def create_external_object_child(self, **_kwargs):
+        raise KeyError("Parent instance not found: URDT-MISSING")
 
 
 class _DummyAnalysisJobManager:
@@ -359,16 +372,23 @@ class _DummyAnalysisJobManager:
 
 
 class _DummyDeweyClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        artifact_type: str = "sequencing_run_dir",
+        storage_uri: str = "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+    ) -> None:
         self.result_calls: list[dict] = []
         self.external_objects: list[dict] = []
         self.external_relations: list[dict] = []
+        self.artifact_type = artifact_type
+        self.storage_uri = storage_uri
 
     def resolve_artifact(self, artifact_euid: str):
         return {
             "artifact_euid": artifact_euid,
-            "artifact_type": "sequencing_run_dir",
-            "storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+            "artifact_type": self.artifact_type,
+            "storage_uri": self.storage_uri,
         }
 
     def register_analysis_results(self, *, payload, idempotency_key: str):
@@ -781,6 +801,111 @@ def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> No
     assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == "illumina_run_qc_bclconvert"
+
+
+def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeypatch) -> None:
+    run_storage_uri = (
+        "s3://lsmc-ssf-sequencing-data/basecalls/lsmc/ssf-hq/lh01121/2026/"
+        "20260520_LH01121_0001_A23WW7FLT4/"
+    )
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient(storage_uri=run_storage_uri)
+    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey)
+    body = {
+        "run_folder_name": "20260520_LH01121_0001_A23WW7FLT4",
+        "platform": "ILMN",
+        "run_storage_uri": run_storage_uri,
+        "dewey_run_artifact_euid": "M-DGX-9SD7",
+        "bloom_run_euid": "M-BRM-4Z",
+        "command_ids": ["illumina_run_qc_bclconvert"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": (
+            "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9:"
+            "20260520_LH01121_0001_A23WW7FLT4"
+        ),
+        "owy_execution_id": "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9",
+        "dry_run": False,
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "owy-dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9",
+            },
+            json=body,
+        )
+
+    assert created.status_code == 202, created.text
+    payload = created.json()
+    assert payload["run_folder_name"] == "20260520_LH01121_0001_A23WW7FLT4"
+    assert payload["bloom_run_euid"] == "M-BRM-4Z"
+    assert payload["dewey_run_artifact_euid"] == "M-DGX-9SD7"
+    assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
+    assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
+    assert payload["request"]["owy_execution_id"] == "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9"
+    assert payload["ursa_external_objects"][0]["external_object_id"] == "M-BRM-4Z"
+    assert resources.external_object_parent_lookups == [
+        {
+            "parent_euid": payload["trigger_euid"],
+            "parent_external_id_key": "trigger_euid",
+        }
+    ]
+
+
+def test_run_directory_trigger_rejects_bad_run_storage_uri_without_500(monkeypatch) -> None:
+    app = _app(monkeypatch, dewey_client=_DummyDeweyClient())
+    body = {
+        "run_folder_name": "20260520_LH01121_0001_A23WW7FLT4",
+        "platform": "ILMN",
+        "run_storage_uri": "https://not-s3.example/run/",
+        "dewey_run_artifact_euid": "M-DGX-9SD7",
+        "bloom_run_euid": "M-BRM-4Z",
+        "command_ids": ["illumina_run_qc_bclconvert"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:20260520_LH01121_0001_A23WW7FLT4",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-bad-s3"},
+            json=body,
+        )
+
+    assert rejected.status_code == 400
+    assert "S3 URI must be an absolute s3:// URI" in rejected.text
+    assert "Internal server error" not in rejected.text
+
+
+def test_run_directory_trigger_persistence_failure_is_explicit_503(monkeypatch) -> None:
+    resources = _MissingParentResourceStore()
+    dewey = _DummyDeweyClient()
+    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey)
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc_bclconvert"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+        "bloom_run_euid": "BLOOM-RUN-1",
+    }
+
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-parent-missing"},
+            json=body,
+        )
+
+    assert rejected.status_code == 503
+    assert "Ursa run-directory trigger persistence failed" in rejected.text
+    assert "Internal server error" not in rejected.text
 
 
 def test_run_directory_trigger_accepts_null_bloom_run(monkeypatch) -> None:
