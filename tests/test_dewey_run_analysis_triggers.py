@@ -754,6 +754,35 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     assert len(dewey.external_relations) == 3
 
 
+def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient()
+    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey)
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc_bclconvert"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={"X-API-Key": "ursa-write-token", "Idempotency-Key": "idem-run-dir-bclconvert"},
+            json=body,
+        )
+
+    assert created.status_code == 202, created.text
+    payload = created.json()
+    assert payload["command_ids"] == ["illumina_run_qc_bclconvert"]
+    assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
+    assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == "illumina_run_qc_bclconvert"
+
+
 def test_run_directory_trigger_accepts_null_bloom_run(monkeypatch) -> None:
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()

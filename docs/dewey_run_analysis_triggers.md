@@ -96,6 +96,12 @@ Ursa resolves the Dewey artifact and requires
 creating work. Ursa validates each command ID against the DayEC catalog and
 rejects non-`run_analysis` commands.
 
+Production Ursa deployments must provide the run-directory analysis policy explicitly. The policy must include tenant UUID, owner user ID, cluster name, region, reference S3 URI, stage target, destination S3 URI, project, and AWS profile. Missing values intentionally return `503 Ursa run-directory analysis policy is incomplete`; Ursa must not infer defaults from deployment name, environment variables, or DayEC catalog content.
+
+For the `lsmcok1` production deployment, OWY currently sends `illumina_run_qc_bclconvert` for ILMN runs. The DayEC command catalog entry must remain `command_class=run_analysis` and `input_contract=run_context` before this route can launch it.
+
+Do not log or print Dewey, Ursa, or broker service tokens while validating this route. Smoke checks should report response codes, EUIDs, and redacted config presence only.
+
 When `bloom_run_euid` is supplied, Ursa creates an Ursa-local external-object
 child under the run-directory trigger and creates a Dewey external-object
 relation from the Dewey run-dir artifact to the Bloom sequencing run. When
