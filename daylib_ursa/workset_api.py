@@ -128,6 +128,7 @@ from daylib_ursa.resource_store import (
     ClusterJobEventRecord,
     ClusterJobRecord,
     DEWEY_RUN_TRIGGER_TEMPLATE,
+    DeweyRunTriggerRecord,
     DeweyImportRecord,
     LinkedBucketRecord,
     ManifestEditorOptionRecord,
@@ -2613,6 +2614,25 @@ def create_app(
             json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         ).hexdigest()
 
+    def _canonical_run_directory_trigger_fingerprint(payload: dict[str, Any]) -> str:
+        stable_payload = dict(payload)
+        stable_payload.pop("producer_object_euid", None)
+        stable_payload.pop("owy_execution_id", None)
+        run_metadata = stable_payload.get("run_metadata")
+        if isinstance(run_metadata, dict):
+            stable_run_metadata = dict(run_metadata)
+            stable_run_metadata.pop("execution_id", None)
+            stable_payload["run_metadata"] = stable_run_metadata
+        return _canonical_trigger_fingerprint(stable_payload)
+
+    def _run_directory_trigger_fingerprint_matches(
+        existing: DeweyRunTriggerRecord,
+        fingerprint: str,
+    ) -> bool:
+        if existing.fingerprint == fingerprint:
+            return True
+        return _canonical_run_directory_trigger_fingerprint(existing.request) == fingerprint
+
     def require_resource_store() -> ResourceStore:
         resource_backend = getattr(app.state, "resource_store", None)
         if resource_backend is None:
@@ -4370,11 +4390,11 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        fingerprint = _canonical_trigger_fingerprint(request_payload)
+        fingerprint = _canonical_run_directory_trigger_fingerprint(request_payload)
         idempotency_lookup = str(idempotency_key)
         existing = resources.get_dewey_run_trigger_by_idempotency(idempotency_lookup)
         if existing is not None:
-            if existing.fingerprint != fingerprint:
+            if not _run_directory_trigger_fingerprint_matches(existing, fingerprint):
                 raise HTTPException(
                     status_code=409,
                     detail="Idempotency-Key reuse with different request payload",

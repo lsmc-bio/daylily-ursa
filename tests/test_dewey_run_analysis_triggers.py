@@ -774,6 +774,73 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     assert len(dewey.external_relations) == 3
 
 
+def test_run_directory_trigger_replay_allows_new_owy_attempt_fields(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    dewey = _DummyDeweyClient()
+    app = _app(monkeypatch, resource_store=resources, dewey_client=dewey)
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+        "bloom_run_euid": "BLOOM-RUN-1",
+        "run_metadata": {"execution_id": "exec-1", "instrument_id": "LH01106"},
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-attempt",
+            },
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        original = created.json()
+
+        record = resources.triggers_by_idempotency["idem-run-dir-attempt"]
+        resources.triggers_by_idempotency["idem-run-dir-attempt"] = replace(
+            record,
+            fingerprint="stored-before-stable-owy-attempt-fingerprint",
+        )
+
+        replay_body = {
+            **body,
+            "producer_object_euid": "exec-2:run-a",
+            "owy_execution_id": "exec-2",
+            "run_metadata": {"execution_id": "exec-2", "instrument_id": "LH01106"},
+        }
+        replay = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-attempt",
+            },
+            json=replay_body,
+        )
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["trigger_euid"] == original["trigger_euid"]
+
+        changed = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-attempt",
+            },
+            json={**replay_body, "command_ids": ["illumina_run_qc_bclconvert"]},
+        )
+        assert changed.status_code == 409
+        assert "Idempotency-Key reuse with different request payload" in changed.text
+
+    assert len(resources.worksets) == 1
+    assert len(resources.analysis_jobs) == 1
+
+
 def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> None:
     resources = _MemoryResourceStore()
     dewey = _DummyDeweyClient()
