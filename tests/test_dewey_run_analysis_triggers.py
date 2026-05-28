@@ -211,6 +211,17 @@ class _MemoryResourceStore:
         self.analysis_jobs[job_euid] = updated
         return updated
 
+    def update_analysis_job_request(self, *, job_euid: str, request: dict, created_by: str):
+        _ = created_by
+        record = self.analysis_jobs[job_euid]
+        updated = replace(
+            record,
+            request=dict(request or {}),
+            updated_at="2026-05-27T00:03:30Z",
+        )
+        self.analysis_jobs[job_euid] = updated
+        return updated
+
     def get_analysis_job(self, job_euid: str):
         return self.analysis_jobs.get(job_euid)
 
@@ -791,6 +802,9 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     assert resources.analysis_jobs["AJ-1"].request["run_directory_trigger"]["bloom_run_euid"] == (
         "BLOOM-RUN-1"
     )
+    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
+        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+    )
     assert len(resources.external_objects) == 1
     assert len(dewey.external_objects) == 3
     assert len(dewey.external_relations) == 3
@@ -897,6 +911,20 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
         assert created.status_code == 202, created.text
         assert created.json()["status"] == "FAILED"
         assert "AnalysisIdentityError" in resources.analysis_jobs["AJ-1"].error
+        assert resources.analysis_jobs["AJ-1"].request["destination"] == (
+            "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+        )
+
+        stale_job = resources.analysis_jobs["AJ-1"]
+        resources.analysis_jobs["AJ-1"] = replace(
+            stale_job,
+            request={
+                **stale_job.request,
+                "destination": (
+                    "s3://analysis-results/run-directories/run-a/01-illumina_run_qc/"
+                ),
+            },
+        )
 
         manager.terminal_state = "RUNNING"
         replay = client.post(
@@ -914,10 +942,14 @@ def test_run_directory_trigger_replay_relaunches_prelaunch_failure(monkeypatch) 
     assert payload["analysis_jobs"][0]["status"] == "RUNNING"
     assert payload["analysis_job_euids"] == ["AJ-1"]
     assert manager.launch_calls[1]["request_overrides"] == {
-        "executing_entity": "ursa-run-directory"
+        "executing_entity": "ursa-run-directory",
+        "destination": "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/",
     }
     assert resources.triggers_by_idempotency["idem-run-dir-prelaunch-failure"].status == "RUNNING"
     assert resources.analysis_jobs["AJ-1"].state == "RUNNING"
+    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
+        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+    )
     assert len(resources.worksets) == 1
     assert len(resources.analysis_jobs) == 1
 
@@ -950,6 +982,9 @@ def test_run_directory_trigger_accepts_owy_bclconvert_command(monkeypatch) -> No
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert resources.analysis_jobs["AJ-1"].request["analysis_command_id"] == "illumina_run_qc_bclconvert"
     assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "ursa-run-directory"
+    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
+        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+    )
 
 
 def test_run_directory_trigger_requires_explicit_path_safe_executing_entity(monkeypatch) -> None:
@@ -1024,6 +1059,9 @@ def test_run_directory_trigger_accepts_exact_owy_handoff_with_bloom_euid(monkeyp
     assert payload["analysis_jobs"][0]["command_id"] == "illumina_run_qc_bclconvert"
     assert payload["request"]["owy_execution_id"] == "dc5f4e8c-9e0f-48dd-810b-e0b66a3f32b9"
     assert resources.analysis_jobs["AJ-1"].request["executing_entity"] == "ursa-run-directory"
+    assert resources.analysis_jobs["AJ-1"].request["destination"] == (
+        "s3://analysis-results/run-directories/ursa-run-directory/AJ-1/"
+    )
     assert payload["ursa_external_objects"][0]["external_object_id"] == "M-BRM-4Z"
     assert resources.external_object_parent_lookups == [
         {

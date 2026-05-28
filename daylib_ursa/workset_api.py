@@ -4020,6 +4020,53 @@ def create_app(
         )
         return values
 
+    def _run_directory_analysis_destination(
+        *,
+        policy: dict[str, Any],
+        analysis_job_euid: str,
+    ) -> str:
+        executing_entity = str(policy["executing_entity"]).strip()
+        job_euid = str(analysis_job_euid or "").strip()
+        if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(executing_entity):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ursa run-directory analysis policy has invalid executing_entity; "
+                    "expected a path-safe segment matching ^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                ),
+            )
+        if not DAYEC_EXECUTING_ENTITY_RE.fullmatch(job_euid):
+            raise HTTPException(
+                status_code=500,
+                detail="Ursa analysis job EUID is not path-safe for DAY-EC export identity",
+            )
+        return (
+            str(policy["destination_s3_uri"]).rstrip("/")
+            + f"/{executing_entity}/{job_euid}/"
+        )
+
+    def _with_run_directory_analysis_destination(
+        *,
+        resources: ResourceStore,
+        job: AnalysisJobRecord,
+        policy: dict[str, Any],
+        actor_user_id: str,
+    ) -> AnalysisJobRecord:
+        destination = _run_directory_analysis_destination(
+            policy=policy,
+            analysis_job_euid=job.job_euid,
+        )
+        request_payload = {
+            **dict(job.request or {}),
+            "executing_entity": str(policy["executing_entity"]),
+            "destination": destination,
+        }
+        return resources.update_analysis_job_request(
+            job_euid=job.job_euid,
+            request=request_payload,
+            created_by=actor_user_id,
+        )
+
     def _validate_run_directory_commands(
         command_ids: Sequence[str],
     ) -> list[dict[str, Any]]:
@@ -4469,10 +4516,22 @@ def create_app(
             if existing_job is not None and _analysis_job_failed_before_workflow_launch(
                 existing_job
             ):
+                existing_job = _with_run_directory_analysis_destination(
+                    resources=resources,
+                    job=existing_job,
+                    policy=policy,
+                    actor_user_id=str(policy["owner_user_id"]),
+                )
                 relaunched = manager.launch_job(
                     existing_job.job_euid,
                     actor_user_id=str(policy["owner_user_id"]),
-                    request_overrides={"executing_entity": str(policy["executing_entity"])},
+                    request_overrides={
+                        "executing_entity": str(policy["executing_entity"]),
+                        "destination": _run_directory_analysis_destination(
+                            policy=policy,
+                            analysis_job_euid=existing_job.job_euid,
+                        ),
+                    },
                 )
                 response = _run_directory_response_with_job(record=existing, job=relaunched)
                 updated = resources.update_dewey_run_trigger(
@@ -4565,14 +4624,10 @@ def create_app(
         previous_job_euid: str | None = None
         for index, command in enumerate(commands):
             command_id = str(command["command_id"])
-            destination = (
-                str(policy["destination_s3_uri"]).rstrip("/")
-                + f"/{request.run_folder_name}/{index + 1:02d}-{command_id}/"
-            )
             job_request = {
                 "analysis_command_id": command_id,
                 "optional_features": [],
-                "destination": destination,
+                "destination": None,
                 "export_trigger": "on-success",
                 "executing_entity": policy["executing_entity"],
                 "reference_s3_uri": policy["reference_s3_uri"],
@@ -4602,6 +4657,12 @@ def create_app(
                 owner_user_id=str(policy["owner_user_id"]),
                 request=job_request,
             )
+            record = _with_run_directory_analysis_destination(
+                resources=resources,
+                job=record,
+                policy=policy,
+                actor_user_id=str(policy["owner_user_id"]),
+            )
             resources.add_analysis_job_event(
                 job_euid=record.job_euid,
                 event_type="dewey-run-directory-trigger-defined",
@@ -4612,6 +4673,7 @@ def create_app(
                     "trigger_euid": trigger_euid,
                     "pipeline_order": index + 1,
                     "predecessor_analysis_job_euid": previous_job_euid,
+                    "destination_s3_uri": record.request.get("destination"),
                 },
                 created_by=str(policy["owner_user_id"]),
             )
