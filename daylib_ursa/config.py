@@ -106,6 +106,18 @@ def _yaml_seed_from_ursa_config() -> dict[str, object]:
         "api_host": cfg.api_host,
         "api_port": cfg.api_port,
         "allowed_hosts": getattr(cfg, "allowed_hosts", ""),
+        "ursa_gui_cache_enabled": getattr(cfg, "ursa_gui_cache_enabled", None),
+        "ursa_gui_cache_ttl_seconds": getattr(cfg, "ursa_gui_cache_ttl_seconds", None),
+        "ursa_gui_cache_refresh_interval_seconds": getattr(
+            cfg,
+            "ursa_gui_cache_refresh_interval_seconds",
+            None,
+        ),
+        "ursa_gui_cache_background_refresh_enabled": getattr(
+            cfg,
+            "ursa_gui_cache_background_refresh_enabled",
+            None,
+        ),
         "bloom_base_url": cfg.bloom_base_url,
         "bloom_verify_ssl": cfg.bloom_verify_ssl,
         "atlas_base_url": cfg.atlas_base_url,
