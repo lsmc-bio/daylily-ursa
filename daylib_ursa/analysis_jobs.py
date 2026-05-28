@@ -74,7 +74,7 @@ def _snakemake_log_reports_success(text: str) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.24."""
+    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.25."""
 
     def __init__(
         self,
@@ -208,6 +208,7 @@ class AnalysisJobManager:
             dewey_ursa_analysis_euid=(
                 str(request.get("dewey_ursa_analysis_euid") or "").strip() or None
             ),
+            replace_existing_analysis_dir=bool(request.get("replace_existing_analysis_dir")),
             profile=aws_profile,
             region=job.region,
             cluster=job.cluster_name,

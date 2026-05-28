@@ -4517,6 +4517,13 @@ def create_app(
                 )
                 return _dewey_run_directory_trigger_response_from_record(updated)
             if existing_job is not None and existing_job.state == "FAILED":
+                request_payload = dict(existing_job.request or {})
+                request_payload["replace_existing_analysis_dir"] = True
+                existing_job = resources.update_analysis_job_request(
+                    job_euid=existing_job.job_euid,
+                    request=request_payload,
+                    created_by=str(policy["owner_user_id"]),
+                )
                 existing_job = resources.update_analysis_job_status(
                     job_euid=existing_job.job_euid,
                     state="DEFINED",

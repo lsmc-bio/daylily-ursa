@@ -472,6 +472,8 @@ class _FakeRunAnalysisCommand:
                 argv.extend([flag, value])
         if kwargs.get("delete_on_export_success"):
             argv.append("--delete-on-export-success")
+        if kwargs.get("replace_existing_analysis_dir"):
+            argv.append("--replace-existing-analysis-dir")
         return argv
 
 
@@ -1163,6 +1165,7 @@ def test_run_directory_trigger_replay_relaunches_failed_workflow_job(monkeypatch
     assert payload["trigger_euid"] == first_payload["trigger_euid"]
     assert payload["analysis_job_euids"] == first_payload["analysis_job_euids"]
     assert resources.analysis_jobs[job.job_euid].state == "DEFINED"
+    assert resources.analysis_jobs[job.job_euid].request["replace_existing_analysis_dir"] is True
     assert resources.triggers_by_idempotency["idem-run-dir-failed-workflow"].status == "QUEUED"
     assert orchestrator.start_calls == [first_payload["trigger_euid"], first_payload["trigger_euid"]]
     assert len(resources.worksets) == 1
@@ -1622,6 +1625,7 @@ def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_
     assert "--analysis-id" in argv and "AJ-1" in argv
     assert "--executing-entity" in argv and "cluster-a" in argv
     assert "--session-name" in argv and "ursa-AJ-1-illumina_run_qc" in argv
+    assert "--replace-existing-analysis-dir" not in argv
     assert "--delete-on-export-success" in argv
     assert "--dewey-analysis-dir-external-object-id" in argv
     assert expected_destination + "daylily-omics-analysis/" in argv
@@ -1802,6 +1806,7 @@ def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path, monke
             "session_name": "run-a-illumina_run_qc",
             "project": "daylily",
             "aws_profile": "lsmc",
+            "replace_existing_analysis_dir": True,
             "run_directory_trigger": {"trigger_euid": "URDT-1"},
         },
     )
@@ -1834,6 +1839,7 @@ def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path, monke
     assert launched.state == "RUNNING"
     argv = captured["argv"]
     assert "--run-context-file" in argv
+    assert "--replace-existing-analysis-dir" in argv
     assert "--stage-dir" not in argv
     run_context_file = argv[argv.index("--run-context-file") + 1]
     assert run_context_file.endswith(".ursa-run-contexts/AJ-1/config/runs.tsv")

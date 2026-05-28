@@ -456,3 +456,22 @@ Recorded: 2026-05-28T21:22:00Z
 | REL22-001 | Orchestrator | Commit, push main, create annotated Ursa `4.0.22` tag, push tag, build, and publish. | OPEN | release_hygiene | 7 | Pending. |  | Existing tags must not be moved. |
 | PROD22-001 | Orchestrator | Deploy Ursa `4.0.22` to `ursa.day.lsmc.bio` and verify runtime. | OPEN | active_product_contract | 7 | Pending. |  | Production restart must avoid interrupting active analysis/workflow processes. |
 | OWY22-001 | Orchestrator | Replay the original OWY idempotency key after the headnode Chrome repair and verify export, Dewey links, cleanup, and `.complete`. | OPEN | active_product_contract | 7 | Pending. |  | This retry must reuse `M-RGX-9S3G`. |
+
+### DYEC 5.0.25 / Ursa 4.0.23 Retry Directory Amendment
+
+Recorded: 2026-05-28T21:42:00Z
+
+- Ursa `4.0.22` production replay reused the original trigger and job, wrote `.ursa.M-RGX-9S3G.inprog`, then failed before tmux launch because the prior failed attempt left `/fsx/analysis_results/xfer-cluster/M-RGX-9S3G/` in place.
+- Exact headnode SSM failure evidence: command `57171acb-1b26-4f1b-9f4e-7e863b2eaa8b` returned `__DAYLILY_ERROR__=analysis_dir_exists`.
+- DAY-EC `5.0.25` adds an explicit retry flag, `--replace-existing-analysis-dir`, that preserves the default fail-hard behavior and only removes the computed same-analysis FSx directory when the caller explicitly opts in.
+- Ursa is amended from exact `daylily-ephemeral-cluster==5.0.24` to exact `daylily-ephemeral-cluster==5.0.25`.
+- Ursa failed-job idempotency replay marks the existing job request with `replace_existing_analysis_dir=true`; first-time jobs do not get that flag.
+
+| ID | Owner | Requirement | Status | Category | Gate | Evidence | Root Cause | Terminal Note |
+|---|---|---|---|---|---|---|---|---|
+| DYEC25-001 | Orchestrator | Release DAY-EC `5.0.25` with explicit retry directory replacement. | SUCCESS | release_hygiene | 8 | Commit `b108404f`; annotated tag `5.0.25`; branch/main/tag pushed; `twup` uploaded wheel/sdist; PyPI reports latest `5.0.25`. | DAY-EC refused stale failed same-analysis directories, blocking stable-EUID retry. | Default remains fail-hard unless `--replace-existing-analysis-dir` is present. |
+| URSA23-001 | Orchestrator | Update Ursa to exact DAY-EC `5.0.25` and pass replacement only for failed idempotency replay. | SUCCESS | feature_implementation | 8 | `pyproject.toml`, `uv.lock`, runtime guard/docs/tests updated; `AnalysisJobManager` forwards `replace_existing_analysis_dir`; failed idempotency replay marks only the existing failed job request for replacement. | Ursa `4.0.22` pinned `5.0.24`, which lacked the retry flag. | Next Ursa tag target is `4.0.23`; do not move existing tags. |
+| VALID23-001 | Orchestrator | Validate Ursa `4.0.23` locally before release. | SUCCESS | contract_test | 8 | `uv run --python 3.12 python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py tests/test_cluster_partition_helpers.py` -> `82 passed`; `ruff check ...`, `uv lock --check`, and `git diff --check` passed. |  | Release candidate ready for tag `4.0.23`. |
+| REL23-001 | Orchestrator | Commit, push main, annotated-tag `4.0.23`, build, publish. | OPEN | release_hygiene | 8 | Pending. |  | Existing tags must not be moved. |
+| PROD23-001 | Orchestrator | Deploy Ursa `4.0.23` to `ursa.day.lsmc.bio` with DYEC `5.0.25`. | OPEN | active_product_contract | 9 | Pending. |  | Check for active workflow/controller processes before restart. |
+| OWY23-001 | Orchestrator | Replay original OWY request and verify export, Dewey links, cleanup, and `.ursa.M-RGX-9S3G.complete`. | OPEN | active_product_contract | 9 | Pending. |  | Must reuse original idempotency key and analysis EUID `M-RGX-9S3G`. |
