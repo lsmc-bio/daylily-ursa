@@ -20,7 +20,7 @@
     },
     "daylily-tapdb": {
       "repo": "Daylily-Informatics/daylily-tapdb",
-      "current": "7.0.7"
+      "current": "7.0.9"
     },
     "cli-core-yo": {
       "repo": "Daylily-Informatics/cli-core-yo",
@@ -38,10 +38,10 @@
       "ephemeral_cluster": ">=5.0.19",
       "omics_analysis": "2.0.0",
       "cognito": "2.1.5",
-      "tapdb": "7.0.7",
+      "tapdb": "7.0.9",
       "cli_core_yo": "2.1.1",
       "omics_references": "0.3.1",
-      "notes": "Requires daylily-ephemeral-cluster >=5.0.19 for run-directory run_analysis command IDs, daylily-auth-cognito to 2.1.5, daylily-tapdb to 7.0.7, cli-core-yo to 2.1.1, and lsmc-bio daylily-omics-analysis to GitHub release 2.0.0"
+      "notes": "Requires daylily-ephemeral-cluster >=5.0.19 for run-directory run_analysis command IDs, daylily-auth-cognito to 2.1.5, daylily-tapdb to 7.0.9, cli-core-yo to 2.1.1, and lsmc-bio daylily-omics-analysis to GitHub release 2.0.0"
     },
     {
       "date": "2026-03-03",
