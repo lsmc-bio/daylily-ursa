@@ -26,10 +26,10 @@ Use statuses: `OPEN`, `IN_PROGRESS`, `ATTEMPTING_BUGFIX`, `SUCCESS`, `DUPLICATE`
 | BUG-001 | GUI | Identify why token creation loses the one-time plaintext token | SUCCESS | Gate 1 | API returns `plaintext_token`; GUI reloads immediately after create | Root cause confirmed in `tokens/list.html`, `admin_tokens.html`, and `admin_client_detail.html`. |
 | FIX-001 | GUI | Display the returned one-time plaintext token in-place on user, admin, and client token-create pages | SUCCESS | Gate 2 | `UrsaPortal.renderOneTimeTokenResult(...)`; token result containers in all three templates | One-time token is displayed from the API response without automatic reload. |
 | TEST-001 | Tests | Add focused tests proving token pages no longer reload away the plaintext result | SUCCESS | Gate 3 | `node --check daylib_ursa/gui/static/portal.js`; `python -m pytest tests/test_user_tokens_api.py tests/test_admin_gui_and_cluster_routes.py -q` -> 26 passed; `python -m build` succeeded | Local env needed `python -m pip install -e .` and `python -m pip install build` before tests/build. |
-| RELEASE-001 | Release | Commit, push branch, create annotated next semver tag, and push tag | OPEN | Gate 4 |  |  |
-| AWS-001 | Deploy | Update AWS `lsmcok1` Ursa checkout to the new tag and restart only Ursa | OPEN | Gate 5 |  |  |
-| AWS-002 | Validation | Verify local AWS Ursa health and public `ursa.day.lsmc.bio` report the new version | OPEN | Gate 5 |  |  |
-| FINAL-001 | Acceptance | All rows terminal; report commit, tag, tests, deployment evidence, and new version | OPEN | Gate 6 |  |  |
+| RELEASE-001 | Release | Commit, push branch, create annotated next semver tag, and push tag | SUCCESS | Gate 4 | Commit `d3eadc75743c8f1ee1f79244d694c63533d56e52`; branch `codex/ursa-token-plaintext-20260528`; annotated tag `4.0.12` pushed | Release tag is bare semver and annotated (`git cat-file -t 4.0.12` -> `tag`). |
+| AWS-001 | Deploy | Update AWS `lsmcok1` Ursa checkout to the new tag and restart only Ursa | SUCCESS | Gate 5 | SSM command `2cd57032-6edf-49b8-9a6c-db8445900867`; checkout `4.0.12`; new Ursa PID `486684`; session `lsmcok1-ursa-service-4-0-12-20260528T131817Z` | Restarted only Ursa on port `8913`; no database mutation was run. |
+| AWS-002 | Validation | Verify local AWS Ursa health and public `ursa.day.lsmc.bio` report the new version | SUCCESS | Gate 5 | SSM command `b51e7b68-7517-4d80-93ff-d78fa39da5cc`; local and public `/healthz` both returned `status=ok`, `build.version=4.0.12` | `https://ursa.day.lsmc.bio/healthz` is serving the new version. |
+| FINAL-001 | Acceptance | All rows terminal; report commit, tag, tests, deployment evidence, and new version | SUCCESS | Gate 6 | All rows terminal | New Ursa version is `4.0.12`. |
 
 ## Test Plan
 
