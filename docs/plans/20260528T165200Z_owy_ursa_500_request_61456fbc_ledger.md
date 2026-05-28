@@ -72,14 +72,14 @@ Recorded: 2026-05-28
 | Gate | Purpose | Status | Evidence |
 |---|---|---|---|
 | 0 | Inventory freeze | SUCCESS | Git/tag/DYEC/source inventory above. |
-| 1 | Production read-only request forensics | OPEN | Agent 1 assigned; no production mutation approved. |
-| 2 | Recommendation sanity review and root-cause decision | OPEN | Agent 2 assigned; local route/source inspection started. |
-| 3 | Local reproduction | OPEN | Exact OWY payload fixture to be added. |
-| 4 | Ursa fix and DYEC 5.0.22 update | OPEN | Source edits pending. |
-| 5 | Release tag preparation | OPEN | Fetched tags changed during execution; `4.0.14` now exists, so final target is `4.0.15`. |
+| 1 | Production read-only request forensics | SUCCESS | Agent 1 captured production runtime and request-id stack trace with no production mutation. |
+| 2 | Recommendation sanity review and root-cause decision | SUCCESS | Agent 2 confirmed an Ursa-scoped parent lookup bug; no Bloom/Dewey/OWY changes were justified by the evidence. |
+| 3 | Local reproduction | SUCCESS | Exact OWY payload fixture and explicit parent lookup/error tests added. |
+| 4 | Ursa fix and DYEC 5.0.22 update | SUCCESS | Source, tests, runtime guard, metadata, and lockfile updated to exact `daylily-ephemeral-cluster==5.0.22`; focused validation passed. |
+| 5 | Release tag preparation | SUCCESS | Release target amended around disjoint `4.0.14`; branch and annotated tag `4.0.15` pushed. |
 | 6 | Approval-gated production deploy | BLOCKED | Requires exact approval phrase. |
 | 7 | OWY acceptance retry | BLOCKED | Requires deployed fixed Ursa and user/OWY retry approval. |
-| 8 | Terminal report | OPEN | Pending. |
+| 8 | Terminal report | SUCCESS | Final ledger counts and remaining blockers recorded below. |
 
 ## Ledger Rows
 
@@ -102,16 +102,61 @@ Recorded: 2026-05-28
 | FIX-002 | Agent 3 | Ensure expected domain/config failures return explicit 4xx/409/503 responses instead of generic 500. | SUCCESS | feature_implementation | 4 | Bad request S3 URI returns 400; Dewey malformed storage URI maps to 502; local persistence parent failure maps to explicit 503. |  | Expected failures no longer collapse to generic 500 in covered paths. |
 | TEST-001 | Agent 3 | Run focused Ursa tests for run-directory triggers, idempotency, Bloom-null path, OWY BCLConvert command, error handling, and DYEC pin. | SUCCESS | contract_test | 4 | `python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py` -> 59 passed; `tests/test_dayec_run_directory_command_catalog.py tests/test_cluster_partition_helpers.py` -> 20 passed; `ruff check daylib_ursa tests`, `git diff --check`, `uv lock --check`, and `pip check` passed. |  | Focused local validation passed. |
 | RELEASE-001 | Agent 4 | Fetch tags and compute next Ursa patch tag. | SUCCESS | plan_amendment | 5 | Initial audit found `4.0.13`; pre-commit audit found remote annotated tag `4.0.14` on commit `ad981db62159804962caa60bdcba6706b58eee64` (`codex/inf6-deploy-formalization-20260528`). |  | Release target amended to `4.0.15`; do not reuse `4.0.14`. |
-| RELEASE-002 | Agent 4 | Prepare commit, annotated tag, and push plan after tests pass. | OPEN | plan_amendment | 5 | Pending. |  |  |
-| DYEC-005 | Agent 4 | Include DYEC `5.0.22` proof in Ursa release, image/package provenance, and production deploy verification. | BLOCKED | plan_amendment | 5 | Requires completed source update and release artifact. | Release not built yet. | Unblock after tests and release packaging. |
+| RELEASE-002 | Agent 4 | Prepare commit, annotated tag, and push plan after tests pass. | SUCCESS | plan_amendment | 5 | Commits `be6ecb0` and `9e0ff2a`; annotated tag `4.0.15` on `9e0ff2a`; pushed branch `codex/ursa-4-0-11-docker-template-pack-20260528` and tag `4.0.15` to `origin`. |  | Release source and tag published. |
+| DYEC-005 | Agent 4 | Include DYEC `5.0.22` proof in Ursa release, image/package provenance, and production deploy verification. | BLOCKED | plan_amendment | 5 | Wheel proof: `dist/daylily_ursa-4.0.15-py3-none-any.whl` metadata has `Version: 4.0.15` and `Requires-Dist: daylily-ephemeral-cluster==5.0.22`; wheel source contains the OWY route and `parent_external_id_key="trigger_euid"`. | Production deploy verification is not approved. | Release/package proof is complete; production verification remains blocked until approved deploy. |
 | DEPLOY-001 | Agent 4 | Block production deploy until approval phrase is received. | BLOCKED | active_product_contract | 6 | Approval phrase not received. | Live production deploy/restart approval missing. | Unblock with `APPROVE URSA PROD OWY FIX DEPLOY us-west-2 ursa.day.lsmc.bio`. |
 | DEPLOY-002 | Agent 4 | After approval, deploy only Ursa using the current production runtime path; do not migrate runtime lane. | BLOCKED | active_product_contract | 6 | Approval phrase not received. | Live production deploy/restart approval missing. | Unblock with approval phrase. |
 | ACCEPT-001 | Agent 4 | After deploy, verify health/OpenAPI tag and coordinate one OWY retry for the same run. | BLOCKED | active_product_contract | 7 | Deploy blocked. | Fixed Ursa not deployed. | Unblock after approved deploy. |
 | ACCEPT-002 | Agent 4 | Confirm no duplicate Bloom/Dewey sidecars, `.ursa.*` sidecar written only after success, and OWY failure stage cleared. | BLOCKED | active_product_contract | 7 | Deploy blocked. | OWY retry not approved/performed. | Unblock after approved deploy and OWY retry. |
-| FINAL-001 | Orchestrator | Record status counts, changed files, pushed refs, deploy approval state, acceptance result, and remaining blockers. | OPEN | plan_amendment | 8 | Pending terminal report. |  |  |
+| FINAL-001 | Orchestrator | Record status counts, changed files, pushed refs, deploy approval state, acceptance result, and remaining blockers. | SUCCESS | plan_amendment | 8 | Status counts: `SUCCESS=19`, `BLOCKED=5`, `OPEN=0`, `IN_PROGRESS=0`, `ATTEMPTING_BUGFIX=0`. Pushed refs: branch `codex/ursa-4-0-11-docker-template-pack-20260528`, tag `4.0.15`. Production deploy and OWY retry were not approved or performed. |  | Terminal ledger complete with approval-gated blockers preserved. |
 
 ## Working Notes
 
 - Status counts after Gate 0: `SUCCESS=4`, `OPEN=15`, `BLOCKED=5`.
 - The implementation must not silently reinterpret `DYEC 5.0.22` as a lower version or a loose minimum.
 - The implementation must not add fallback config behavior or compatibility shims.
+
+## Terminal Report
+
+Recorded: 2026-05-28
+
+- Final status counts: `SUCCESS=19`, `BLOCKED=5`, `OPEN=0`, `IN_PROGRESS=0`, `ATTEMPTING_BUGFIX=0`.
+- Changed files:
+  - `README.md`
+  - `cluex.yaml`
+  - `config/ecosystem-versions.json`
+  - `daylib_ursa/analysis_commands.py`
+  - `daylib_ursa/analysis_jobs.py`
+  - `daylib_ursa/cluster_service.py`
+  - `daylib_ursa/ephemeral_cluster/runner.py`
+  - `daylib_ursa/resource_store.py`
+  - `daylib_ursa/workset_api.py`
+  - `environment.yaml`
+  - `pyproject.toml`
+  - `tests/conftest.py`
+  - `tests/test_activation_metadata.py`
+  - `tests/test_admin_gui_and_cluster_routes.py`
+  - `tests/test_cluster_headnode_diagnostics.py`
+  - `tests/test_cluster_partition_helpers.py`
+  - `tests/test_dewey_run_analysis_triggers.py`
+  - `ursa-conformance-directive.md`
+  - `uv.lock`
+  - `docs/plans/20260528T165200Z_owy_ursa_500_request_61456fbc_ledger.md`
+- Validation commands:
+  - `source ./activate owy500 && python -m pytest -q tests/test_dewey_run_analysis_triggers.py tests/test_daylily_ec_runner.py tests/test_activation_metadata.py tests/test_cluster_headnode_diagnostics.py tests/test_admin_gui_and_cluster_routes.py` -> `59 passed`.
+  - `source ./activate owy500 && python -m pytest -q tests/test_dayec_run_directory_command_catalog.py tests/test_cluster_partition_helpers.py` -> `20 passed`.
+  - `source ./activate owy500 && ruff check daylib_ursa tests` -> passed.
+  - `git diff --check` -> passed.
+  - `uv lock --check` -> passed.
+  - `source ./activate owy500 && python -m pip check` -> passed.
+  - Runtime proof: `daylily-ephemeral-cluster 5.0.22`; `require_daylily_ec_version()` returns `5.0.22`.
+  - Build proof: `uv build --wheel --sdist` produced `dist/daylily_ursa-4.0.15-py3-none-any.whl` and `dist/daylily_ursa-4.0.15.tar.gz`.
+  - Wheel metadata proof: `Version: 4.0.15`; `Requires-Dist: daylily-ephemeral-cluster==5.0.22`.
+  - Wheel source proof: OWY route present; Bloom child creation uses `parent_external_id_key="trigger_euid"`.
+- Pushed refs:
+  - `origin/codex/ursa-4-0-11-docker-template-pack-20260528` includes release source through `9e0ff2a`; terminal ledger finalization is branch-only and does not move the release tag.
+  - `origin/4.0.15` -> annotated tag for release `4.0.15`.
+- Remaining blockers:
+  - Production deploy remains blocked until exact approval phrase: `APPROVE URSA PROD OWY FIX DEPLOY us-west-2 ursa.day.lsmc.bio`.
+  - OWY acceptance retry remains blocked until fixed Ursa is deployed and a retry is approved/coordinated.
+  - Production verification of DYEC `5.0.22` remains blocked until the approved deploy occurs.
