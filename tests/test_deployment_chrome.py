@@ -56,6 +56,11 @@ dewey_enabled: false
 dewey_base_url: https://localhost:8914
 dewey_api_token: dewey-dev-token
 dewey_verify_ssl: true
+external_broker_service_token: yaml-service-token
+ursa_gui_cache_enabled: false
+ursa_gui_cache_ttl_seconds: 37
+ursa_gui_cache_refresh_interval_seconds: 41
+ursa_gui_cache_background_refresh_enabled: false
 cognito_user_pool_id: yaml-pool
 cognito_app_client_id: yaml-client
 cognito_app_client_secret: yaml-secret
@@ -92,6 +97,11 @@ deployment:
     assert settings.cognito_callback_url == "https://env.example.com/auth/callback"
     assert settings.cognito_logout_url == "https://env.example.com/login"
     assert settings.dewey_api_token == "dewey-dev-token"
+    assert settings.external_broker_service_token == "yaml-service-token"
+    assert settings.ursa_gui_cache_enabled is False
+    assert settings.ursa_gui_cache_ttl_seconds == 37
+    assert settings.ursa_gui_cache_refresh_interval_seconds == 41
+    assert settings.ursa_gui_cache_background_refresh_enabled is False
     assert settings.deployment == {
         "name": "staging",
         "color": _stable_deployment_color_hex("staging"),

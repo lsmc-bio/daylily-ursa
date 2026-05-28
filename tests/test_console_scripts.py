@@ -500,6 +500,11 @@ class TestStrictConfigValidation:
                     "regions": ["us-west-2"],
                     "tapdb_domain_code": "Z",
                     "tapdb_owner_repo_name": "ursa",
+                    "external_broker_service_token": "ursa-service-token",
+                    "ursa_gui_cache_enabled": True,
+                    "ursa_gui_cache_ttl_seconds": 600,
+                    "ursa_gui_cache_refresh_interval_seconds": 600,
+                    "ursa_gui_cache_background_refresh_enabled": True,
                     "ursa_tapdb_mount_enabled": True,
                     "ursa_tapdb_mount_path": "/admin/tapdb",
                 }

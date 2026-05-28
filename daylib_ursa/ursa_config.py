@@ -205,6 +205,7 @@ VALID_FIELDS = {
     "external_broker_service_id": (str, "External login broker service identifier"),
     "external_broker_login_url": (str, "External login broker start URL"),
     "external_broker_handoff_exchange_url": (str, "External login broker handoff exchange URL"),
+    "external_broker_service_token": (str, "External login broker registered-service token"),
     "external_broker_callback_url": (str, "External login broker callback URL"),
     "external_broker_logout_url": (str, "External login broker logout URL"),
     "external_broker_ca_bundle": (str, "External login broker CA bundle path"),
@@ -212,6 +213,16 @@ VALID_FIELDS = {
     "api_host": (str, "API bind host"),
     "api_port": (int, "API bind port"),
     "allowed_hosts": (str, "Comma-separated HTTP Host values accepted by the Ursa web server"),
+    "ursa_gui_cache_enabled": (bool, "Enable Ursa GUI payload caching"),
+    "ursa_gui_cache_ttl_seconds": (int, "Ursa GUI payload cache TTL in seconds"),
+    "ursa_gui_cache_refresh_interval_seconds": (
+        int,
+        "Ursa GUI background cache refresh interval in seconds",
+    ),
+    "ursa_gui_cache_background_refresh_enabled": (
+        bool,
+        "Enable Ursa GUI background cache refresh",
+    ),
     "ursa_tapdb_mount_enabled": (bool, "Mount TapDB admin UI/API inside Ursa"),
     "ursa_tapdb_mount_path": (str, "Ursa path prefix for embedded TapDB admin UI/API"),
     "bloom_base_url": (str, "Bloom base URL"),
@@ -525,6 +536,18 @@ class UrsaConfig:
     allowed_hosts: Optional[str] = None
     """Comma-separated HTTP Host values accepted by the Ursa web server."""
 
+    ursa_gui_cache_enabled: Optional[bool] = None
+    """Whether Ursa GUI payload caching is enabled."""
+
+    ursa_gui_cache_ttl_seconds: Optional[int] = None
+    """Ursa GUI payload cache TTL in seconds."""
+
+    ursa_gui_cache_refresh_interval_seconds: Optional[int] = None
+    """Ursa GUI background cache refresh interval in seconds."""
+
+    ursa_gui_cache_background_refresh_enabled: Optional[bool] = None
+    """Whether Ursa GUI background cache refresh is enabled."""
+
     ursa_tapdb_mount_enabled: Optional[bool] = None
     """Whether to mount the embedded TapDB admin UI/API."""
 
@@ -727,6 +750,12 @@ class UrsaConfig:
         api_host = data.get("api_host")
         api_port = data.get("api_port")
         allowed_hosts = data.get("allowed_hosts")
+        ursa_gui_cache_enabled = data.get("ursa_gui_cache_enabled")
+        ursa_gui_cache_ttl_seconds = data.get("ursa_gui_cache_ttl_seconds")
+        ursa_gui_cache_refresh_interval_seconds = data.get("ursa_gui_cache_refresh_interval_seconds")
+        ursa_gui_cache_background_refresh_enabled = data.get(
+            "ursa_gui_cache_background_refresh_enabled"
+        )
         ursa_tapdb_mount_enabled = data.get("ursa_tapdb_mount_enabled")
         ursa_tapdb_mount_path = data.get("ursa_tapdb_mount_path")
         bloom_base_url = data.get("bloom_base_url")
@@ -807,6 +836,10 @@ class UrsaConfig:
             api_host=api_host,
             api_port=api_port,
             allowed_hosts=allowed_hosts,
+            ursa_gui_cache_enabled=ursa_gui_cache_enabled,
+            ursa_gui_cache_ttl_seconds=ursa_gui_cache_ttl_seconds,
+            ursa_gui_cache_refresh_interval_seconds=ursa_gui_cache_refresh_interval_seconds,
+            ursa_gui_cache_background_refresh_enabled=ursa_gui_cache_background_refresh_enabled,
             ursa_tapdb_mount_enabled=ursa_tapdb_mount_enabled,
             ursa_tapdb_mount_path=ursa_tapdb_mount_path,
             bloom_base_url=bloom_base_url,
