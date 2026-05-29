@@ -940,6 +940,24 @@ def test_workset_and_manifest_routes_use_versioned_user_api() -> None:
         ANALYSIS_SAMPLES_COLUMNS
     )
     assert DEFAULT_STAGE_TARGET in analysis_samples_manifest["content"]
+    assert analysis_samples_manifest["analysis_experiments"] == [
+        {
+            "analysis_experiment_euid": analysis_samples_manifest["analysis_experiments"][0][
+                "analysis_experiment_euid"
+            ],
+            "row_number": "1",
+            "run_id": analysis_samples_manifest["rows"][0]["RUN_ID"],
+            "sample_id": analysis_samples_manifest["rows"][0]["SAMPLE_ID"],
+            "experiment_id": analysis_samples_manifest["rows"][0]["EXPERIMENTID"],
+            "lane": analysis_samples_manifest["rows"][0]["LANE"],
+            "seqbc_id": analysis_samples_manifest["rows"][0]["SEQBC_ID"],
+            "seq_platform": analysis_samples_manifest["rows"][0]["SEQ_PLATFORM"],
+            "stage_target": analysis_samples_manifest["rows"][0]["STAGE_TARGET"],
+        }
+    ]
+    assert analysis_samples_manifest["analysis_experiments"][0][
+        "analysis_experiment_euid"
+    ].startswith("URXP-")
     assert listed_worksets.json()[0]["manifests"][0]["manifest_euid"] == "MF-1"
     assert listed_manifests.json()[0]["artifact_set_euid"] == "AS-1"
     assert (

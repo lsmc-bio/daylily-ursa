@@ -28,6 +28,7 @@ from daylib_ursa.resource_store import (
     ClientRegistrationRecord,
     ClusterJobEventRecord,
     ClusterJobRecord,
+    ComputeClusterRecord,
     LinkedBucketRecord,
     ManifestRecord,
     StagingJobRecord,
@@ -362,10 +363,12 @@ class MemoryResourceStore:
             )
         }
         self.client_registrations: dict[str, ClientRegistrationRecord] = {}
+        self.compute_clusters: dict[str, ComputeClusterRecord] = {}
         self.cluster_jobs: dict[str, ClusterJobRecord] = {}
         self.analysis_jobs: dict[str, AnalysisJobRecord] = {}
         self.staging_jobs: dict[str, StagingJobRecord] = {}
         self._client_seq = 0
+        self._compute_cluster_seq = 0
         self._job_seq = 0
         self._analysis_job_seq = 0
         self.worksets["WS-1"] = WorksetRecord(
@@ -435,6 +438,66 @@ class MemoryResourceStore:
             values = [item for item in values if item.owner_user_id == owner_user_id]
         return values
 
+    def create_compute_cluster(
+        self,
+        *,
+        display_name: str,
+        cluster_name: str,
+        cluster_type: str,
+        region: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        metadata=None,
+    ) -> ComputeClusterRecord:
+        self._compute_cluster_seq += 1
+        record = ComputeClusterRecord(
+            cluster_euid=f"CC-{self._compute_cluster_seq}",
+            display_name=display_name,
+            cluster_name=cluster_name,
+            cluster_type=cluster_type,
+            region=region,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            state="ACTIVE",
+            metadata=dict(metadata or {}),
+            created_at="2026-03-25T00:00:00Z",
+            updated_at="2026-03-25T00:00:00Z",
+        )
+        self.compute_clusters[record.cluster_euid] = record
+        return record
+
+    def get_compute_cluster(self, cluster_euid: str):
+        return self.compute_clusters.get(cluster_euid)
+
+    def list_compute_clusters(self, *, tenant_id: uuid.UUID | None = None, limit: int = 200):
+        _ = limit
+        values = list(self.compute_clusters.values())
+        if tenant_id is not None:
+            values = [item for item in values if item.tenant_id == tenant_id]
+        return values
+
+    def update_compute_cluster_state(
+        self,
+        *,
+        cluster_euid: str,
+        state: str,
+        actor_user_id: str,
+        metadata=None,
+    ) -> ComputeClusterRecord:
+        _ = actor_user_id
+        record = self.compute_clusters[cluster_euid]
+        merged_metadata = dict(record.metadata)
+        if metadata is not None:
+            merged_metadata.update(dict(metadata))
+        updated = replace(
+            record,
+            state=state,
+            metadata=merged_metadata,
+            updated_at="2026-03-25T00:01:00Z",
+        )
+        self.compute_clusters[cluster_euid] = updated
+        return updated
+
     def add_cluster_job(
         self, *, cluster_name: str, owner_user_id: str, sponsor_user_id: str
     ) -> ClusterJobRecord:
@@ -470,6 +533,51 @@ class MemoryResourceStore:
                     created_at="2026-03-25T00:00:00Z",
                 )
             ],
+        )
+        self.cluster_jobs[record.job_euid] = record
+        return record
+
+    def create_cluster_job(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        region_az: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        sponsor_user_id: str,
+        request=None,
+        job_name: str | None = None,
+        cluster_euid: str | None = None,
+        job_type: str = "generic",
+        analysis_job_euid: str | None = None,
+        scheduler_job_id: str | None = None,
+    ) -> ClusterJobRecord:
+        self._job_seq += 1
+        record = ClusterJobRecord(
+            job_euid=f"CJ-{self._job_seq}",
+            job_name=job_name or cluster_name,
+            cluster_name=cluster_name,
+            region=region,
+            region_az=region_az,
+            tenant_id=tenant_id,
+            owner_user_id=owner_user_id,
+            sponsor_user_id=sponsor_user_id,
+            state="QUEUED",
+            created_at="2026-03-25T00:00:00Z",
+            updated_at="2026-03-25T00:00:00Z",
+            started_at=None,
+            completed_at=None,
+            return_code=None,
+            error=None,
+            output_summary=None,
+            request=dict(request or {}),
+            cluster={},
+            events=[],
+            cluster_euid=cluster_euid,
+            job_type=job_type,
+            analysis_job_euid=analysis_job_euid,
+            scheduler_job_id=scheduler_job_id,
         )
         self.cluster_jobs[record.job_euid] = record
         return record
@@ -1110,6 +1218,92 @@ def _aws_check_all_result(**kwargs):
         '{"summary":{"PASS":1,"WARN":0,"FAIL":0},"checks":[{"id":"iam.policy","status":"PASS"}]}',
         "",
     )
+
+
+def test_compute_cluster_and_cluster_job_routes_are_first_class_objects() -> None:
+    app, resources = _create_test_app()
+
+    with TestClient(app) as client:
+        created_cluster = client.post(
+            "/api/v1/compute-clusters",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "display_name": "Majors Cluster",
+                "cluster_name": "majors-cluster",
+                "cluster_type": "aws_parallelcluster_slurm",
+                "region": "us-west-2",
+                "metadata": {"region_az": "us-west-2a"},
+            },
+        )
+        listed_clusters = client.get(
+            "/api/v1/compute-clusters",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        cluster_detail = client.get(
+            f"/api/v1/compute-clusters/{created_cluster.json()['cluster_euid']}",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        cluster_state = client.post(
+            f"/api/v1/compute-clusters/{created_cluster.json()['cluster_euid']}/state",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={"state": "READY", "metadata": {"scheduler": "slurm"}},
+        )
+        cluster_job = client.post(
+            "/api/v1/cluster-jobs",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={
+                "cluster_euid": created_cluster.json()["cluster_euid"],
+                "job_name": "dy-r help smoke",
+                "job_type": "slurm",
+                "analysis_job_euid": "AJ-123",
+                "scheduler_job_id": "456",
+                "request": {"command": "dy-r help"},
+            },
+        )
+        listed_cluster_jobs = client.get(
+            "/api/v1/cluster-jobs",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+        job_detail = client.get(
+            f"/api/v1/cluster-jobs/{cluster_job.json()['cluster_job_euid']}",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
+
+    assert created_cluster.status_code == 201, created_cluster.text
+    assert created_cluster.json()["cluster_euid"] == "CC-1"
+    assert created_cluster.json()["cluster_type"] == "aws_parallelcluster_slurm"
+    assert listed_clusters.status_code == 200
+    assert listed_clusters.json()[0]["cluster_name"] == "majors-cluster"
+    assert cluster_detail.status_code == 200
+    assert cluster_detail.json()["cluster_euid"] == "CC-1"
+    assert cluster_state.status_code == 200
+    assert cluster_state.json()["state"] == "READY"
+    assert cluster_state.json()["metadata"]["scheduler"] == "slurm"
+    assert cluster_job.status_code == 201, cluster_job.text
+    assert listed_cluster_jobs.status_code == 200
+    assert listed_cluster_jobs.json()[0]["cluster_job_euid"] == "CJ-1"
+    assert cluster_job.json()["cluster_job_euid"] == "CJ-1"
+    assert cluster_job.json()["job_name"] == "dy-r help smoke"
+    assert cluster_job.json()["cluster_euid"] == "CC-1"
+    assert cluster_job.json()["job_type"] == "slurm"
+    assert cluster_job.json()["analysis_job_euid"] == "AJ-123"
+    assert cluster_job.json()["scheduler_job_id"] == "456"
+    assert cluster_job.json()["request"] == {"command": "dy-r help"}
+    assert job_detail.status_code == 200
+    assert job_detail.json()["cluster_job_euid"] == "CJ-1"
+    assert resources.cluster_jobs["CJ-1"].cluster_euid == "CC-1"
+
+
+def test_gui_static_assets_include_cli_viz_mode_and_compute_cluster_surface() -> None:
+    static_dir = Path(__file__).resolve().parents[1] / "daylib_ursa" / "gui"
+    portal_js = (static_dir / "static" / "portal.js").read_text()
+    clusters_template = (static_dir / "templates" / "clusters.html").read_text()
+
+    assert "CLI Viz" in portal_js
+    assert "buildApiCliCommand" in portal_js
+    assert "copy" in portal_js
+    assert "Compute Clusters" in clusters_template
+    assert "/api/v1/compute-clusters" in clusters_template
 
 
 def test_create_app_uses_package_version() -> None:

@@ -93,7 +93,96 @@ window.UrsaPortal = (() => {
     return node.innerHTML;
   }
 
+  function shellQuote(value) {
+    const text = String(value ?? "");
+    if (/^[A-Za-z0-9_./:=@%+-]+$/.test(text)) {
+      return text;
+    }
+    return `'${text.replace(/'/g, `'\\''`)}'`;
+  }
+
+  function cliVizEnabled() {
+    return window.localStorage.getItem("ursaCliViz") === "enabled";
+  }
+
+  function setCliVizEnabled(enabled) {
+    window.localStorage.setItem("ursaCliViz", enabled ? "enabled" : "disabled");
+    const button = document.getElementById("cli-viz-toggle");
+    if (button) {
+      button.classList.toggle("active", enabled);
+      button.setAttribute("aria-pressed", enabled ? "true" : "false");
+    }
+    const panel = document.getElementById("cli-viz-panel");
+    if (panel) {
+      panel.classList.toggle("d-none", !enabled);
+    }
+  }
+
+  function buildApiCliCommand(path, options = {}) {
+    const method = String(options.method || "GET").toUpperCase();
+    const args = [
+      "ursa",
+      "--json",
+      "api",
+      "request",
+      "--api-base-url",
+      window.location.origin,
+      "--token",
+      "<TOKEN>",
+      "--method",
+      method,
+      "--path",
+      String(path || ""),
+    ];
+    if (options.body && !(options.body instanceof FormData) && method !== "GET") {
+      args.push("--body-json", JSON.stringify(options.body));
+    }
+    return args.map(shellQuote).join(" ");
+  }
+
+  function showCliVizCommand(command) {
+    if (!cliVizEnabled()) {
+      return;
+    }
+    const output = document.getElementById("cli-viz-output");
+    if (output) {
+      output.textContent = command;
+    }
+  }
+
+  function initCliViz() {
+    if (document.getElementById("cli-viz-toggle")) {
+      return;
+    }
+    const button = document.createElement("button");
+    button.id = "cli-viz-toggle";
+    button.type = "button";
+    button.className = "cli-viz-toggle";
+    button.setAttribute("aria-pressed", "false");
+    button.textContent = "CLI Viz";
+    const panel = document.createElement("aside");
+    panel.id = "cli-viz-panel";
+    panel.className = "cli-viz-panel d-none";
+    panel.innerHTML = `
+      <div class="cli-viz-header">
+        <strong>CLI command</strong>
+        <button class="btn btn-outline btn-sm" type="button" id="cli-viz-copy">
+          <i class="fa-solid fa-copy"></i> Copy
+        </button>
+      </div>
+      <pre id="cli-viz-output" class="cli-viz-output">Turn CLI Viz on, then use an Ursa action.</pre>
+    `;
+    document.body.appendChild(button);
+    document.body.appendChild(panel);
+    button.addEventListener("click", () => setCliVizEnabled(!cliVizEnabled()));
+    panel.querySelector("#cli-viz-copy")?.addEventListener("click", () => {
+      copyText(document.getElementById("cli-viz-output")?.textContent || "", "CLI command copied");
+    });
+    setCliVizEnabled(cliVizEnabled());
+  }
+
   async function apiRequest(path, options = {}) {
+    showCliVizCommand(buildApiCliCommand(path, options));
     const init = {
       credentials: "same-origin",
       headers: { Accept: "application/json", ...(options.headers || {}) },
@@ -353,6 +442,7 @@ window.UrsaPortal = (() => {
       });
     });
     initSortableTables();
+    initCliViz();
   });
 
   window.showToast = showToast;
@@ -378,5 +468,6 @@ window.UrsaPortal = (() => {
     showToast,
     hideLoading,
     initSortableTables,
+    showCliVizCommand,
   };
 })();

@@ -1084,6 +1084,62 @@ input[type="radio"] {
     animation: spin 1s linear infinite;
 }
 
+.cli-viz-toggle {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 65;
+    border: 1px solid var(--color-gray-300);
+    border-radius: 6px;
+    background: var(--color-white);
+    color: var(--color-gray-900);
+    padding: 0.6rem 0.8rem;
+    font-weight: 700;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+    cursor: pointer;
+}
+
+.cli-viz-toggle.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-white);
+}
+
+.cli-viz-panel {
+    position: fixed;
+    right: 1rem;
+    bottom: 4.2rem;
+    z-index: 65;
+    width: min(680px, calc(100vw - 2rem));
+    max-height: 44vh;
+    border: 1px solid var(--color-gray-300);
+    border-radius: 8px;
+    background: var(--color-white);
+    color: var(--color-gray-900);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
+    overflow: hidden;
+}
+
+.cli-viz-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--color-gray-200);
+}
+
+.cli-viz-output {
+    margin: 0;
+    max-height: 32vh;
+    overflow: auto;
+    padding: 1rem;
+    background: var(--color-gray-50);
+    color: var(--color-gray-900);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 @keyframes spin {
     to { transform: rotate(360deg); }
 }

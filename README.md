@@ -112,6 +112,8 @@ Core API surface:
 - `/api/v1/staging-jobs` defines and runs sample staging through `daylily-ec samples stage`.
 - `/api/v1/analysis-jobs` defines, launches, refreshes, and reads analysis workflow jobs.
 - `/api/v1/dewey/run-analysis-triggers` accepts service-token Dewey triggers and can launch catalog-backed analysis jobs when explicit execution context is supplied.
+- `/api/v1/dewey/run-directory-analysis-triggers` accepts OWY run-directory triggers and exposes readback for run-directory analysis lifecycle.
+- `/api/v1/compute-clusters` and `/api/v1/cluster-jobs` persist durable compute placement records with `cluster_euid` and `cluster_job_euid`.
 - `/api/v1/clusters` and `/api/v1/clusters/jobs` expose cluster creation, inspection, dry-run delete planning, and cluster job state.
 - `/api/v1/admin/cluster-cleanup-policy` and `/api/v1/admin/cluster-cleanup/run` expose admin-only idle cleanup policy and dry-run/execute controls.
 - `/api/v1/buckets` manages linked S3 buckets and object browsing/upload helper routes.
@@ -120,6 +122,10 @@ Core API surface:
 Manifest creation rejects caller-supplied generated manifest metadata. Ursa derives `analysis_samples_manifest` from `editor_analysis_inputs` or S3 input references, using the installed Daylily-Informatics `daylily-ephemeral-cluster` `==5.0.28` template.
 
 Staging jobs run against an existing manifest and capture the remote FSx stage directory plus stdout/stderr. Analysis jobs may either stage from a `reference_s3_uri` or reuse a completed `staging_job_euid` whose tenant, workset, manifest, state, and `stage_dir` match the request.
+
+Generated analysis manifests and OWY run-directory jobs carry deterministic `analysis_experiment_euid` values for row/cell-defined analysis work. These EUIDs are evidence identifiers, not QC interpretations.
+
+The GUI includes a CLI Viz toggle. When enabled, GUI actions that have CLI analogs render a copyable `ursa --json api request ...` command with a `<TOKEN>` placeholder.
 
 Cluster auto cleanup is disabled by default. When enabled by an admin, cleanup must export `/fsx/analysis_results/...` to S3 through the DayEC export path before delete; export failure blocks delete.
 
@@ -169,6 +175,7 @@ The repo uses setuptools-scm for versions. Release tags are bare numeric semver 
 - [Docs index](docs/README.md)
 - [Google OAuth default](docs/GOOGLE_OAUTH_DEFAULT.md)
 - [Dewey run analysis trigger contract](docs/dewey_run_analysis_triggers.md)
+- [Compute cluster and cluster job lifecycle](docs/compute_cluster_lifecycle.md)
 - [Cluster auto cleanup runbook](docs/cluster_auto_cleanup.md)
 - [Ursa-Atlas return contract](docs/ursa_atlas_return_contract.md)
 - [TapDB admin mount status](docs/tapdb_mount_execplan.md)

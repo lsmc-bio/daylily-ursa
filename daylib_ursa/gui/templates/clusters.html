@@ -377,6 +377,53 @@
     </details>
     {% endif %}
 
+    <div class="card mb-xl" id="compute-clusters-card">
+        <div class="card-header d-flex justify-between align-center flex-wrap gap-md">
+            <div>
+                <h3 class="card-title" style="margin-bottom: 0.25rem;">
+                    <i class="fas fa-layer-group"></i> Compute Clusters
+                </h3>
+                <div class="text-sm text-muted">Durable Ursa compute-cluster objects with explicit cluster EUIDs.</div>
+            </div>
+            <button class="btn btn-outline btn-sm" type="button" onclick="refreshComputeClusters()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="card-body">
+            {% if is_admin %}
+            <div class="grid grid-4 gap-md mb-md">
+                <input class="form-input" id="compute-cluster-name" type="text" placeholder="cluster name">
+                <select class="form-select" id="compute-cluster-type">
+                    <option value="aws_parallelcluster_slurm">AWS ParallelCluster Slurm</option>
+                    <option value="vanilla_slurm">Vanilla Slurm</option>
+                    <option value="generic">Generic</option>
+                </select>
+                <input class="form-input" id="compute-cluster-region" type="text" placeholder="us-west-2">
+                <button class="btn btn-primary" type="button" onclick="registerComputeCluster()" id="compute-cluster-register-btn">
+                    <i class="fas fa-plus"></i> Register
+                </button>
+            </div>
+            {% endif %}
+            <div class="table-wrapper">
+                <table class="table" id="compute-clusters-table">
+                    <thead>
+                        <tr>
+                            <th>Cluster EUID</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Region</th>
+                            <th>State</th>
+                            <th>Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody id="compute-clusters-tbody">
+                        <tr><td colspan="6" class="text-muted">Loading compute clusters...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="card mb-xl" id="cluster-create-jobs-card">
         <div class="card-header d-flex justify-between align-center flex-wrap gap-md">
             <div>
@@ -1989,6 +2036,50 @@ async function refreshCreateJobs() {
     }
 }
 
+async function refreshComputeClusters() {
+    try {
+        const clusters = await UrsaPortal.apiRequest('/api/v1/compute-clusters');
+        const tbody = document.getElementById('compute-clusters-tbody');
+        tbody.innerHTML = clusters.length ? clusters.map((cluster) => `
+            <tr>
+                <td class="mono">${escapeHtml(cluster.cluster_euid)}</td>
+                <td>${escapeHtml(cluster.cluster_name)}</td>
+                <td>${escapeHtml(cluster.cluster_type)}</td>
+                <td>${escapeHtml(cluster.region)}</td>
+                <td><span class="badge badge-${escapeHtml(String(cluster.state || '').toLowerCase().replace(/_/g, '-'))}">${escapeHtml(cluster.state)}</span></td>
+                <td>${escapeHtml(String(cluster.updated_at || '').slice(0, 19))}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="6" class="text-muted">No compute clusters registered.</td></tr>';
+    } catch (error) {
+        showToast('error', clusterActionErrorMessage(error, 'Failed to refresh compute clusters'));
+    }
+}
+
+async function registerComputeCluster() {
+    try {
+        const clusterName = String(document.getElementById('compute-cluster-name')?.value || '').trim();
+        const clusterType = String(document.getElementById('compute-cluster-type')?.value || '').trim();
+        const region = String(document.getElementById('compute-cluster-region')?.value || '').trim();
+        if (!clusterName || !clusterType || !region) {
+            showToast('error', 'Cluster name, type, and region are required');
+            return;
+        }
+        await UrsaPortal.apiRequest('/api/v1/compute-clusters', {
+            method: 'POST',
+            body: {
+                cluster_name: clusterName,
+                cluster_type: clusterType,
+                region,
+                metadata: {},
+            },
+        });
+        showToast('success', 'Compute cluster registered');
+        await refreshComputeClusters();
+    } catch (error) {
+        showToast('error', clusterActionErrorMessage(error, 'Failed to register compute cluster'));
+    }
+}
+
 async function deleteCluster(clusterName, region) {
     try {
         const plan = await UrsaPortal.apiRequest(`/api/v1/clusters/${encodeURIComponent(clusterName)}/delete-plan?region=${encodeURIComponent(region)}`, {
@@ -2024,6 +2115,9 @@ async function deleteCluster(clusterName, region) {
 
 document.addEventListener('DOMContentLoaded', () => {
     updateCreateButtonState();
+    refreshComputeClusters().catch((error) => {
+        showToast('error', clusterActionErrorMessage(error, 'Failed to load compute clusters'));
+    });
     loadClusterInventory(false).catch((error) => {
         showToast('error', clusterActionErrorMessage(error, 'Failed to load cluster inventory'));
     });

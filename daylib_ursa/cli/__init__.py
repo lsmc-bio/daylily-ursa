@@ -197,6 +197,7 @@ def _build_spec() -> CliSpec:
                 "daylib_ursa.cli.quality.register",
                 "daylib_ursa.cli.integrations.register",
                 "daylib_ursa.cli.monitor.register",
+                "daylib_ursa.cli.api.register",
             ],
         ),
         info_hooks=[_ursa_info_hook],

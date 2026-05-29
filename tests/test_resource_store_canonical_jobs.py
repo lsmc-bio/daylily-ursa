@@ -9,6 +9,7 @@ from daylib_ursa.tapdb_graph import from_json_addl
 from daylib_ursa.resource_store import (
     ANALYSIS_JOB_TEMPLATE,
     CLUSTER_JOB_TEMPLATE,
+    COMPUTE_CLUSTER_TEMPLATE,
     MANIFEST_TEMPLATE,
     STAGING_JOB_TEMPLATE,
     WORKSET_TEMPLATE,
@@ -61,6 +62,7 @@ class MemoryBackend:
             WORKSET_TEMPLATE: "WS",
             MANIFEST_TEMPLATE: "MF",
             CLUSTER_JOB_TEMPLATE: "CJ",
+            COMPUTE_CLUSTER_TEMPLATE: "CC",
             "RGX/cluster/ephemeral-job-event/1.0/": "CJE",
             ANALYSIS_JOB_TEMPLATE: "AJ",
             "RGX/analysis/launch-job-event/1.0/": "AJE",
@@ -247,6 +249,75 @@ def test_cluster_job_statuses_mutate_canonical_job_and_keep_events_as_events() -
     _assert_no_revision_objects(backend, job)
     event_children = backend.list_children(object(), parent=job, relationship_type="event")
     assert [child.euid for child in event_children] == [event.event_euid]
+
+
+def test_compute_cluster_links_to_explicit_cluster_job() -> None:
+    store, backend = _store_with_backend()
+
+    cluster = store.create_compute_cluster(
+        display_name="Majors Cluster",
+        cluster_name="majors-cluster",
+        cluster_type="aws_parallelcluster_slurm",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        metadata={"region_az": "us-west-2a"},
+    )
+    job = store.create_cluster_job(
+        cluster_euid=cluster.cluster_euid,
+        job_name="dy-r help smoke",
+        cluster_name=cluster.cluster_name,
+        region=cluster.region,
+        region_az="us-west-2a",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+        sponsor_user_id=USER_ID,
+        request={"command": "dy-r help"},
+        job_type="slurm",
+        analysis_job_euid="AJ-1",
+        scheduler_job_id="12345",
+    )
+
+    assert cluster.cluster_euid == "CC-1"
+    assert cluster.cluster_type == "aws_parallelcluster_slurm"
+    assert job.cluster_job_euid == job.job_euid
+    assert job.job_name == "dy-r help smoke"
+    assert job.cluster_euid == cluster.cluster_euid
+    assert job.job_type == "slurm"
+    assert job.analysis_job_euid == "AJ-1"
+    assert job.scheduler_job_id == "12345"
+    assert job.request == {"command": "dy-r help"}
+
+    cluster_instance = _instance_for_euid(backend, cluster.cluster_euid)
+    job_instance = _instance_for_euid(backend, job.job_euid)
+    assert (cluster_instance, job_instance, "compute_cluster_job") in backend.lineages
+
+
+def test_compute_cluster_rejects_duplicate_active_name_region() -> None:
+    store, _backend = _store_with_backend()
+
+    store.create_compute_cluster(
+        display_name="Cluster",
+        cluster_name="majors-cluster",
+        cluster_type="generic",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=USER_ID,
+    )
+
+    try:
+        store.create_compute_cluster(
+            display_name="Cluster again",
+            cluster_name="majors-cluster",
+            cluster_type="generic",
+            region="us-west-2",
+            tenant_id=TENANT_ID,
+            owner_user_id=USER_ID,
+        )
+    except ValueError as exc:
+        assert "compute cluster already exists" in str(exc)
+    else:
+        raise AssertionError("duplicate active compute cluster was accepted")
 
 
 def test_analysis_job_statuses_mutate_canonical_job_without_revision_children() -> None:

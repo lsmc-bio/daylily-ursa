@@ -128,6 +128,7 @@ from daylib_ursa.resource_store import (
     ClientRegistrationRecord,
     AnalysisJobEventRecord,
     AnalysisJobRecord,
+    ComputeClusterRecord,
     ClusterJobEventRecord,
     ClusterJobRecord,
     DEWEY_RUN_TRIGGER_TEMPLATE,
@@ -1008,6 +1009,7 @@ class AnalysisJobCreateRequest(BaseModel):
     dry_run: bool = False
     stage_target: str | None = None
     staging_job_euid: str | None = None
+    analysis_experiment_euid: str | None = None
 
     @model_validator(mode="after")
     def validate_required_fields(self) -> "AnalysisJobCreateRequest":
@@ -1063,6 +1065,7 @@ class AnalysisJobResponse(BaseModel):
     request: dict[str, Any]
     launch: dict[str, Any]
     events: list[AnalysisJobEventResponse]
+    analysis_experiment_euid: str | None = None
 
 
 class StagingJobCreateRequest(BaseModel):
@@ -1232,6 +1235,68 @@ class AtlasUserDirectoryResponse(BaseModel):
     is_active: bool
 
 
+class ComputeClusterCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    cluster_name: str
+    cluster_type: Literal["generic", "vanilla_slurm", "aws_parallelcluster_slurm"]
+    region: str
+    owner_user_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_compute_cluster(self) -> "ComputeClusterCreateRequest":
+        for field_name in ("cluster_name", "cluster_type", "region"):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        return self
+
+
+class ComputeClusterStateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: str
+    metadata: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_state(self) -> "ComputeClusterStateRequest":
+        if not str(self.state or "").strip():
+            raise ValueError("state is required")
+        return self
+
+
+class ComputeClusterResponse(BaseModel):
+    cluster_euid: str
+    display_name: str
+    cluster_name: str
+    cluster_type: str
+    region: str
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    state: str
+    metadata: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+class ClusterJobCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cluster_euid: str
+    job_name: str | None = None
+    job_type: Literal["generic", "slurm"] = "generic"
+    analysis_job_euid: str | None = None
+    scheduler_job_id: str | None = None
+    request: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_cluster_job(self) -> "ClusterJobCreateRequest":
+        if not str(self.cluster_euid or "").strip():
+            raise ValueError("cluster_euid is required")
+        return self
+
+
 class ClusterJobEventResponse(BaseModel):
     event_euid: str
     job_euid: str
@@ -1244,8 +1309,13 @@ class ClusterJobEventResponse(BaseModel):
 
 
 class ClusterJobResponse(BaseModel):
+    cluster_job_euid: str
     job_euid: str
     job_name: str
+    cluster_euid: str | None = None
+    job_type: str = "generic"
+    analysis_job_euid: str | None = None
+    scheduler_job_id: str | None = None
     cluster_name: str
     region: str
     region_az: str
@@ -1569,10 +1639,19 @@ def _cluster_job_event_response(record: ClusterJobEventRecord) -> ClusterJobEven
     return ClusterJobEventResponse(**record.__dict__)
 
 
+def _compute_cluster_response(record: ComputeClusterRecord) -> ComputeClusterResponse:
+    return ComputeClusterResponse(**record.__dict__)
+
+
 def _cluster_job_response(record: ClusterJobRecord) -> ClusterJobResponse:
     return ClusterJobResponse(
+        cluster_job_euid=record.cluster_job_euid,
         job_euid=record.job_euid,
         job_name=record.job_name,
+        cluster_euid=record.cluster_euid,
+        job_type=record.job_type,
+        analysis_job_euid=record.analysis_job_euid,
+        scheduler_job_id=record.scheduler_job_id,
         cluster_name=record.cluster_name,
         region=record.region,
         region_az=record.region_az,
@@ -1618,6 +1697,7 @@ def _analysis_job_response(record: AnalysisJobRecord) -> AnalysisJobResponse:
         request=record.request,
         launch=record.launch,
         events=[_analysis_job_event_response(item) for item in record.events],
+        analysis_experiment_euid=record.analysis_experiment_euid,
     )
 
 
@@ -2702,6 +2782,7 @@ def create_app(
                 candidate["pipeline_order"] = job.request.get(
                     "run_directory_trigger", {}
                 ).get("pipeline_order", candidate.get("pipeline_order"))
+                candidate["analysis_experiment_euid"] = job.analysis_experiment_euid
             rows.append(candidate)
         if not rows:
             rows.append(
@@ -2712,6 +2793,7 @@ def create_app(
                     "pipeline_order": job.request.get("run_directory_trigger", {}).get(
                         "pipeline_order"
                     ),
+                    "analysis_experiment_euid": job.analysis_experiment_euid,
                 }
             )
         response["analysis_jobs"] = rows
@@ -3989,6 +4071,50 @@ def create_app(
             )
         return DeweyRunDirectoryAnalysisTriggerResponse(**response_payload)
 
+    def _refresh_run_directory_trigger_response(record) -> DeweyRunDirectoryAnalysisTriggerResponse:
+        response_payload = dict(record.response or {})
+        if not response_payload:
+            raise HTTPException(
+                status_code=500, detail="Dewey run-directory trigger record is missing response"
+            )
+        job_rows: list[dict[str, Any]] = []
+        for job_euid in list(response_payload.get("analysis_job_euids") or []):
+            job_id = str(job_euid or "").strip()
+            if not job_id:
+                continue
+            job = require_resource_store().get_analysis_job(job_id)
+            if job is None:
+                continue
+            job_rows.append(
+                {
+                    "analysis_job_euid": job.job_euid,
+                    "command_id": job.request.get("analysis_command_id"),
+                    "status": job.state,
+                    "pipeline_order": job.request.get("run_directory_trigger", {}).get(
+                        "pipeline_order"
+                    ),
+                    "cluster_name": job.cluster_name,
+                    "region": job.region,
+                    "analysis_experiment_euid": job.analysis_experiment_euid,
+                    "updated_at": job.updated_at,
+                }
+            )
+        if job_rows:
+            response_payload["analysis_jobs"] = job_rows
+            terminal_states = {str(row.get("status") or "") for row in job_rows}
+            if terminal_states and terminal_states <= {"COMPLETED"}:
+                response_payload["status"] = "COMPLETED"
+            elif terminal_states & {"FAILED"}:
+                response_payload["status"] = "FAILED"
+            elif terminal_states & {"RUNNING", "LAUNCHING", "STAGING", "PREPARING"}:
+                response_payload["status"] = "RUNNING"
+            elif terminal_states & {"DEFINED", "QUEUED"}:
+                response_payload["status"] = "QUEUED"
+            response_payload["updated_at"] = datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+        return DeweyRunDirectoryAnalysisTriggerResponse(**response_payload)
+
     def _normalize_s3_prefix_uri(value: str) -> str:
         raw = str(value or "").strip()
         parsed = urlparse(raw)
@@ -4121,6 +4247,24 @@ def create_app(
             "content": content,
             "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
         }
+
+    def _run_directory_analysis_experiment_euid(
+        *,
+        run_context_row: dict[str, Any],
+        command_id: str,
+        pipeline_order: int,
+    ) -> str:
+        payload = {
+            "schema": "ursa.analysis_experiment/1.0",
+            "source": "run_directory_trigger",
+            "run_context_row": dict(run_context_row),
+            "command_id": command_id,
+            "pipeline_order": pipeline_order,
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return f"URXP-{digest[:20].upper()}"
 
     def _relation_idempotency_key(*parts: str) -> str:
         digest = hashlib.sha256(
@@ -4628,7 +4772,14 @@ def create_app(
         previous_job_euid: str | None = None
         for index, command in enumerate(commands):
             command_id = str(command["command_id"])
+            pipeline_order = index + 1
+            analysis_experiment_euid = _run_directory_analysis_experiment_euid(
+                run_context_row=dict(run_context["rows"][0]),
+                command_id=command_id,
+                pipeline_order=pipeline_order,
+            )
             job_request = {
+                "analysis_experiment_euid": analysis_experiment_euid,
                 "analysis_command_id": command_id,
                 "optional_features": [],
                 "destination": None,
@@ -4647,12 +4798,12 @@ def create_app(
                     "dewey_run_artifact_euid": request.dewey_run_artifact_euid,
                     "run_storage_uri": request_payload["run_storage_uri"],
                     "bloom_run_euid": bloom_run_euid,
-                    "pipeline_order": index + 1,
+                    "pipeline_order": pipeline_order,
                     "predecessor_analysis_job_euid": previous_job_euid,
                 },
             }
             record = resources.create_analysis_job(
-                job_name=f"{request.run_folder_name}:{index + 1:02d}:{command_id}",
+                job_name=f"{request.run_folder_name}:{pipeline_order:02d}:{command_id}",
                 workset_euid=workset.workset_euid,
                 manifest_euid=manifest.manifest_euid,
                 cluster_name="",
@@ -4669,7 +4820,8 @@ def create_app(
                 details={
                     "manifest_euid": manifest.manifest_euid,
                     "trigger_euid": trigger_euid,
-                    "pipeline_order": index + 1,
+                    "pipeline_order": pipeline_order,
+                    "analysis_experiment_euid": analysis_experiment_euid,
                     "predecessor_analysis_job_euid": previous_job_euid,
                     "placement": "pending_cluster_selection",
                 },
@@ -4737,6 +4889,7 @@ def create_app(
                     "pipeline_order": job.request.get("run_directory_trigger", {}).get(
                         "pipeline_order"
                     ),
+                    "analysis_experiment_euid": job.analysis_experiment_euid,
                 }
             )
         response_status = "QUEUED"
@@ -4925,18 +5078,37 @@ def create_app(
 
     @app.get(
         "/api/v1/dewey/run-analysis-triggers/{trigger_euid}",
-        response_model=DeweyRunAnalysisTriggerResponse,
+        response_model=DeweyRunAnalysisTriggerResponse | DeweyRunDirectoryAnalysisTriggerResponse,
     )
     async def get_dewey_run_analysis_trigger(
         trigger_euid: str,
         _api_key: str = Depends(require_write_api_key),
         resources: ResourceStore = Depends(require_resource_store),
-    ) -> DeweyRunAnalysisTriggerResponse:
+    ) -> DeweyRunAnalysisTriggerResponse | DeweyRunDirectoryAnalysisTriggerResponse:
         _ = _api_key
         record = resources.get_dewey_run_trigger(str(trigger_euid or "").strip())
         if record is None:
             raise HTTPException(status_code=404, detail="Dewey run-analysis trigger not found")
+        if str(record.trigger_euid or "").startswith("URDT-"):
+            return _refresh_run_directory_trigger_response(record)
         return _dewey_trigger_response_from_record(record)
+
+    @app.get(
+        "/api/v1/dewey/run-directory-analysis-triggers/{trigger_euid}",
+        response_model=DeweyRunDirectoryAnalysisTriggerResponse,
+    )
+    async def get_dewey_run_directory_analysis_trigger(
+        trigger_euid: str,
+        _api_key: str = Depends(require_write_api_key),
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> DeweyRunDirectoryAnalysisTriggerResponse:
+        _ = _api_key
+        record = resources.get_dewey_run_trigger(str(trigger_euid or "").strip())
+        if record is None:
+            raise HTTPException(
+                status_code=404, detail="Dewey run-directory analysis trigger not found"
+            )
+        return _refresh_run_directory_trigger_response(record)
 
     @app.post(
         "/api/v1/worksets", response_model=WorksetResponse, status_code=status.HTTP_201_CREATED
@@ -5332,6 +5504,8 @@ def create_app(
             "project": request.project,
             "aws_profile": request.aws_profile,
             "dry_run": bool(request.dry_run),
+            "analysis_experiment_euid": str(request.analysis_experiment_euid or "").strip()
+            or None,
             "stage_target": request.stage_target
             or (staging_job.request.get("stage_target") if staging_job else None)
             or "/staging/staged_external_sequencing_data",
@@ -5832,6 +6006,144 @@ def create_app(
     ) -> list[ClusterJobResponse]:
         records = resources.list_cluster_jobs(tenant_id=None if actor.is_admin else actor.tenant_id)
         return [_cluster_job_response(item) for item in records]
+
+    @app.get("/api/v1/compute-clusters", response_model=list[ComputeClusterResponse])
+    async def list_compute_clusters(
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> list[ComputeClusterResponse]:
+        records = resources.list_compute_clusters(
+            tenant_id=None if actor.is_admin else actor.tenant_id
+        )
+        return [_compute_cluster_response(item) for item in records]
+
+    @app.post(
+        "/api/v1/compute-clusters",
+        response_model=ComputeClusterResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_compute_cluster(
+        request: ComputeClusterCreateRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> ComputeClusterResponse:
+        owner_user_id = str(request.owner_user_id or actor.user_id).strip()
+        if not owner_user_id:
+            raise HTTPException(status_code=400, detail="owner_user_id is required")
+        try:
+            record = resources.create_compute_cluster(
+                display_name=str(request.display_name or "").strip() or request.cluster_name,
+                cluster_name=request.cluster_name,
+                cluster_type=request.cluster_type,
+                region=request.region,
+                tenant_id=actor.tenant_id,
+                owner_user_id=owner_user_id,
+                metadata=request.metadata,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _compute_cluster_response(record)
+
+    @app.get("/api/v1/compute-clusters/{cluster_euid}", response_model=ComputeClusterResponse)
+    async def get_compute_cluster(
+        cluster_euid: str,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> ComputeClusterResponse:
+        record = resources.get_compute_cluster(str(cluster_euid or "").strip())
+        if record is None:
+            raise HTTPException(status_code=404, detail="Compute cluster not found")
+        if not actor.is_admin and record.tenant_id != actor.tenant_id:
+            raise HTTPException(
+                status_code=403, detail="Compute cluster is outside the caller tenant"
+            )
+        return _compute_cluster_response(record)
+
+    @app.post(
+        "/api/v1/compute-clusters/{cluster_euid}/state",
+        response_model=ComputeClusterResponse,
+    )
+    async def update_compute_cluster_state(
+        cluster_euid: str,
+        request: ComputeClusterStateRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> ComputeClusterResponse:
+        existing = resources.get_compute_cluster(str(cluster_euid or "").strip())
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Compute cluster not found")
+        if not actor.is_admin and existing.tenant_id != actor.tenant_id:
+            raise HTTPException(
+                status_code=403, detail="Compute cluster is outside the caller tenant"
+            )
+        try:
+            record = resources.update_compute_cluster_state(
+                cluster_euid=existing.cluster_euid,
+                state=request.state,
+                actor_user_id=actor.user_id,
+                metadata=request.metadata,
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _compute_cluster_response(record)
+
+    @app.get("/api/v1/cluster-jobs", response_model=list[ClusterJobResponse])
+    async def list_top_level_cluster_jobs(
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> list[ClusterJobResponse]:
+        records = resources.list_cluster_jobs(tenant_id=None if actor.is_admin else actor.tenant_id)
+        return [_cluster_job_response(item) for item in records]
+
+    @app.post(
+        "/api/v1/cluster-jobs",
+        response_model=ClusterJobResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_top_level_cluster_job(
+        request: ClusterJobCreateRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> ClusterJobResponse:
+        cluster = resources.get_compute_cluster(str(request.cluster_euid or "").strip())
+        if cluster is None:
+            raise HTTPException(status_code=404, detail="Compute cluster not found")
+        if not actor.is_admin and cluster.tenant_id != actor.tenant_id:
+            raise HTTPException(
+                status_code=403, detail="Compute cluster is outside the caller tenant"
+            )
+        try:
+            record = resources.create_cluster_job(
+                cluster_euid=cluster.cluster_euid,
+                job_name=str(request.job_name or "").strip()
+                or f"{cluster.cluster_name}:{request.job_type}",
+                cluster_name=cluster.cluster_name,
+                region=cluster.region,
+                region_az=str(cluster.metadata.get("region_az") or ""),
+                tenant_id=cluster.tenant_id,
+                owner_user_id=cluster.owner_user_id,
+                sponsor_user_id=actor.user_id,
+                request=dict(request.request or {}),
+                job_type=request.job_type,
+                analysis_job_euid=request.analysis_job_euid,
+                scheduler_job_id=request.scheduler_job_id,
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _cluster_job_response(record)
+
+    @app.get("/api/v1/cluster-jobs/{cluster_job_euid}", response_model=ClusterJobResponse)
+    async def get_top_level_cluster_job(
+        cluster_job_euid: str,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+    ) -> ClusterJobResponse:
+        record = resources.get_cluster_job(str(cluster_job_euid or "").strip())
+        if record is None:
+            raise HTTPException(status_code=404, detail="Cluster job not found")
+        if not actor.is_admin and record.tenant_id != actor.tenant_id:
+            raise HTTPException(status_code=403, detail="Cluster job is outside the caller tenant")
+        return _cluster_job_response(record)
 
     @app.get("/api/v1/clusters/jobs/{job_euid}", response_model=ClusterJobResponse)
     async def get_cluster_job(

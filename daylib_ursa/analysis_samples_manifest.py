@@ -17,6 +17,7 @@ from daylib_ursa.file_metadata import (
 
 ANALYSIS_SAMPLES_SCHEMA = "ursa.analysis_samples_manifest/1.0"
 ANALYSIS_SAMPLES_FORMAT = "analysis_samples.tsv"
+ANALYSIS_EXPERIMENT_EUID_PREFIX = "URXP"
 ANALYSIS_SAMPLES_COLUMN_SET = frozenset(ANALYSIS_SAMPLES_COLUMNS)
 ANALYSIS_SAMPLES_SOURCE_COLUMNS = (
     "R1_FQ",
@@ -52,6 +53,7 @@ class AnalysisSamplesManifest:
     artifact_euids: list[str]
     staging: dict[str, Any]
     analysis_defaults: dict[str, Any]
+    analysis_experiments: list[dict[str, str]]
     filename: str = "analysis_samples.tsv"
     schema: str = ANALYSIS_SAMPLES_SCHEMA
     format: str = ANALYSIS_SAMPLES_FORMAT
@@ -71,6 +73,7 @@ class AnalysisSamplesManifest:
             "artifact_euids": list(self.artifact_euids),
             "staging": dict(self.staging),
             "analysis_defaults": dict(self.analysis_defaults),
+            "analysis_experiments": [dict(item) for item in self.analysis_experiments],
             "template_distribution": "daylily-ephemeral-cluster",
             "template_version": require_daylily_ec_template_version(),
             "template_resource": (
@@ -152,6 +155,39 @@ def _content_from_rows(rows: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _analysis_experiment_euid(row: dict[str, str]) -> str:
+    parts = [
+        row.get("RUN_ID", ""),
+        row.get("SAMPLE_ID", ""),
+        row.get("EXPERIMENTID", ""),
+        row.get("LANE", ""),
+        row.get("SEQBC_ID", ""),
+        row.get("SEQ_PLATFORM", ""),
+        row.get("STAGE_TARGET", ""),
+    ]
+    digest = hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+    return f"{ANALYSIS_EXPERIMENT_EUID_PREFIX}-{digest[:16].upper()}"
+
+
+def _analysis_experiments_from_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    experiments: list[dict[str, str]] = []
+    for index, row in enumerate(rows, start=1):
+        experiments.append(
+            {
+                "analysis_experiment_euid": _analysis_experiment_euid(row),
+                "row_number": str(index),
+                "run_id": row.get("RUN_ID", ""),
+                "sample_id": row.get("SAMPLE_ID", ""),
+                "experiment_id": row.get("EXPERIMENTID", ""),
+                "lane": row.get("LANE", ""),
+                "seqbc_id": row.get("SEQBC_ID", ""),
+                "seq_platform": row.get("SEQ_PLATFORM", ""),
+                "stage_target": row.get("STAGE_TARGET", ""),
+            }
+        )
+    return experiments
+
+
 def _s3_values_from_references(input_references: Iterable[dict[str, Any]]) -> list[str]:
     values: list[str] = []
     for ref in input_references:
@@ -184,6 +220,7 @@ def _build_manifest(
         artifact_euids=list(artifact_euids),
         staging={"stage_target": stage_target},
         analysis_defaults=_analysis_defaults_from_metadata(metadata),
+        analysis_experiments=_analysis_experiments_from_rows(rows),
     )
 
 

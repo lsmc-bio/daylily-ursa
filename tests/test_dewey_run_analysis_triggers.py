@@ -165,6 +165,10 @@ class _MemoryResourceStore:
             request=dict(request or {}),
             launch={},
             events=[],
+            analysis_experiment_euid=str(
+                dict(request or {}).get("analysis_experiment_euid") or ""
+            ).strip()
+            or None,
         )
         self.analysis_jobs[record.job_euid] = record
         return record
@@ -893,6 +897,74 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     assert len(resources.external_objects) == 1
     assert len(dewey.external_objects) == 3
     assert len(dewey.external_relations) == 3
+
+
+def test_run_directory_trigger_get_refreshes_job_status_and_generic_readback(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        dewey_client=_DummyDeweyClient(),
+        run_directory_orchestrator=_DummyRunDirectoryOrchestrator(),
+    )
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["illumina_run_qc"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-readback",
+            },
+            json=body,
+        )
+        assert created.status_code == 202, created.text
+        trigger_euid = created.json()["trigger_euid"]
+        job_euid = created.json()["analysis_job_euids"][0]
+        analysis_experiment_euid = created.json()["analysis_jobs"][0][
+            "analysis_experiment_euid"
+        ]
+
+        resources.update_analysis_job_status(
+            job_euid=job_euid,
+            state="COMPLETED",
+            created_by=OWNER_USER_ID,
+            started_at="2026-05-27T00:03:00Z",
+            completed_at="2026-05-27T00:04:00Z",
+            return_code=0,
+            output_summary="dy-r help completed",
+            launch={"session_name": "run-a-help", "exit_code": 0},
+        )
+
+        direct = client.get(
+            f"/api/v1/dewey/run-directory-analysis-triggers/{trigger_euid}",
+            headers={"X-API-Key": "ursa-write-token"},
+        )
+        generic = client.get(
+            f"/api/v1/dewey/run-analysis-triggers/{trigger_euid}",
+            headers={"X-API-Key": "ursa-write-token"},
+        )
+
+    assert analysis_experiment_euid.startswith("URXP-")
+    assert direct.status_code == 200, direct.text
+    assert direct.json()["status"] == "COMPLETED"
+    assert direct.json()["analysis_jobs"][0]["analysis_job_euid"] == job_euid
+    assert direct.json()["analysis_jobs"][0]["status"] == "COMPLETED"
+    assert direct.json()["analysis_jobs"][0]["analysis_experiment_euid"] == (
+        analysis_experiment_euid
+    )
+    assert generic.status_code == 200, generic.text
+    assert generic.json()["trigger_euid"] == trigger_euid
+    assert generic.json()["status"] == "COMPLETED"
 
 
 def test_run_directory_trigger_replay_allows_new_owy_attempt_fields(monkeypatch) -> None:

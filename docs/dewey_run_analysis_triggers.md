@@ -75,9 +75,12 @@ Terminal result registration happens when a launched or refreshed analysis job r
 OWY uses the run-directory-specific trigger:
 
 - `POST /api/v1/dewey/run-directory-analysis-triggers`
+- `GET /api/v1/dewey/run-directory-analysis-triggers/{trigger_euid}`
 
 This route requires the scoped Ursa write service token in `X-API-Key` and
-`Idempotency-Key`.
+creation requires `Idempotency-Key`. `URDT-*` trigger EUIDs may also be read
+through `GET /api/v1/dewey/run-analysis-triggers/{trigger_euid}` for callers
+using the generic trigger readback route.
 
 Request fields:
 
@@ -96,7 +99,15 @@ Ursa resolves the Dewey artifact and requires
 creating work. Ursa validates each command ID against the DayEC catalog and
 rejects non-`run_analysis` commands.
 
-Production Ursa deployments must provide the run-directory analysis policy explicitly. The policy must include tenant UUID, owner user ID, cluster name, region, reference S3 URI, stage target, destination S3 URI, project, and AWS profile. Missing values intentionally return `503 Ursa run-directory analysis policy is incomplete`; Ursa must not infer defaults from deployment name, environment variables, or DayEC catalog content.
+Production Ursa deployments must provide the run-directory analysis policy
+explicitly. The policy must include tenant UUID, owner user ID, region,
+reference S3 URI, stage target, destination S3 URI, project, and AWS profile.
+Cluster placement is intentionally not a policy default; placement is selected
+by the run-directory worker and is represented by explicit compute-cluster,
+cluster-job, and analysis-job state. Missing required policy values
+intentionally return `503 Ursa run-directory analysis policy is incomplete`;
+Ursa must not infer defaults from deployment name, environment variables, or
+DayEC catalog content.
 
 For the `lsmcok1` production deployment, OWY currently sends `illumina_run_qc_bclconvert` for ILMN runs. The DayEC command catalog entry must remain `command_class=run_analysis` and `input_contract=run_context` before this route can launch it.
 
@@ -110,7 +121,23 @@ trigger, workset, manifest, and analysis jobs.
 
 The response includes `trigger_euid`, `workset_euid`, `manifest_euid`,
 `analysis_job_euids`, `analysis_jobs`, `ursa_external_objects`,
-`dewey_external_relations`, and the optional `bloom_run_euid`.
+`dewey_external_relations`, and the optional `bloom_run_euid`. Each
+`analysis_jobs` row includes the current job status when read back and may
+include `cluster_name`, `region`, `pipeline_order`, and
+`analysis_experiment_euid`.
+
+Run-directory analysis jobs receive deterministic `analysis_experiment_euid`
+values derived from the run-context row, command ID, and pipeline order. These
+are evidence identifiers for lifecycle linkage; they are not sample identity
+and do not encode QC disposition.
+
+CLI readback is available without browser state:
+
+```bash
+ursa --json run-directory-triggers get URDT-EXAMPLE \
+  --api-base-url https://ursa.day.lsmc.bio \
+  --token "$URSA_WRITE_SERVICE_TOKEN"
+```
 
 ## Persistence
 

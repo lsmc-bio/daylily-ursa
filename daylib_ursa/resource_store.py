@@ -32,6 +32,11 @@ STAGING_JOB_STATES = frozenset({"DEFINED", "STAGING", "COMPLETED", "FAILED"})
 DEWEY_RUN_TRIGGER_TEMPLATE = "RGX/dewey/run-analysis-trigger/1.0/"
 EXTERNAL_OBJECT_TEMPLATE = "RGX/external/object/1.0/"
 LINKED_BUCKET_TEMPLATE = "RGX/storage/linked-bucket/1.0/"
+COMPUTE_CLUSTER_TEMPLATE = "RGX/compute/cluster/1.0/"
+COMPUTE_CLUSTER_TYPES = frozenset(
+    {"generic", "vanilla_slurm", "aws_parallelcluster_slurm"}
+)
+CLUSTER_JOB_TYPES = frozenset({"generic", "slurm"})
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,21 @@ class ClientRegistrationRecord:
 
 
 @dataclass(frozen=True)
+class ComputeClusterRecord:
+    cluster_euid: str
+    display_name: str
+    cluster_name: str
+    cluster_type: str
+    region: str
+    tenant_id: uuid.UUID
+    owner_user_id: str
+    state: str
+    metadata: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class ClusterJobEventRecord:
     event_euid: str
     job_euid: str
@@ -135,6 +155,14 @@ class ClusterJobRecord:
     request: dict[str, Any]
     cluster: dict[str, Any]
     events: list[ClusterJobEventRecord] = field(default_factory=list)
+    cluster_euid: str | None = None
+    job_type: str = "generic"
+    analysis_job_euid: str | None = None
+    scheduler_job_id: str | None = None
+
+    @property
+    def cluster_job_euid(self) -> str:
+        return self.job_euid
 
 
 @dataclass(frozen=True)
@@ -170,6 +198,7 @@ class AnalysisJobRecord:
     request: dict[str, Any]
     launch: dict[str, Any]
     events: list[AnalysisJobEventRecord] = field(default_factory=list)
+    analysis_experiment_euid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -402,6 +431,10 @@ class ResourceStore:
             request=dict(payload.get("request") or {}),
             cluster=dict(payload.get("cluster") or {}),
             events=events,
+            cluster_euid=str(payload.get("cluster_euid") or "").strip() or None,
+            job_type=str(payload.get("job_type") or "generic").strip() or "generic",
+            analysis_job_euid=str(payload.get("analysis_job_euid") or "").strip() or None,
+            scheduler_job_id=str(payload.get("scheduler_job_id") or "").strip() or None,
         )
 
     @staticmethod
@@ -449,6 +482,25 @@ class ResourceStore:
             request=dict(payload.get("request") or {}),
             launch=dict(payload.get("launch") or {}),
             events=events,
+            analysis_experiment_euid=str(payload.get("analysis_experiment_euid") or "").strip()
+            or None,
+        )
+
+    @staticmethod
+    def _compute_cluster_from_instance(instance) -> ComputeClusterRecord:
+        payload = from_json_addl(instance)
+        return ComputeClusterRecord(
+            cluster_euid=str(payload.get("cluster_euid") or instance.euid),
+            display_name=str(instance.name or payload.get("display_name") or ""),
+            cluster_name=str(payload.get("cluster_name") or ""),
+            cluster_type=str(payload.get("cluster_type") or ""),
+            region=str(payload.get("region") or ""),
+            tenant_id=ResourceStore._parse_tenant_uuid(payload.get("tenant_id")),
+            owner_user_id=str(payload.get("owner_user_id") or ""),
+            state=str(payload.get("state") or instance.bstatus),
+            metadata=dict(payload.get("metadata") or {}),
+            created_at=str(payload.get("created_at") or utc_now_iso()),
+            updated_at=str(payload.get("updated_at") or payload.get("created_at") or utc_now_iso()),
         )
 
     @staticmethod
@@ -1154,6 +1206,140 @@ class ResourceStore:
                 )
             return [self._client_from_instance(item) for item in rows]
 
+    def create_compute_cluster(
+        self,
+        *,
+        display_name: str,
+        cluster_name: str,
+        cluster_type: str,
+        region: str,
+        tenant_id: uuid.UUID,
+        owner_user_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ComputeClusterRecord:
+        normalized_type = str(cluster_type or "").strip()
+        if normalized_type not in COMPUTE_CLUSTER_TYPES:
+            allowed = ", ".join(sorted(COMPUTE_CLUSTER_TYPES))
+            raise ValueError(f"cluster_type must be one of: {allowed}")
+        normalized_name = str(cluster_name or "").strip()
+        normalized_region = str(region or "").strip()
+        if not normalized_name or not normalized_region:
+            raise ValueError("cluster_name and region are required")
+        now = utc_now_iso()
+        with self.backend.session_scope(commit=True) as session:
+            same_name = self.backend.list_instances_by_property(
+                session,
+                template_code=COMPUTE_CLUSTER_TEMPLATE,
+                key="cluster_name",
+                value=normalized_name,
+                limit=500,
+            )
+            for candidate in same_name:
+                payload = from_json_addl(candidate)
+                if (
+                    str(payload.get("region") or "").strip() == normalized_region
+                    and str(payload.get("state") or candidate.bstatus) != "DELETED"
+                ):
+                    raise ValueError(
+                        "compute cluster already exists for cluster_name and region"
+                    )
+            cluster = self.backend.create_instance(
+                session,
+                COMPUTE_CLUSTER_TEMPLATE,
+                str(display_name or "").strip() or normalized_name,
+                json_addl={
+                    "cluster_name": normalized_name,
+                    "cluster_type": normalized_type,
+                    "region": normalized_region,
+                    "tenant_id": str(tenant_id),
+                    "owner_user_id": owner_user_id,
+                    "metadata": dict(metadata or {}),
+                    "created_at": now,
+                    "updated_at": now,
+                    "created_by": owner_user_id,
+                    "updated_by": owner_user_id,
+                    "state": "ACTIVE",
+                },
+                bstatus="ACTIVE",
+                tenant_id=tenant_id,
+            )
+            self.backend.update_instance_json(
+                session,
+                cluster,
+                {
+                    "cluster_euid": str(cluster.euid),
+                },
+            )
+            return self._compute_cluster_from_instance(cluster)
+
+    def get_compute_cluster(self, cluster_euid: str) -> ComputeClusterRecord | None:
+        with self.backend.session_scope(commit=False) as session:
+            cluster = self.backend.find_instance_by_euid(
+                session,
+                template_code=COMPUTE_CLUSTER_TEMPLATE,
+                value=cluster_euid,
+            )
+            if cluster is None:
+                return None
+            return self._compute_cluster_from_instance(cluster)
+
+    def list_compute_clusters(
+        self,
+        *,
+        tenant_id: uuid.UUID | None = None,
+        limit: int = 200,
+    ) -> list[ComputeClusterRecord]:
+        with self.backend.session_scope(commit=False) as session:
+            if tenant_id:
+                rows = self.backend.list_instances_by_property(
+                    session,
+                    template_code=COMPUTE_CLUSTER_TEMPLATE,
+                    key="tenant_id",
+                    value=str(tenant_id),
+                    limit=limit,
+                )
+            else:
+                rows = self.backend.list_instances_by_template(
+                    session,
+                    template_code=COMPUTE_CLUSTER_TEMPLATE,
+                    limit=limit,
+                )
+            return [self._compute_cluster_from_instance(item) for item in rows]
+
+    def update_compute_cluster_state(
+        self,
+        *,
+        cluster_euid: str,
+        state: str,
+        actor_user_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ComputeClusterRecord:
+        normalized_state = str(state or "").strip().upper()
+        if not normalized_state:
+            raise ValueError("state is required")
+        with self.backend.session_scope(commit=True) as session:
+            cluster = self.backend.find_instance_by_euid(
+                session,
+                template_code=COMPUTE_CLUSTER_TEMPLATE,
+                value=cluster_euid,
+                for_update=True,
+            )
+            if cluster is None:
+                raise KeyError(f"compute cluster not found: {cluster_euid}")
+            payload = from_json_addl(cluster)
+            updates: dict[str, Any] = {
+                "state": normalized_state,
+                "updated_at": utc_now_iso(),
+                "updated_by": actor_user_id,
+            }
+            if metadata is not None:
+                merged_metadata = dict(payload.get("metadata") or {})
+                merged_metadata.update(dict(metadata))
+                updates["metadata"] = merged_metadata
+            self.backend.update_instance_json(session, cluster, updates)
+            cluster.bstatus = normalized_state
+            return self._compute_cluster_from_instance(cluster)
+
     def create_cluster_job(
         self,
         *,
@@ -1164,14 +1350,37 @@ class ResourceStore:
         owner_user_id: str,
         sponsor_user_id: str,
         request: dict[str, Any] | None = None,
+        job_name: str | None = None,
+        cluster_euid: str | None = None,
+        job_type: str = "generic",
+        analysis_job_euid: str | None = None,
+        scheduler_job_id: str | None = None,
     ) -> ClusterJobRecord:
+        normalized_job_type = str(job_type or "generic").strip() or "generic"
+        if normalized_job_type not in CLUSTER_JOB_TYPES:
+            allowed = ", ".join(sorted(CLUSTER_JOB_TYPES))
+            raise ValueError(f"job_type must be one of: {allowed}")
         now = utc_now_iso()
         with self.backend.session_scope(commit=True) as session:
+            linked_cluster_euid = str(cluster_euid or "").strip() or None
+            if linked_cluster_euid:
+                cluster = self.backend.find_instance_by_euid(
+                    session,
+                    template_code=COMPUTE_CLUSTER_TEMPLATE,
+                    value=linked_cluster_euid,
+                )
+                if cluster is None:
+                    raise KeyError(f"compute cluster not found: {linked_cluster_euid}")
             job = self.backend.create_instance(
                 session,
                 CLUSTER_JOB_TEMPLATE,
-                cluster_name,
+                str(job_name or "").strip() or cluster_name,
                 json_addl={
+                    "job_name": str(job_name or "").strip() or cluster_name,
+                    "cluster_euid": linked_cluster_euid,
+                    "job_type": normalized_job_type,
+                    "analysis_job_euid": str(analysis_job_euid or "").strip() or None,
+                    "scheduler_job_id": str(scheduler_job_id or "").strip() or None,
                     "cluster_name": cluster_name,
                     "region": region,
                     "region_az": region_az,
@@ -1194,6 +1403,27 @@ class ResourceStore:
                 bstatus="QUEUED",
                 tenant_id=tenant_id,
             )
+            self.backend.update_instance_json(
+                session,
+                job,
+                {
+                    "cluster_job_euid": str(job.euid),
+                },
+            )
+            if linked_cluster_euid:
+                cluster = self.backend.find_instance_by_euid(
+                    session,
+                    template_code=COMPUTE_CLUSTER_TEMPLATE,
+                    value=linked_cluster_euid,
+                    for_update=True,
+                )
+                if cluster is not None:
+                    self.backend.create_lineage(
+                        session,
+                        parent=cluster,
+                        child=job,
+                        relationship_type="compute_cluster_job",
+                    )
             return self._cluster_job_from_instance(session, job)
 
     def update_cluster_job_status(
@@ -1347,6 +1577,10 @@ class ResourceStore:
         request: dict[str, Any] | None = None,
     ) -> AnalysisJobRecord:
         now = utc_now_iso()
+        request_payload = dict(request or {})
+        analysis_experiment_euid = (
+            str(request_payload.get("analysis_experiment_euid") or "").strip() or None
+        )
         with self.backend.session_scope(commit=True) as session:
             workset = self.backend.find_instance_by_euid(
                 session,
@@ -1377,7 +1611,8 @@ class ResourceStore:
                         "region": region,
                         "tenant_id": str(tenant_id),
                         "owner_user_id": owner_user_id,
-                        "request": dict(request or {}),
+                        "analysis_experiment_euid": analysis_experiment_euid,
+                        "request": request_payload,
                         "created_at": now,
                         "updated_at": now,
                         "created_by": owner_user_id,
