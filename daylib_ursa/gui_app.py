@@ -1687,8 +1687,8 @@ def mount_gui(app: FastAPI) -> None:
         return await _logout_response(request)
 
     @app.get("/logout")
-    async def logout(request: Request):
-        return await _logout_response(request)
+    async def logout():
+        return RedirectResponse(url="/auth/logout", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get("/aws_usage_report", include_in_schema=False)
     async def aws_usage_report_redirect(request: Request):
