@@ -9,6 +9,16 @@ making Ursa explicitly model compute clusters and cluster jobs, expose the same
 actions through API/CLI/GUI, and prove an OWY-style `dy-r help` command can be
 placed on a cluster, complete, and close the Ursa analysis job lifecycle.
 
+## Current Completion
+
+- Agent 8, DYEC/DayOA Pipeline: 100% success for the requested `dy-r help`
+  cluster placement and return path. Production Ursa `4.0.29` completed cluster
+  job `M-RGX-9WBX` on `xfer-cluster`.
+- Agent 9, DRA/Cluster Lifecycle: 100% terminal for this non-destructive
+  validation scope. Cluster lifecycle is validated; DRA export/delete is
+  explicitly blocked because `dy-r help` produces no DRA export and no second
+  destructive approval was given.
+
 ## Gate 0 Inventory
 
 - Controlling user request: complete OWY Agent 8 and Agent 9; add Ursa compute
@@ -58,9 +68,9 @@ placed on a cluster, complete, and close the Ursa analysis job lifecycle.
 | CLI-001 | Ursa CLI | Add CLI commands for compute-cluster and cluster-job actions matching API behavior. | SUCCESS | feature_implementation | Gate 3 | Agent 4 | `daylib_ursa/cli/api.py`; registry exposes `api request`, `compute-clusters`, `cluster-jobs create/start/get/list`, and `run-directory-triggers`; CLI registry tests pass. |  | Commands require explicit `--api-base-url` and `--token`; no environment token fallback. |
 | GUI-001 | Ursa GUI | Add CLI visualization mode for GUI actions with CLI analogs, floating command popup, and copy button. | SUCCESS | feature_implementation | Gate 3 | Agent 5 | `portal.js` CLI Viz toggle/popup/copy support; `main.css`; static tests and `node --check` pass. |  | GUI renders `<TOKEN>` placeholder instead of secrets. |
 | GUI-002 | Ursa GUI | Surface compute clusters and cluster jobs without card-in-card clutter and preserve existing cluster UX. | SUCCESS | feature_implementation | Gate 3 | Agent 5 | `clusters.html` compute-cluster list/register surface plus queued-job Start action; API route tests pass. |  | Existing cluster page behavior and `/api/v1/clusters` routes are preserved. |
-| LIFE-001 | Lifecycle | Ensure `dy-r help` can be represented, launched, completed, and reflected in Ursa analysis job lifecycle. | SUCCESS_LOCAL | feature_implementation | Gate 4 | Agent 6 | `run_dayoa_dyr_help_job` validates explicit request fields, creates an `ubuntu` headnode tmux session through SSM, runs `source dyoainit`, `dy-a`, and `dy-r help`, and persists captured output/return code. Focused worker/API/CLI/GUI tests pass. | Live cluster placement still requires production deploy and explicit live trigger/run. | Local lifecycle contract is implemented and tested; live execution remains in `OWY-001`. |
-| OWY-001 | Live validation | Trigger/register an OWY-style `dy-r help` run on a cluster and verify returned terminal lifecycle. | OPEN | feature_implementation | Gate 5 | Agent 7 |  |  |  |
-| DRA-001 | DRA/export | Verify DRA/export lifecycle or keep blocked only for explicit missing live prerequisite/destructive approval. | OPEN | legitimate_safety_handling | Gate 5 | Agent 8 |  |  |  |
+| LIFE-001 | Lifecycle | Ensure `dy-r help` can be represented, launched, completed, and reflected in Ursa analysis job lifecycle. | SUCCESS | feature_implementation | Gate 4 | Agent 6 | `run_dayoa_dyr_help_job` validates explicit request fields, creates an `ubuntu` headnode tmux session through SSM, runs `source dyoainit`, `dy-a`, and `dy-r help`, and persists captured output/return code. Production live cluster job `M-RGX-9WBX` completed on `xfer-cluster`. | Initial production classifier trusted SSM wrapper status even when the explicit DayOA marker was `__URSA_CLUSTER_JOB_RC__=0`; fixed in `4.0.29`. | Lifecycle is implemented, deployed, and live-validated. |
+| OWY-001 | Live validation | Trigger/register an OWY-style `dy-r help` run on a cluster and verify returned terminal lifecycle. | SUCCESS | feature_implementation | Gate 5 | Agent 7 | Production Ursa `4.0.29`; SSM command `f3ac6040-8d0a-4220-b541-34a4675cd775`; compute cluster `M-RGX-9TFQ`; cluster job `M-RGX-9WBX`; analysis job link `M-RGX-9T77`; tmux session `ursa-dyr-help-M-RGX-9T77-v7`; output `WORKFLOW SUCCESS`, `RETURN CODE: 0`, `__URSA_CLUSTER_JOB_RC__=0`. | The source analysis dir was missing `config/units.tsv`; a two-line smoke units table was staged from the mounted run FASTQs so `dy-r help` could load the DayOA Snakefile. | Ursa placed the command on the cluster, ran it, returned completion, and closed the cluster-job lifecycle. |
+| DRA-001 | DRA/export | Verify DRA/export lifecycle or keep blocked only for explicit missing live prerequisite/destructive approval. | BLOCKED | legitimate_safety_handling | Gate 5 | Agent 8 | No DRA export/delete was produced by the `dy-r help` smoke command. No cluster deletion, staged-data deletion, DRA mount deletion, or S3 cleanup was approved in this turn. | `dy-r help` is a lifecycle smoke, not an export-producing pipeline; destructive cleanup requires a second explicit approval naming exact resources. | Terminal safety state: non-destructive cluster lifecycle was validated; DRA export/delete remains blocked by scope and approval, not claimed as passed. |
 | DOC-001 | Docs | Document new object model, CLI/GUI usage, OWY `dy-r help` lifecycle, and remaining destructive gate boundaries. | SUCCESS | contract_test | Gate 6 | Agent 9 | `README.md`, `docs/README.md`, `docs/dewey_run_analysis_triggers.md`, `docs/compute_cluster_lifecycle.md`. |  | Docs now state no default cluster placement, CLI/GUI parity, readback routes, and destructive cleanup gate boundaries. |
 | TEST-001 | Tests | Add focused API/model/CLI/GUI-contract tests and run relevant suites. | SUCCESS | contract_test | Gate 6 | Agent 10 | `python -m pytest -q tests` -> `364 passed, 2 skipped`; `ruff check ...` passed; `node --check daylib_ursa/gui/static/portal.js` passed; `git diff --check` passed. | Initial full run exposed missing direct route samples, then fixed. | Local validation is green. |
 
@@ -106,13 +116,59 @@ placed on a cluster, complete, and close the Ursa analysis job lifecycle.
   checkout `5.0.27-dirty`, while Ursa requires exact `5.0.28`. Cluster-create
   dry-run tests that call the live local DayEC helper fail in this workstation
   environment; production Ursa is expected to use the pinned `5.0.28` runtime.
+- 2026-05-29T01:03Z production `4.0.28` health/OpenAPI: public health returned
+  `status=ok`, build `4.0.28`, and OpenAPI reported 124 paths including
+  `/api/v1/cluster-jobs/{cluster_job_euid}/start`.
+- 2026-05-29T01:12Z live CLI validation first reached Ursa cluster-job worker
+  and the headnode, but the DayOA command failed because
+  `/fsx/analysis_results/xfer-cluster/M-RGX-9T77/daylily-omics-analysis/config/units.tsv`
+  was missing.
+- 2026-05-29T01:15Z headnode staging inspection found the stored analysis job
+  command expected `.test_data/data/bclconvert/units.tsv`, but that checked-in
+  test units table contained only headers. Real FASTQs for run
+  `20260522_LH01106_0010_A23VM5CLT4` were present under
+  `/fsx/run_dir_mounts/20260522_LH01106_0010_A23VM5CLT4/Analysis/1/Data/BCLConvert/fastq/`.
+- 2026-05-29T01:19Z staged a two-line `config/units.tsv` in the failed analysis
+  dir using sample `ANA0-HG002`, safe RUNID `R20260522LH011060010A23VM5CLT4`,
+  lane `L001`, barcode `s74478`, and mounted R1/R2 FASTQs. SSM command
+  `af8689fb-f10f-43f3-9403-3f1c6fdc5370` verified the file had two rows.
+- 2026-05-29T01:21Z production `4.0.28` live cluster job
+  `M-RGX-9VYQ` showed the DayOA command itself completed with
+  `WORKFLOW SUCCESS`, `RETURN CODE: 0`, and `__URSA_CLUSTER_JOB_RC__=0`, but
+  Ursa classified the job `FAILED` because the SSM transport wrapper still
+  surfaced `exit status 1`.
+- 2026-05-29T01:23Z implemented and tested the `4.0.29` classifier fix:
+  if SSM reports transport failure but captured stdout contains
+  `__URSA_CLUSTER_JOB_RC__=0`, Ursa records the cluster job as `COMPLETED` and
+  preserves the transport warning in `cluster.transport_error`. Focused tests:
+  `tests/test_cluster_job_worker.py`,
+  `test_compute_cluster_and_cluster_job_routes_are_first_class_objects`, and
+  `test_cli_registry_exposes_v2_command_tree_and_policies` -> `8 passed`;
+  `ruff check daylib_ursa/cluster_jobs.py tests/test_cluster_job_worker.py`
+  and `git diff --check` passed.
+- 2026-05-29T01:27Z deployed exact tag `4.0.29` to production Ursa editable
+  checkout `/home/ubuntu/.cache/dayhoff/local/lsmcok1/repos/daylily-ursa`.
+  SSM command `e79bcc64-ccd5-4b25-9f8b-ea8880c557ae` verified
+  `daylily-ursa` version `4.0.29`, process
+  `daylib_ursa.workset_api_cli --port 8913`, and local health
+  `{"status":"ok","version":"4.0.29"}`. Public health/OpenAPI also returned
+  `4.0.29` with 124 paths and the cluster-job start route.
+- 2026-05-29T01:29Z final live CLI/API validation succeeded. SSM command
+  `f3ac6040-8d0a-4220-b541-34a4675cd775` used the production `ursa` CLI to
+  create/start/poll cluster job `M-RGX-9WBX` on compute cluster `M-RGX-9TFQ`,
+  linked to analysis job `M-RGX-9T77`; terminal state `COMPLETED`,
+  `return_code=0`, `output_summary="DayOA dy-r help completed"`, tmux session
+  `ursa-dyr-help-M-RGX-9T77-v7`, environment key
+  `PUPPETEER_EXECUTABLE_PATH`, and captured DayOA output ending in
+  `WORKFLOW SUCCESS`, `RETURN CODE: 0`, `__URSA_CLUSTER_JOB_RC__=0`.
 
 ## Release/Live Gate
 
-- `4.0.26` was committed, annotated, pushed, and deployed to production; public
-  health/readiness and OpenAPI returned build/version `4.0.26`.
-- Next release for the explicit headnode `dy-r help` cluster-job execution path
-  is `4.0.27`.
+- `4.0.29` was committed, annotated, pushed, and deployed to production; public
+  health/readiness and OpenAPI returned build/version `4.0.29`.
+- `4.0.29` is the live-validated release for first-class compute clusters,
+  first-class cluster jobs, CLI/GUI parity, and the OWY-style DayOA `dy-r help`
+  cluster-job lifecycle.
 - No cluster deletion, staged-data deletion, DRA mount deletion, or other
   destructive cleanup is included in this ledger without a second explicit
   approval naming the exact resource.

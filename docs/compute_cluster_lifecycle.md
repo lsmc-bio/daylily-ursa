@@ -161,6 +161,12 @@ environment values, runs `source dyoainit`, `dy-a <executor> <genome_build>`,
 and then `dy-r help`. The captured pane output and terminal return code are
 persisted back to the cluster-job record.
 
+The worker records the DayOA command marker `__URSA_CLUSTER_JOB_RC__=<rc>` in
+captured stdout. If the SSM transport wrapper reports a generic failure but the
+captured marker is `0`, Ursa records the cluster job as `COMPLETED` and
+preserves the transport warning in `cluster.transport_error`. Non-zero or
+missing markers remain failures.
+
 ## DRA And Destructive Gates
 
 Ursa may verify staging, launch, export, Dewey external-object linking, and
