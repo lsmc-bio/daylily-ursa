@@ -4192,15 +4192,22 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
-            if command.get("command_class") != "run_analysis":
+            command_class = str(command.get("command_class") or "").strip()
+            input_contract = str(command.get("input_contract") or "").strip()
+            is_run_analysis = command_class == "run_analysis" and input_contract == "run_context"
+            is_utility = (
+                command_class == "utility"
+                and input_contract in {"", "none"}
+                and not bool(command.get("requires_staging"))
+                and not bool(command.get("requires_run_mount"))
+            )
+            if not is_run_analysis and not is_utility:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"{command_id} is not a run_analysis command",
-                )
-            if command.get("input_contract") != "run_context":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{command_id} does not use run_context input",
+                    detail=(
+                        f"{command_id} must be run_analysis/run_context or "
+                        "utility with no input, staging, or run mount"
+                    ),
                 )
             commands.append(command)
         return commands

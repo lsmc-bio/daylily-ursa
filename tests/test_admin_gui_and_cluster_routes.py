@@ -773,7 +773,7 @@ class DummyClusterInfo:
                 "state": "running",
                 "instance_id": "i-0123456789abcdef0",
             },
-            "daylily_ec_pinned_version": "5.0.28",
+            "daylily_ec_pinned_version": "5.0.31",
             "aws_console_url": (
                 f"https://{self.region}.console.aws.amazon.com/ec2/home?region={self.region}"
                 "#InstanceDetails:instanceId=i-0123456789abcdef0"
@@ -789,8 +789,8 @@ class DummyClusterInfo:
                     "ttl_seconds": 86400,
                     "cached": True,
                     "data": {
-                        "daylily_ec_pinned_version": "5.0.28",
-                        "remote_daylily_ec_version": "5.0.28",
+                        "daylily_ec_pinned_version": "5.0.31",
+                        "remote_daylily_ec_version": "5.0.31",
                         "remote_git_hash": "abc123",
                         "day_clone_available": True,
                         "day_clone_help": "Usage: day-clone [OPTIONS]\n  --help",
@@ -896,8 +896,8 @@ class DummyClusterService:
             "ttl_seconds": 86400,
             "cached": not refresh,
             "data": {
-                "daylily_ec_pinned_version": "5.0.28",
-                "remote_daylily_ec_version": "5.0.28",
+                "daylily_ec_pinned_version": "5.0.31",
+                "remote_daylily_ec_version": "5.0.31",
                 "remote_git_hash": "abc123",
                 "day_clone_available": True,
                 "day_clone_help": "Usage: day-clone [OPTIONS]",
@@ -1530,7 +1530,7 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_aws_check.json()["return_code"] == 0
     assert "PASS iam.policy" in cluster_aws_check.json()["gap_analysis"]
     assert cluster_aws_check.json()["report"]["summary"] == {"PASS": 1, "WARN": 0, "FAIL": 0}
-    assert cluster_detail.json()["daylily_ec_pinned_version"] == "5.0.28"
+    assert cluster_detail.json()["daylily_ec_pinned_version"] == "5.0.31"
     assert cluster_static_probe.status_code == 200
     assert cluster_static_probe.json()["data"]["day_clone_available"] is True
     assert cluster_scheduler_probe.status_code == 200

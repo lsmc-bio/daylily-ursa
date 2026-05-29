@@ -73,8 +73,19 @@ def _snakemake_log_reports_success(text: str) -> bool:
     return False
 
 
+def _is_run_directory_utility_command(command: Any) -> bool:
+    command_class = str(getattr(command, "command_class", "") or "").strip()
+    input_contract = str(getattr(command, "input_contract", "") or "").strip()
+    return (
+        command_class == "utility"
+        and input_contract in {"", "none"}
+        and not bool(getattr(command, "requires_staging", False))
+        and not bool(getattr(command, "requires_run_mount", False))
+    )
+
+
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.28."""
+    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.31."""
 
     def __init__(
         self,
@@ -175,7 +186,11 @@ class AnalysisJobManager:
         input_contract = str(getattr(command, "input_contract", "") or "").strip()
         if command_class == "run_analysis" and input_contract != "run_context":
             raise ValueError(f"{command_id} is run_analysis but does not use run_context input")
-        if command_class != "run_analysis" and not stage_dir:
+        if (
+            command_class != "run_analysis"
+            and not _is_run_directory_utility_command(command)
+            and not stage_dir
+        ):
             raise ValueError(f"stage_dir is required for {command_id}")
         session_name = str(request.get("session_name") or "").strip() or _safe_session_name(
             job.job_euid
@@ -185,8 +200,11 @@ class AnalysisJobManager:
             if not run_context_file:
                 raise ValueError("run_context_file is required for run_analysis launch")
             stage_dir = None
-        elif run_context_file:
-            raise ValueError("run_context_file is only valid for run_analysis launch")
+        else:
+            if run_context_file:
+                raise ValueError("run_context_file is only valid for run_analysis launch")
+            if _is_run_directory_utility_command(command):
+                stage_dir = None
         destination = str(request.get("destination") or "").strip() or None
         argv = command.launch_argv(
             analysis_id=str(request.get("analysis_id") or job.job_euid),
@@ -310,27 +328,47 @@ class AnalysisJobManager:
         started_at = utc_now_iso()
         try:
             if bool(request.get("run_directory_trigger")):
+                command_id = str(
+                    request.get("analysis_command_id") or request.get("command_id") or ""
+                ).strip()
+                command = get_analysis_command(command_id)
+                command_class = str(getattr(command, "command_class", "") or "").strip()
                 self.resource_store.update_analysis_job_status(
                     job_euid=job_euid,
                     state="PREPARING",
                     created_by=actor_user_id,
                     started_at=started_at,
                 )
-                run_context_path = self._run_context_file_from_manifest(job=job)
-                request["run_context_file"] = str(run_context_path)
+                if command_class == "run_analysis":
+                    run_context_path = self._run_context_file_from_manifest(job=job)
+                    request["run_context_file"] = str(run_context_path)
+                    self.resource_store.add_analysis_job_event(
+                        job_euid=job_euid,
+                        event_type="run_context",
+                        status="COMPLETED",
+                        summary=f"Prepared run context from manifest {job.manifest_euid}",
+                        details={
+                            "manifest_euid": job.manifest_euid,
+                            "run_context_file": str(run_context_path),
+                        },
+                        created_by=actor_user_id,
+                    )
+                elif _is_run_directory_utility_command(command):
+                    request["run_context_file"] = None
+                    self.resource_store.add_analysis_job_event(
+                        job_euid=job_euid,
+                        event_type="utility_context",
+                        status="COMPLETED",
+                        summary=f"Utility command {command_id} requires no run context",
+                        details={"manifest_euid": job.manifest_euid, "command_id": command_id},
+                        created_by=actor_user_id,
+                    )
+                else:
+                    raise ValueError(
+                        f"{command_id} is not supported for run-directory triggers"
+                    )
                 stage_dir = None
                 staging_job_euid = None
-                self.resource_store.add_analysis_job_event(
-                    job_euid=job_euid,
-                    event_type="run_context",
-                    status="COMPLETED",
-                    summary=f"Prepared run context from manifest {job.manifest_euid}",
-                    details={
-                        "manifest_euid": job.manifest_euid,
-                        "run_context_file": str(run_context_path),
-                    },
-                    created_by=actor_user_id,
-                )
             else:
                 self.resource_store.update_analysis_job_status(
                     job_euid=job_euid,

@@ -481,6 +481,28 @@ class _FakeRunAnalysisCommand:
         return argv
 
 
+class _FakeUtilityCommand:
+    command_id = "simple-test"
+    command_class = "utility"
+    input_contract = "none"
+    requires_staging = False
+    requires_run_mount = False
+
+    def launch_argv(self, **kwargs):
+        assert kwargs.get("run_context_file") is None
+        assert kwargs.get("stage_dir") is None
+        return [
+            "workflow",
+            "launch",
+            "--analysis-id",
+            kwargs["analysis_id"],
+            "--executing-entity",
+            kwargs["executing_entity"],
+            "--session-name",
+            kwargs["session_name"],
+        ]
+
+
 class _DummyDeweyClient:
     def __init__(
         self,
@@ -576,16 +598,25 @@ def _app(
             "ont_run_qc",
             "ultima_run_qc",
         }
+        utility_commands = {"simple-test"}
         if command_id not in {
             "illumina_snv_alignstats_relatedness_vep_multiqc",
+            *utility_commands,
             *run_analysis_commands,
         }:
             raise ValueError(f"Unknown analysis command: {command_id}")
+        command_class = "run_analysis" if command_id in run_analysis_commands else "sample_analysis"
+        input_contract = "run_context"
+        if command_id in utility_commands:
+            command_class = "utility"
+            input_contract = "none"
         return {
             "command_id": command_id,
             "workflow": "daylily-omics-analysis",
-            "command_class": "run_analysis" if command_id in run_analysis_commands else "sample_analysis",
-            "input_contract": "run_context",
+            "command_class": command_class,
+            "input_contract": input_contract,
+            "requires_staging": False,
+            "requires_run_mount": False,
         }
 
     monkeypatch.setattr(
@@ -897,6 +928,47 @@ def test_run_directory_trigger_links_supplied_bloom_run_manifest_jobs_and_relati
     assert len(resources.external_objects) == 1
     assert len(dewey.external_objects) == 3
     assert len(dewey.external_relations) == 3
+
+
+def test_run_directory_trigger_accepts_simple_test_utility_command(monkeypatch) -> None:
+    resources = _MemoryResourceStore()
+    orchestrator = _DummyRunDirectoryOrchestrator()
+    app = _app(
+        monkeypatch,
+        resource_store=resources,
+        dewey_client=_DummyDeweyClient(),
+        run_directory_orchestrator=orchestrator,
+    )
+    body = {
+        "dewey_run_artifact_euid": "AT-RUN-1",
+        "run_storage_uri": "s3://bucket/basecalls/lsmc/ssf-hq/LH01106/2026/run-a/",
+        "run_folder_name": "run-a",
+        "platform": "ILMN",
+        "command_ids": ["simple-test"],
+        "producer_system": "offwithyou",
+        "producer_object_euid": "exec-1:run-a",
+        "owy_execution_id": "exec-1",
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/dewey/run-directory-analysis-triggers",
+            headers={
+                "X-API-Key": "ursa-write-token",
+                "Idempotency-Key": "idem-run-dir-simple-test",
+            },
+            json=body,
+        )
+
+    assert created.status_code == 202, created.text
+    payload = created.json()
+    assert payload["status"] == "QUEUED"
+    assert payload["command_ids"] == ["simple-test"]
+    assert payload["analysis_jobs"][0]["command_id"] == "simple-test"
+    job = resources.analysis_jobs[payload["analysis_job_euids"][0]]
+    assert job.request["command"]["command_class"] == "utility"
+    assert job.request["command"]["input_contract"] == "none"
+    assert orchestrator.start_calls == [payload["trigger_euid"]]
 
 
 def test_run_directory_trigger_get_refreshes_job_status_and_generic_readback(monkeypatch) -> None:
@@ -1454,7 +1526,7 @@ def test_run_directory_trigger_accepts_null_bloom_run(monkeypatch) -> None:
     assert len(dewey.external_relations) == 2
 
 
-def test_run_directory_trigger_rejects_non_run_analysis_command(monkeypatch) -> None:
+def test_run_directory_trigger_rejects_unsupported_command(monkeypatch) -> None:
     app = _app(monkeypatch, dewey_client=_DummyDeweyClient())
     body = {
         "dewey_run_artifact_euid": "AT-RUN-1",
@@ -1474,7 +1546,7 @@ def test_run_directory_trigger_rejects_non_run_analysis_command(monkeypatch) -> 
             json=body,
         )
     assert rejected.status_code == 400
-    assert "not a run_analysis command" in rejected.text
+    assert "must be run_analysis/run_context or utility" in rejected.text
 
 
 def test_run_directory_orchestrator_selects_cluster_launches_exports_and_writes_sidecars(
@@ -1923,6 +1995,82 @@ def test_run_directory_analysis_job_launch_uses_run_context_file(tmp_path, monke
     )
     assert "s3://analysis-results/run-a/01-illumina_run_qc/" in run_context_content
     assert "s3://old-output/" not in run_context_content
+
+
+def test_run_directory_utility_job_launch_uses_no_run_context_or_stage(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "daylib_ursa.analysis_jobs.get_analysis_command",
+        lambda _command_id, optional_features=None: _FakeUtilityCommand(),
+    )
+    resources = _MemoryResourceStore()
+    workset = resources.create_workset(
+        name="Run directory run-a",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        artifact_set_euids=[],
+        metadata={},
+    )
+    manifest = resources.create_manifest(
+        workset_euid=workset.workset_euid,
+        name="Run directory run-a run context",
+        artifact_set_euid=None,
+        artifact_euids=["AT-RUN-1"],
+        input_references=[],
+        metadata={},
+    )
+    job = resources.create_analysis_job(
+        job_name="run-a:01:simple-test",
+        workset_euid=workset.workset_euid,
+        manifest_euid=manifest.manifest_euid,
+        cluster_name="cluster-1",
+        region="us-west-2",
+        tenant_id=TENANT_ID,
+        owner_user_id=OWNER_USER_ID,
+        request={
+            "analysis_command_id": "simple-test",
+            "destination": None,
+            "export_trigger": "none",
+            "session_name": "run-a-simple-test",
+            "project": "daylily",
+            "aws_profile": "lsmc",
+            "run_directory_trigger": {"trigger_euid": "URDT-1"},
+        },
+    )
+    captured: dict[str, list[str]] = {}
+
+    class FakeDayEcClient:
+        aws_profile = "lsmc"
+
+        def workflow_launch(self, argv, *, cwd):  # noqa: ANN001
+            captured["argv"] = list(argv)
+            return subprocess.CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=(
+                    "__DAYLILY_SESSION__=run-a-simple-test\n"
+                    "__DAYLILY_RUN_DIR__=/fsx/analysis/run-a-simple-test\n"
+                    "__DAYLILY_REPO_PATH__=/fsx/repos/daylily-omics-analysis\n"
+                ),
+                stderr="",
+            )
+
+    manager = AnalysisJobManager(
+        resource_store=resources,
+        client=FakeDayEcClient(),
+        workspace_root=tmp_path,
+    )
+
+    launched = manager.launch_job(job.job_euid, actor_user_id=OWNER_USER_ID)
+
+    assert launched.state == "RUNNING"
+    argv = captured["argv"]
+    assert "--run-context-file" not in argv
+    assert "--stage-dir" not in argv
+    assert not (tmp_path / ".ursa-run-contexts").exists()
+    event_types = [event.event_type for event in resources.analysis_events[job.job_euid]]
+    assert "utility_context" in event_types
 
 
 def test_run_directory_analysis_refresh_launches_successor_job(tmp_path, monkeypatch) -> None:

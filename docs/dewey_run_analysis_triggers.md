@@ -88,7 +88,11 @@ Request fields:
 - `run_storage_uri`
 - `run_folder_name`
 - `platform`: `ILMN`, `ONT`, or `ULTIMA`
-- `command_ids`: ordered DayEC `command_class=run_analysis` IDs
+- `command_ids`: ordered DayEC command IDs. Production analysis commands must
+  be `command_class=run_analysis` with `input_contract=run_context`. The
+  `simple-test` utility command is also accepted for OWY smoke validation only
+  when the catalog marks it `command_class=utility`, `input_contract=none`,
+  `requires_staging=false`, and `requires_run_mount=false`.
 - `bloom_run_euid`: optional string or `null`
 - `producer_system`, `producer_object_euid`, `owy_execution_id`
 - `run_metadata`
@@ -97,7 +101,8 @@ Request fields:
 Ursa resolves the Dewey artifact and requires
 `artifact_type=sequencing_run_dir` plus an exact normalized S3 URI match before
 creating work. Ursa validates each command ID against the DayEC catalog and
-rejects non-`run_analysis` commands.
+rejects commands that are neither run-directory analysis commands nor the
+explicit no-input utility smoke shape.
 
 Production Ursa deployments must provide the run-directory analysis policy
 explicitly. The policy must include tenant UUID, owner user ID, region,
@@ -110,6 +115,12 @@ Ursa must not infer defaults from deployment name, environment variables, or
 DayEC catalog content.
 
 For the `lsmcok1` production deployment, OWY currently sends `illumina_run_qc_bclconvert` for ILMN runs. The DayEC command catalog entry must remain `command_class=run_analysis` and `input_contract=run_context` before this route can launch it.
+
+For OWY-to-Ursa smoke testing, OWY may instead send `simple-test` from a
+separate test-only rules file. That command runs
+`source dyoainit; dy-a local hg38; dy-r -p -k -j 1 help` and launches without a
+run-context file, staging directory, or run mount. Do not use this smoke rules
+file as production cron configuration.
 
 Do not log or print Dewey, Ursa, or broker service tokens while validating this route. Smoke checks should report response codes, EUIDs, and redacted config presence only.
 

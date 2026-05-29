@@ -15,9 +15,19 @@ from daylib_ursa.analysis_commands import analysis_command_payload
         "ultima_run_qc",
     ],
 )
-def test_dayec_5014_run_directory_commands_are_run_analysis(command_id: str) -> None:
+def test_dayec_run_directory_commands_are_run_analysis(command_id: str) -> None:
     payload = analysis_command_payload(command_id)
 
     assert payload["command_id"] == command_id
     assert payload["command_class"] == "run_analysis"
     assert payload["input_contract"] == "run_context"
+
+
+def test_dayec_simple_test_command_is_no_input_utility() -> None:
+    payload = analysis_command_payload("simple-test")
+
+    assert payload["command_id"] == "simple-test"
+    assert payload["command_class"] == "utility"
+    assert payload["input_contract"] == "none"
+    assert payload["requires_staging"] is False
+    assert payload["requires_run_mount"] is False
