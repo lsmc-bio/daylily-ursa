@@ -81,7 +81,10 @@ ursa --json cluster-jobs create \
     "genome_build":"hg38",
     "tmux_session":"ursa-dyr-help-smoke",
     "timeout_seconds":120,
-    "aws_profile":"lsmc"
+    "aws_profile":"lsmc",
+    "environment":{
+      "PUPPETEER_EXECUTABLE_PATH":"/home/ubuntu/.cache/puppeteer/chrome-headless-shell/linux-149.0.7827.22/chrome-headless-shell-linux64/chrome-headless-shell"
+    }
   }' \
   --start
 ```
@@ -150,10 +153,13 @@ state. This fixes OWY lifecycle completion polling for run-directory triggers.
 For headnode smoke validation, Ursa can start a registered cluster job whose
 request command is exactly `dy-r help`. This path is intentionally narrow:
 `analysis_dir`, `executor`, `genome_build`, `tmux_session`, `timeout_seconds`,
-and `aws_profile` must be supplied explicitly. The worker uses SSM to create an
-`ubuntu` tmux session on the selected headnode, runs `source dyoainit`,
-`dy-a <executor> <genome_build>`, and then `dy-r help`. The captured pane output
-and terminal return code are persisted back to the cluster-job record.
+and `aws_profile` must be supplied explicitly. The optional `environment` object
+allows only explicit runtime keys required by this smoke path, currently
+`PUPPETEER_EXECUTABLE_PATH` and `PUPPETEER_CACHE_DIR`. The worker uses SSM to
+create an `ubuntu` tmux session on the selected headnode, exports the explicit
+environment values, runs `source dyoainit`, `dy-a <executor> <genome_build>`,
+and then `dy-r help`. The captured pane output and terminal return code are
+persisted back to the cluster-job record.
 
 ## DRA And Destructive Gates
 

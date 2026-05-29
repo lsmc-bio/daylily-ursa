@@ -293,6 +293,12 @@ def test_run_dayoa_dyr_help_job_uses_headnode_tmux_script() -> None:
             "tmux_session": "ursa-dyr-help-smoke",
             "timeout_seconds": 120,
             "aws_profile": "lsmc",
+            "environment": {
+                "PUPPETEER_EXECUTABLE_PATH": (
+                    "/home/ubuntu/.cache/puppeteer/chrome-headless-shell/"
+                    "linux-149/chrome-headless-shell"
+                )
+            },
         },
     )
 
@@ -311,6 +317,7 @@ def test_run_dayoa_dyr_help_job_uses_headnode_tmux_script() -> None:
     script = str(captured["script"])
     assert "sudo -u ubuntu" in script
     assert "source dyoainit" in script
+    assert "export PUPPETEER_EXECUTABLE_PATH=" in script
     assert "dy-a local hg38" in script
     assert "dy-r help" in script
 

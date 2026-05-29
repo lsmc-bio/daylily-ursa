@@ -24,6 +24,8 @@ from daylib_ursa.tapdb_graph import utc_now_iso
 LOGGER = logging.getLogger("daylily.ursa.cluster_jobs")
 _SAFE_TMUX_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_GENOME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_ALLOWED_DAYOA_DYR_HELP_ENV_KEYS = {"PUPPETEER_EXECUTABLE_PATH", "PUPPETEER_CACHE_DIR"}
 
 
 def region_from_region_az(region_az: str) -> str:
@@ -53,6 +55,28 @@ def _request_int(request: dict[str, Any], key: str, *, minimum: int, maximum: in
     return value
 
 
+def _request_environment(request: dict[str, Any]) -> dict[str, str]:
+    raw = request.get("environment") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("environment must be an object")
+    environment: dict[str, str] = {}
+    for raw_key, raw_value in raw.items():
+        key = str(raw_key or "").strip()
+        if key not in _ALLOWED_DAYOA_DYR_HELP_ENV_KEYS or not _SAFE_ENV_KEY_RE.fullmatch(key):
+            allowed = ", ".join(sorted(_ALLOWED_DAYOA_DYR_HELP_ENV_KEYS))
+            raise ValueError(f"environment keys must be one of: {allowed}")
+        value = str(raw_value or "").strip()
+        if not value:
+            raise ValueError(f"environment.{key} must not be empty")
+        if "\n" in value or "\x00" in value:
+            raise ValueError(f"environment.{key} contains unsupported characters")
+        if key.endswith("_PATH") or key.endswith("_DIR"):
+            if not value.startswith("/"):
+                raise ValueError(f"environment.{key} must be an absolute path")
+        environment[key] = value
+    return environment
+
+
 def _dayoa_dyr_help_script(
     *,
     job: ClusterJobRecord,
@@ -61,6 +85,7 @@ def _dayoa_dyr_help_script(
     genome_build: str,
     tmux_session: str,
     timeout_seconds: int,
+    environment: dict[str, str],
 ) -> str:
     marker_path = f"/tmp/ursa-cluster-job-{job.job_euid}.rc"
     output_path = f"/tmp/ursa-cluster-job-{job.job_euid}.out"
@@ -69,6 +94,20 @@ def _dayoa_dyr_help_script(
         f"tmux capture-pane -pt {shlex.quote(tmux_session)} -S -400 > {shlex.quote(output_path)}; "
         f"printf '%s\\n' \"$rc\" > {shlex.quote(marker_path)}; "
         "exit \"$rc\""
+    )
+    tmux_commands = [
+        f"tmux send-keys -t \"$session\" {shlex.quote('cd ' + shlex.quote(analysis_dir))} Enter",
+    ]
+    for key, value in sorted(environment.items()):
+        tmux_commands.append(
+            f"tmux send-keys -t \"$session\" {shlex.quote('export ' + key + '=' + shlex.quote(value))} Enter"
+        )
+    tmux_commands.extend(
+        [
+            'tmux send-keys -t "$session" "source dyoainit" Enter',
+            f"tmux send-keys -t \"$session\" {shlex.quote('dy-a ' + executor + ' ' + genome_build)} Enter",
+            f"tmux send-keys -t \"$session\" {shlex.quote(remote_command)} Enter",
+        ]
     )
     inner = "; ".join(
         [
@@ -86,10 +125,7 @@ def _dayoa_dyr_help_script(
             'printf "tmux session already exists: %s\\n" "$session"; exit 2; fi',
             'tmux new-session -d -s "$session" "bash -l"',
             "sleep 1",
-            f"tmux send-keys -t \"$session\" {shlex.quote('cd ' + shlex.quote(analysis_dir))} Enter",
-            'tmux send-keys -t "$session" "source dyoainit" Enter',
-            f"tmux send-keys -t \"$session\" {shlex.quote('dy-a ' + executor + ' ' + genome_build)} Enter",
-            f"tmux send-keys -t \"$session\" {shlex.quote(remote_command)} Enter",
+            *tmux_commands,
             f"deadline=$((SECONDS + {timeout_seconds}))",
             'while [ ! -f "$marker" ] && [ "$SECONDS" -lt "$deadline" ]; do sleep 2; done',
             'if [ ! -f "$marker" ]; then '
@@ -129,6 +165,7 @@ def _validate_dayoa_dyr_help_request(job: ClusterJobRecord) -> dict[str, Any]:
         maximum=900,
     )
     aws_profile = _request_string(request, "aws_profile")
+    environment = _request_environment(request)
     return {
         "command": command,
         "analysis_dir": analysis_dir,
@@ -137,6 +174,7 @@ def _validate_dayoa_dyr_help_request(job: ClusterJobRecord) -> dict[str, Any]:
         "tmux_session": tmux_session,
         "timeout_seconds": timeout_seconds,
         "aws_profile": aws_profile,
+        "environment": environment,
     }
 
 
@@ -170,6 +208,7 @@ def run_dayoa_dyr_help_job(
                 "analysis_dir": params["analysis_dir"],
                 "tmux_session": params["tmux_session"],
                 "command": params["command"],
+                "environment_keys": sorted(params["environment"]),
             },
             created_by=sponsor_user_id,
         )
@@ -180,6 +219,7 @@ def run_dayoa_dyr_help_job(
             genome_build=params["genome_build"],
             tmux_session=params["tmux_session"],
             timeout_seconds=int(params["timeout_seconds"]),
+            environment=dict(params["environment"]),
         )
         _, result, error_result = cluster_service._run_headnode_script(
             cluster_name=job.cluster_name,
@@ -215,6 +255,7 @@ def run_dayoa_dyr_help_job(
                     "region": job.region,
                     "analysis_dir": params["analysis_dir"],
                     "tmux_session": params["tmux_session"],
+                    "environment_keys": sorted(params["environment"]),
                     "stdout": str(data.get("stdout") or "")[-8000:],
                     "stderr": str(data.get("stderr") or "")[-8000:],
                 },
@@ -251,6 +292,7 @@ def run_dayoa_dyr_help_job(
                 "region": job.region,
                 "analysis_dir": params["analysis_dir"],
                 "tmux_session": params["tmux_session"],
+                "environment_keys": sorted(params["environment"]),
                 "stdout": stdout[-8000:],
                 "stderr": stderr[-8000:],
             },
