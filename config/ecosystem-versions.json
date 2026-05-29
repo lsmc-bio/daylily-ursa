@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "last_updated": "2026-05-28",
+  "last_updated": "2026-05-29",
   "components": {
     "daylily-ursa": {
       "repo": "lsmc-bio/daylily-ursa",
@@ -12,7 +12,7 @@
     },
     "daylily-omics-analysis": {
       "repo": "lsmc-bio/daylily-omics-analysis",
-      "current": "2.0.0"
+      "current": "2.0.23"
     },
     "daylily-auth-cognito": {
       "repo": "Daylily-Informatics/daylily-auth-cognito",
@@ -33,15 +33,15 @@
   },
   "tested_combinations": [
     {
-      "date": "2026-05-28",
+      "date": "2026-05-29",
       "ursa": "2.0.11.34",
       "ephemeral_cluster": "5.0.28",
-      "omics_analysis": "2.0.0",
+      "omics_analysis": "2.0.23",
       "cognito": "2.1.5",
       "tapdb": "7.0.9",
       "cli_core_yo": "2.1.1",
       "omics_references": "0.3.1",
-      "notes": "Requires daylily-ephemeral-cluster ==5.0.28 for run-directory run_analysis command IDs, daylily-auth-cognito to 2.1.5, daylily-tapdb to 7.0.9, cli-core-yo to 2.1.1, and lsmc-bio daylily-omics-analysis to GitHub release 2.0.0"
+      "notes": "Requires daylily-ephemeral-cluster ==5.0.28 for run-directory run_analysis command IDs, daylily-auth-cognito to 2.1.5, daylily-tapdb to 7.0.9, cli-core-yo to 2.1.1, and lsmc-bio daylily-omics-analysis to GitHub release 2.0.23"
     },
     {
       "date": "2026-03-03",

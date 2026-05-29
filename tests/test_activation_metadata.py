@@ -106,8 +106,8 @@ def test_pyproject_contains_the_single_python_install_set() -> None:
 def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
     payload = json.loads(_load_text(_project_root() / "config" / "ecosystem-versions.json"))
 
-    assert payload["last_updated"] == "2026-05-28"
-    assert payload["tested_combinations"][0]["date"] == "2026-05-28"
+    assert payload["last_updated"] == "2026-05-29"
+    assert payload["tested_combinations"][0]["date"] == "2026-05-29"
     assert payload["components"]["daylily-ursa"]["current"] == "2.0.11.34"
     assert (
         payload["components"]["daylily-ephemeral-cluster"]["repo"]
@@ -117,14 +117,14 @@ def test_ecosystem_versions_track_ephemeral_cluster_baseline() -> None:
     assert (
         payload["components"]["daylily-omics-analysis"]["repo"] == "lsmc-bio/daylily-omics-analysis"
     )
-    assert payload["components"]["daylily-omics-analysis"]["current"] == "2.0.0"
+    assert payload["components"]["daylily-omics-analysis"]["current"] == "2.0.23"
     assert payload["components"]["daylily-auth-cognito"]["current"] == "2.1.5"
     assert payload["components"]["daylily-tapdb"]["current"] == "7.0.9"
     assert payload["components"]["cli-core-yo"]["current"] == "2.1.1"
     assert "zebra_day" not in payload["components"]
     assert payload["tested_combinations"][0]["ephemeral_cluster"] == "5.0.28"
     assert payload["tested_combinations"][0]["ursa"] == "2.0.11.34"
-    assert payload["tested_combinations"][0]["omics_analysis"] == "2.0.0"
+    assert payload["tested_combinations"][0]["omics_analysis"] == "2.0.23"
     assert payload["tested_combinations"][0]["cognito"] == "2.1.5"
     assert payload["tested_combinations"][0]["tapdb"] == "7.0.9"
     assert payload["tested_combinations"][0]["cli_core_yo"] == "2.1.1"
@@ -147,7 +147,7 @@ def test_workset_monitor_configs_use_daylily_ec_samples_stage() -> None:
         assert "daylily-stage-samples-from-local-to-headnode" not in text, path
         assert "stage_command: daylily-ec samples stage " in text, path
         assert "Daylily-Informatics/daylily-omics-analysis" not in text, path
-        assert "--repository daylily-omics-analysis --git-tag 2.0.0" in text, path
+        assert "--repository daylily-omics-analysis --git-tag 2.0.23" in text, path
 
 
 def test_activate_is_env_only() -> None:
