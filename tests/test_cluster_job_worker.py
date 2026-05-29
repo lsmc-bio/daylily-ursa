@@ -11,7 +11,7 @@ from daylib_ursa.cluster_jobs import (
     run_cluster_create_job,
     run_dayoa_dyr_help_job,
 )
-from daylib_ursa.cluster_service import ClusterService
+from daylib_ursa.cluster_service import ClusterService, HeadnodeProbeResult
 from daylib_ursa.resource_store import ClusterJobEventRecord, ClusterJobRecord
 
 TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -320,6 +320,70 @@ def test_run_dayoa_dyr_help_job_uses_headnode_tmux_script() -> None:
     assert "export PUPPETEER_EXECUTABLE_PATH=" in script
     assert "dy-a local hg38" in script
     assert "dy-r help" in script
+
+
+def test_run_dayoa_dyr_help_job_honors_success_marker_from_failed_transport() -> None:
+    store = MemoryResourceStore()
+
+    class FakeHeadnodeService:
+        def _run_headnode_script(self, **_kwargs):
+            return (
+                None,
+                None,
+                HeadnodeProbeResult(
+                    probe_type="cluster-job",
+                    cluster_name="majors-cluster",
+                    region="us-west-2",
+                    instance_id="i-123",
+                    captured_at="2026-03-25T00:00:00Z",
+                    cache_expires_at="2026-03-25T00:00:00Z",
+                    ttl_seconds=0,
+                    data={
+                        "stdout": (
+                            "WORKFLOW SUCCESS\n"
+                            "RETURN CODE: 0\n"
+                            "__URSA_CLUSTER_JOB_RC__=0\n"
+                        ),
+                        "stderr": "failed to run commands: exit status 1",
+                        "response_code": 1,
+                        "status": "Failed",
+                    },
+                    error="failed to run commands: exit status 1",
+                ),
+            )
+
+    job = store.create_cluster_job(
+        cluster_name="majors-cluster",
+        region="us-west-2",
+        region_az="us-west-2d",
+        tenant_id=TENANT_ID,
+        owner_user_id="user-1",
+        sponsor_user_id="user-2",
+        request={
+            "command": "dy-r help",
+            "analysis_dir": "/fsx/analysis_results/ubuntu/smoke/daylily-omics-analysis",
+            "executor": "local",
+            "genome_build": "hg38",
+            "tmux_session": "ursa-dyr-help-smoke",
+            "timeout_seconds": 120,
+            "aws_profile": "lsmc",
+            "environment": {},
+        },
+    )
+
+    run_dayoa_dyr_help_job(
+        resource_store=store,
+        cluster_service=FakeHeadnodeService(),
+        job_euid=job.job_euid,
+    )
+
+    updated = store.get_cluster_job(job.job_euid)
+    assert updated is not None
+    assert updated.state == "COMPLETED"
+    assert updated.return_code == 0
+    assert updated.error is None
+    assert updated.cluster["transport_error"] == "failed to run commands: exit status 1"
+    assert updated.events[-1].status == "COMPLETED"
 
 
 def test_run_dayoa_dyr_help_job_fails_hard_on_missing_request_fields() -> None:

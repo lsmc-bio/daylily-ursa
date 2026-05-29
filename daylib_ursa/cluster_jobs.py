@@ -26,6 +26,7 @@ _SAFE_TMUX_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_GENOME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _ALLOWED_DAYOA_DYR_HELP_ENV_KEYS = {"PUPPETEER_EXECUTABLE_PATH", "PUPPETEER_CACHE_DIR"}
+_DAYOA_CLUSTER_JOB_RC_RE = re.compile(r"__URSA_CLUSTER_JOB_RC__=(\d+)")
 
 
 def region_from_region_az(region_az: str) -> str:
@@ -75,6 +76,35 @@ def _request_environment(request: dict[str, Any]) -> dict[str, str]:
                 raise ValueError(f"environment.{key} must be an absolute path")
         environment[key] = value
     return environment
+
+
+def _extract_dayoa_cluster_job_rc(stdout: str) -> int | None:
+    matches = _DAYOA_CLUSTER_JOB_RC_RE.findall(str(stdout or ""))
+    if not matches:
+        return None
+    return int(matches[-1])
+
+
+def _completed_dayoa_cluster_payload(
+    *,
+    job: ClusterJobRecord,
+    params: dict[str, Any],
+    stdout: str,
+    stderr: str,
+    transport_error: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "cluster_name": job.cluster_name,
+        "region": job.region,
+        "analysis_dir": params["analysis_dir"],
+        "tmux_session": params["tmux_session"],
+        "environment_keys": sorted(params["environment"]),
+        "stdout": str(stdout or "")[-8000:],
+        "stderr": str(stderr or "")[-8000:],
+    }
+    if transport_error:
+        payload["transport_error"] = str(transport_error)
+    return payload
 
 
 def _dayoa_dyr_help_script(
@@ -232,6 +262,42 @@ def run_dayoa_dyr_help_job(
         if error_result is not None:
             payload = error_result.to_dict(cached=False)
             data = dict(payload.get("data") or {})
+            stdout = str(data.get("stdout") or "")
+            stderr = str(data.get("stderr") or "")
+            marker_rc = _extract_dayoa_cluster_job_rc(stdout)
+            if marker_rc == 0:
+                summary = "DayOA dy-r help completed"
+                resource_store.add_cluster_job_event(
+                    job_euid=job_euid,
+                    event_type="headnode-command",
+                    status="COMPLETED",
+                    summary=summary,
+                    details={
+                        "return_code": marker_rc,
+                        "transport_error": str(payload.get("error") or ""),
+                        "stdout": stdout[-8000:],
+                        "stderr": stderr[-8000:],
+                    },
+                    created_by=sponsor_user_id,
+                )
+                resource_store.update_cluster_job_status(
+                    job_euid=job_euid,
+                    state="COMPLETED",
+                    created_by=sponsor_user_id,
+                    started_at=started_at,
+                    completed_at=utc_now_iso(),
+                    return_code=0,
+                    error=None,
+                    output_summary=summary,
+                    cluster=_completed_dayoa_cluster_payload(
+                        job=job,
+                        params=params,
+                        stdout=stdout,
+                        stderr=stderr,
+                        transport_error=str(payload.get("error") or ""),
+                    ),
+                )
+                return
             error = str(payload.get("error") or "DayOA dy-r help command failed")
             resource_store.add_cluster_job_event(
                 job_euid=job_euid,
@@ -287,15 +353,12 @@ def run_dayoa_dyr_help_job(
             return_code=0,
             error=None,
             output_summary=summary,
-            cluster={
-                "cluster_name": job.cluster_name,
-                "region": job.region,
-                "analysis_dir": params["analysis_dir"],
-                "tmux_session": params["tmux_session"],
-                "environment_keys": sorted(params["environment"]),
-                "stdout": stdout[-8000:],
-                "stderr": stderr[-8000:],
-            },
+            cluster=_completed_dayoa_cluster_payload(
+                job=job,
+                params=params,
+                stdout=stdout,
+                stderr=stderr,
+            ),
         )
     except Exception as exc:
         LOGGER.exception("DayOA dy-r help cluster job %s failed", job_euid)
