@@ -65,6 +65,7 @@ def test_cli_registry_exposes_v2_command_tree_and_policies() -> None:
     assert registry.resolve_command_args(["compute-clusters", "create"]) is not None
     assert registry.resolve_command_args(["compute-clusters", "list"]) is not None
     assert registry.resolve_command_args(["cluster-jobs", "create"]) is not None
+    assert registry.resolve_command_args(["cluster-jobs", "start"]) is not None
     assert registry.resolve_command_args(["cluster-jobs", "get"]) is not None
     assert registry.resolve_command_args(["run-directory-triggers", "get"]) is not None
 
@@ -76,6 +77,7 @@ def test_cli_registry_exposes_v2_command_tree_and_policies() -> None:
     import_artifact_cmd = registry.get_command(("integrations", "dewey", "import-artifact"))
     create_compute_cluster_cmd = registry.get_command(("compute-clusters", "create"))
     create_cluster_job_cmd = registry.get_command(("cluster-jobs", "create"))
+    start_cluster_job_cmd = registry.get_command(("cluster-jobs", "start"))
     get_run_directory_trigger_cmd = registry.get_command(("run-directory-triggers", "get"))
 
     assert version_cmd is not None
@@ -106,6 +108,10 @@ def test_cli_registry_exposes_v2_command_tree_and_policies() -> None:
     assert create_cluster_job_cmd is not None
     assert create_cluster_job_cmd.policy.supports_json is True
     assert create_cluster_job_cmd.policy.mutates_state is True
+
+    assert start_cluster_job_cmd is not None
+    assert start_cluster_job_cmd.policy.supports_json is True
+    assert start_cluster_job_cmd.policy.mutates_state is True
 
     assert get_run_directory_trigger_cmd is not None
     assert get_run_directory_trigger_cmd.policy.supports_json is True

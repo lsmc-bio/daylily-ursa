@@ -1006,6 +1006,23 @@ class DummyClusterJobManager:
             sponsor_user_id=sponsor_user_id,
         )
 
+    def start_job(self, *, job_euid: str, actor_user_id: str):
+        self.started_jobs.append(job_euid)
+        job = self.resource_store.cluster_jobs[job_euid]
+        event = ClusterJobEventRecord(
+            event_euid=f"CE-start-{job_euid}",
+            job_euid=job_euid,
+            event_type="worker-launch",
+            status="QUEUED",
+            summary="Spawned cluster worker pid 123",
+            details={"pid": 123},
+            created_by=actor_user_id,
+            created_at="2026-03-25T00:01:00Z",
+        )
+        updated = replace(job, events=[*job.events, event], updated_at=event.created_at)
+        self.resource_store.cluster_jobs[job_euid] = updated
+        return updated
+
     def record_create_dry_run(
         self,
         *,
@@ -1264,6 +1281,11 @@ def test_compute_cluster_and_cluster_job_routes_are_first_class_objects() -> Non
             "/api/v1/cluster-jobs",
             headers={"Authorization": "Bearer atlas-token"},
         )
+        started_cluster_job = client.post(
+            f"/api/v1/cluster-jobs/{cluster_job.json()['cluster_job_euid']}/start",
+            headers={"Authorization": "Bearer atlas-token"},
+            json={},
+        )
         job_detail = client.get(
             f"/api/v1/cluster-jobs/{cluster_job.json()['cluster_job_euid']}",
             headers={"Authorization": "Bearer atlas-token"},
@@ -1289,6 +1311,8 @@ def test_compute_cluster_and_cluster_job_routes_are_first_class_objects() -> Non
     assert cluster_job.json()["analysis_job_euid"] == "AJ-123"
     assert cluster_job.json()["scheduler_job_id"] == "456"
     assert cluster_job.json()["request"] == {"command": "dy-r help"}
+    assert started_cluster_job.status_code == 202, started_cluster_job.text
+    assert started_cluster_job.json()["events"][-1]["event_type"] == "worker-launch"
     assert job_detail.status_code == 200
     assert job_detail.json()["cluster_job_euid"] == "CJ-1"
     assert resources.cluster_jobs["CJ-1"].cluster_euid == "CC-1"
@@ -1303,6 +1327,7 @@ def test_gui_static_assets_include_cli_viz_mode_and_compute_cluster_surface() ->
     assert "buildApiCliCommand" in portal_js
     assert "copy" in portal_js
     assert "Compute Clusters" in clusters_template
+    assert "startClusterJob" in clusters_template
     assert "/api/v1/compute-clusters" in clusters_template
 
 

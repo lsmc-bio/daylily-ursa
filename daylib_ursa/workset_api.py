@@ -1289,12 +1289,17 @@ class ClusterJobCreateRequest(BaseModel):
     analysis_job_euid: str | None = None
     scheduler_job_id: str | None = None
     request: dict[str, Any] = Field(default_factory=dict)
+    start: bool = False
 
     @model_validator(mode="after")
     def validate_cluster_job(self) -> "ClusterJobCreateRequest":
         if not str(self.cluster_euid or "").strip():
             raise ValueError("cluster_euid is required")
         return self
+
+
+class ClusterJobStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class ClusterJobEventResponse(BaseModel):
@@ -6104,6 +6109,7 @@ def create_app(
         request: ClusterJobCreateRequest,
         actor: RequireAuth,
         resources: ResourceStore = Depends(require_resource_store),
+        manager: ClusterJobManager = Depends(require_cluster_job_manager),
     ) -> ClusterJobResponse:
         cluster = resources.get_compute_cluster(str(request.cluster_euid or "").strip())
         if cluster is None:
@@ -6130,7 +6136,42 @@ def create_app(
             )
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if request.start:
+            try:
+                record = manager.start_job(
+                    job_euid=record.job_euid,
+                    actor_user_id=actor.user_id,
+                )
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _cluster_job_response(record)
+
+    @app.post(
+        "/api/v1/cluster-jobs/{cluster_job_euid}/start",
+        response_model=ClusterJobResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def start_top_level_cluster_job(
+        cluster_job_euid: str,
+        request: ClusterJobStartRequest,
+        actor: RequireAuth,
+        resources: ResourceStore = Depends(require_resource_store),
+        manager: ClusterJobManager = Depends(require_cluster_job_manager),
+    ) -> ClusterJobResponse:
+        _ = request
+        record = resources.get_cluster_job(str(cluster_job_euid or "").strip())
+        if record is None:
+            raise HTTPException(status_code=404, detail="Cluster job not found")
+        if not actor.is_admin and record.tenant_id != actor.tenant_id:
+            raise HTTPException(status_code=403, detail="Cluster job is outside the caller tenant")
+        try:
+            started = manager.start_job(
+                job_euid=record.job_euid,
+                actor_user_id=actor.user_id,
+            )
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _cluster_job_response(started)
 
     @app.get("/api/v1/cluster-jobs/{cluster_job_euid}", response_model=ClusterJobResponse)
     async def get_top_level_cluster_job(

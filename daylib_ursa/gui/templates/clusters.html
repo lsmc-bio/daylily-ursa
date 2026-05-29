@@ -2028,11 +2028,29 @@ async function refreshCreateJobs() {
                 <td><span class="badge badge-${escapeHtml(String(job.state || '').toLowerCase().replace(/_/g, '-'))}">${escapeHtml(job.state)}</span></td>
                 <td>${job.return_code ?? '—'}</td>
                 <td>${escapeHtml(String(job.created_at || '').slice(0, 19))}</td>
-                <td><a href="/clusters/jobs/${encodeURIComponent(job.job_euid)}" class="btn btn-outline btn-sm">View</a></td>
+                <td>
+                    <div class="d-flex gap-sm flex-wrap">
+                        <a href="/clusters/jobs/${encodeURIComponent(job.job_euid)}" class="btn btn-outline btn-sm">View</a>
+                        ${String(job.state || '') === 'QUEUED' ? `<button class="btn btn-primary btn-sm" type="button" onclick="startClusterJob('${escapeHtml(job.job_euid)}')">Start</button>` : ''}
+                    </div>
+                </td>
             </tr>
         `).join('') : '<tr><td colspan="7" class="text-muted">No create jobs yet.</td></tr>';
     } catch (error) {
         showToast('error', clusterActionErrorMessage(error, 'Failed to refresh cluster jobs'));
+    }
+}
+
+async function startClusterJob(jobEuid) {
+    try {
+        await UrsaPortal.apiRequest(`/api/v1/cluster-jobs/${encodeURIComponent(jobEuid)}/start`, {
+            method: 'POST',
+            body: {},
+        });
+        showToast('success', 'Cluster job started');
+        await refreshCreateJobs();
+    } catch (error) {
+        showToast('error', clusterActionErrorMessage(error, 'Failed to start cluster job'));
     }
 }
 

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from daylib_ursa.cluster_jobs import run_cluster_create_job
+from daylib_ursa.cluster_jobs import run_cluster_create_job, run_dayoa_dyr_help_job
 from daylib_ursa.cluster_service import ClusterService
 from daylib_ursa.config import get_settings
 from daylib_ursa.resource_store import ResourceStore
@@ -44,12 +44,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         aws_profile=str(request_payload.get("aws_profile") or settings.aws_profile or "").strip()
         or None,
     )
-    run_cluster_create_job(
-        resource_store=resource_store,
-        cluster_service=cluster_service,
-        workspace_root=Path(args.workspace_root).resolve(),
-        job_euid=args.job_euid,
-    )
+    if str(request_payload.get("command") or "").strip() == "dy-r help":
+        run_dayoa_dyr_help_job(
+            resource_store=resource_store,
+            cluster_service=cluster_service,
+            job_euid=args.job_euid,
+        )
+    else:
+        run_cluster_create_job(
+            resource_store=resource_store,
+            cluster_service=cluster_service,
+            workspace_root=Path(args.workspace_root).resolve(),
+            job_euid=args.job_euid,
+        )
     return 0
 
 

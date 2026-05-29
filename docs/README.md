@@ -6,7 +6,7 @@ Use the root [README](../README.md) as the current repo overview and operational
 
 - [Ursa-Atlas return contract](ursa_atlas_return_contract.md): canonical result-return contract from Ursa into Atlas.
 - [Dewey run analysis trigger contract](dewey_run_analysis_triggers.md): Dewey service-token trigger, auto-launch, idempotency, and Dewey terminal result return behavior.
-- [Compute cluster and cluster job lifecycle](compute_cluster_lifecycle.md): durable compute-cluster objects, cluster-job objects, CLI/API/GUI usage, and OWY run-directory lifecycle readback.
+- [Compute cluster and cluster job lifecycle](compute_cluster_lifecycle.md): durable compute-cluster objects, cluster-job objects, CLI/API/GUI usage, queued cluster-job start, DayOA `dy-r help` smoke execution, and OWY run-directory lifecycle readback.
 - [Cluster auto cleanup runbook](cluster_auto_cleanup.md): admin cleanup policy, dry-run/execute API, and export-before-delete rule.
 - [Google OAuth default](GOOGLE_OAUTH_DEFAULT.md): default Cognito plus Google Hosted UI setup helper and ownership boundaries.
 - [TapDB admin mount status](tapdb_mount_execplan.md): current mounted TapDB admin behavior inside the Ursa FastAPI app.

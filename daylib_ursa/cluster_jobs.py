@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import shlex
 import subprocess
 import sys
 import uuid
@@ -20,6 +22,8 @@ from daylib_ursa.resource_store import ClusterJobRecord, ResourceStore
 from daylib_ursa.tapdb_graph import utc_now_iso
 
 LOGGER = logging.getLogger("daylily.ursa.cluster_jobs")
+_SAFE_TMUX_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_GENOME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def region_from_region_az(region_az: str) -> str:
@@ -27,6 +31,254 @@ def region_from_region_az(region_az: str) -> str:
     if len(value) > 1 and value[-1].isalpha() and value[-2].isdigit():
         return value[:-1]
     return value
+
+
+def _request_string(request: dict[str, Any], key: str, *, required: bool = True) -> str:
+    value = str(request.get(key) or "").strip()
+    if required and not value:
+        raise ValueError(f"{key} is required")
+    return value
+
+
+def _request_int(request: dict[str, Any], key: str, *, minimum: int, maximum: int) -> int:
+    raw = request.get(key)
+    if raw is None or str(raw).strip() == "":
+        raise ValueError(f"{key} is required")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be an integer") from exc
+    if value < minimum or value > maximum:
+        raise ValueError(f"{key} must be between {minimum} and {maximum}")
+    return value
+
+
+def _dayoa_dyr_help_script(
+    *,
+    job: ClusterJobRecord,
+    analysis_dir: str,
+    executor: str,
+    genome_build: str,
+    tmux_session: str,
+    timeout_seconds: int,
+) -> str:
+    marker_path = f"/tmp/ursa-cluster-job-{job.job_euid}.rc"
+    output_path = f"/tmp/ursa-cluster-job-{job.job_euid}.out"
+    remote_command = (
+        "dy-r help; rc=$?; "
+        f"tmux capture-pane -pt {shlex.quote(tmux_session)} -S -400 > {shlex.quote(output_path)}; "
+        f"printf '%s\\n' \"$rc\" > {shlex.quote(marker_path)}; "
+        "exit \"$rc\""
+    )
+    inner = "; ".join(
+        [
+            "set -e",
+            'test "$(id -un)" = ubuntu',
+            "command -v tmux >/dev/null",
+            f"analysis_dir={shlex.quote(analysis_dir)}",
+            f"session={shlex.quote(tmux_session)}",
+            f"marker={shlex.quote(marker_path)}",
+            f"output={shlex.quote(output_path)}",
+            'test -d "$analysis_dir"',
+            'test -f "$analysis_dir/dyoainit"',
+            'rm -f "$marker" "$output"',
+            'if tmux has-session -t "$session" 2>/dev/null; then '
+            'printf "tmux session already exists: %s\\n" "$session"; exit 2; fi',
+            'tmux new-session -d -s "$session" "bash -l"',
+            "sleep 1",
+            f"tmux send-keys -t \"$session\" {shlex.quote('cd ' + shlex.quote(analysis_dir))} Enter",
+            'tmux send-keys -t "$session" "source dyoainit" Enter',
+            f"tmux send-keys -t \"$session\" {shlex.quote('dy-a ' + executor + ' ' + genome_build)} Enter",
+            f"tmux send-keys -t \"$session\" {shlex.quote(remote_command)} Enter",
+            f"deadline=$((SECONDS + {timeout_seconds}))",
+            'while [ ! -f "$marker" ] && [ "$SECONDS" -lt "$deadline" ]; do sleep 2; done',
+            'if [ ! -f "$marker" ]; then '
+            'tmux capture-pane -pt "$session" -S -400 > "$output" 2>/dev/null || true; '
+            'cat "$output" 2>/dev/null || true; '
+            'printf "__URSA_CLUSTER_JOB_TIMEOUT__=1\\n"; exit 124; fi',
+            'cat "$output" 2>/dev/null || true',
+            'rc=$(cat "$marker")',
+            'printf "__URSA_CLUSTER_JOB_RC__=%s\\n" "$rc"',
+            'exit "$rc"',
+        ]
+    )
+    return "sudo -u ubuntu HOME=/home/ubuntu bash -lc " + shlex.quote(inner)
+
+
+def _validate_dayoa_dyr_help_request(job: ClusterJobRecord) -> dict[str, Any]:
+    request = dict(job.request or {})
+    command = _request_string(request, "command")
+    if command != "dy-r help":
+        raise ValueError("cluster job command must be exactly 'dy-r help'")
+    analysis_dir = _request_string(request, "analysis_dir")
+    if not analysis_dir.startswith("/"):
+        raise ValueError("analysis_dir must be an absolute headnode path")
+    executor = _request_string(request, "executor")
+    if executor not in {"local", "slurm"}:
+        raise ValueError("executor must be local or slurm")
+    genome_build = _request_string(request, "genome_build")
+    if not _SAFE_GENOME_RE.fullmatch(genome_build):
+        raise ValueError("genome_build contains unsupported characters")
+    tmux_session = _request_string(request, "tmux_session")
+    if not _SAFE_TMUX_RE.fullmatch(tmux_session):
+        raise ValueError("tmux_session contains unsupported characters")
+    timeout_seconds = _request_int(
+        request,
+        "timeout_seconds",
+        minimum=10,
+        maximum=900,
+    )
+    aws_profile = _request_string(request, "aws_profile")
+    return {
+        "command": command,
+        "analysis_dir": analysis_dir,
+        "executor": executor,
+        "genome_build": genome_build,
+        "tmux_session": tmux_session,
+        "timeout_seconds": timeout_seconds,
+        "aws_profile": aws_profile,
+    }
+
+
+def run_dayoa_dyr_help_job(
+    *,
+    resource_store: ResourceStore,
+    cluster_service: ClusterService,
+    job_euid: str,
+) -> None:
+    job = resource_store.get_cluster_job(job_euid)
+    if job is None:
+        raise KeyError(f"cluster job not found: {job_euid}")
+    sponsor_user_id = str(job.sponsor_user_id or job.owner_user_id or "").strip()
+    started_at = utc_now_iso()
+    try:
+        params = _validate_dayoa_dyr_help_request(job)
+        resource_store.update_cluster_job_status(
+            job_euid=job_euid,
+            state="RUNNING",
+            created_by=sponsor_user_id,
+            started_at=started_at,
+        )
+        resource_store.add_cluster_job_event(
+            job_euid=job_euid,
+            event_type="headnode-command",
+            status="RUNNING",
+            summary="Started DayOA dy-r help smoke command",
+            details={
+                "cluster_name": job.cluster_name,
+                "region": job.region,
+                "analysis_dir": params["analysis_dir"],
+                "tmux_session": params["tmux_session"],
+                "command": params["command"],
+            },
+            created_by=sponsor_user_id,
+        )
+        script = _dayoa_dyr_help_script(
+            job=job,
+            analysis_dir=params["analysis_dir"],
+            executor=params["executor"],
+            genome_build=params["genome_build"],
+            tmux_session=params["tmux_session"],
+            timeout_seconds=int(params["timeout_seconds"]),
+        )
+        _, result, error_result = cluster_service._run_headnode_script(
+            cluster_name=job.cluster_name,
+            region=job.region,
+            probe_type="cluster-job",
+            script=script,
+            ttl_seconds=0,
+            timeout=int(params["timeout_seconds"]) + 120,
+        )
+        if error_result is not None:
+            payload = error_result.to_dict(cached=False)
+            data = dict(payload.get("data") or {})
+            error = str(payload.get("error") or "DayOA dy-r help command failed")
+            resource_store.add_cluster_job_event(
+                job_euid=job_euid,
+                event_type="headnode-command",
+                status="FAILED",
+                summary=error,
+                details=data,
+                created_by=sponsor_user_id,
+            )
+            resource_store.update_cluster_job_status(
+                job_euid=job_euid,
+                state="FAILED",
+                created_by=sponsor_user_id,
+                started_at=started_at,
+                completed_at=utc_now_iso(),
+                return_code=int(data.get("response_code") or 1),
+                error=error,
+                output_summary=error,
+                cluster={
+                    "cluster_name": job.cluster_name,
+                    "region": job.region,
+                    "analysis_dir": params["analysis_dir"],
+                    "tmux_session": params["tmux_session"],
+                    "stdout": str(data.get("stdout") or "")[-8000:],
+                    "stderr": str(data.get("stderr") or "")[-8000:],
+                },
+            )
+            return
+        assert result is not None
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        summary = "DayOA dy-r help completed"
+        resource_store.add_cluster_job_event(
+            job_euid=job_euid,
+            event_type="headnode-command",
+            status="COMPLETED",
+            summary=summary,
+            details={
+                "return_code": int(result.response_code),
+                "status": result.status,
+                "stdout": stdout[-8000:],
+                "stderr": stderr[-8000:],
+            },
+            created_by=sponsor_user_id,
+        )
+        resource_store.update_cluster_job_status(
+            job_euid=job_euid,
+            state="COMPLETED",
+            created_by=sponsor_user_id,
+            started_at=started_at,
+            completed_at=utc_now_iso(),
+            return_code=0,
+            error=None,
+            output_summary=summary,
+            cluster={
+                "cluster_name": job.cluster_name,
+                "region": job.region,
+                "analysis_dir": params["analysis_dir"],
+                "tmux_session": params["tmux_session"],
+                "stdout": stdout[-8000:],
+                "stderr": stderr[-8000:],
+            },
+        )
+    except Exception as exc:
+        LOGGER.exception("DayOA dy-r help cluster job %s failed", job_euid)
+        error_message = f"{type(exc).__name__}: {exc}"
+        try:
+            resource_store.add_cluster_job_event(
+                job_euid=job_euid,
+                event_type="headnode-command",
+                status="FAILED",
+                summary=error_message,
+                details={},
+                created_by=sponsor_user_id,
+            )
+            resource_store.update_cluster_job_status(
+                job_euid=job_euid,
+                state="FAILED",
+                created_by=sponsor_user_id,
+                started_at=started_at,
+                completed_at=utc_now_iso(),
+                return_code=1,
+                error=error_message,
+                output_summary=error_message,
+            )
+        except Exception:
+            LOGGER.exception("Failed to persist terminal cluster job state for %s", job_euid)
 
 
 def run_cluster_create_job(
@@ -244,6 +496,46 @@ class ClusterJobManager:
             start_new_session=True,
         )
 
+    def start_job(self, *, job_euid: str, actor_user_id: str) -> ClusterJobRecord:
+        job = self.resource_store.get_cluster_job(job_euid)
+        if job is None:
+            raise KeyError(f"cluster job not found: {job_euid}")
+        if job.state not in {"QUEUED", "DEFINED"}:
+            raise ValueError(f"cluster job is not startable from state {job.state}")
+        try:
+            worker = self._spawn_worker(job_euid=job.job_euid)
+        except Exception as exc:
+            error_message = f"Failed to launch cluster worker: {type(exc).__name__}: {exc}"
+            self.resource_store.add_cluster_job_event(
+                job_euid=job.job_euid,
+                event_type="worker-launch",
+                status="FAILED",
+                summary=error_message,
+                details={"command": self._worker_command(job_euid=job.job_euid)},
+                created_by=actor_user_id,
+            )
+            return self.resource_store.update_cluster_job_status(
+                job_euid=job.job_euid,
+                state="FAILED",
+                created_by=actor_user_id,
+                completed_at=utc_now_iso(),
+                return_code=1,
+                error=error_message,
+                output_summary=error_message,
+            )
+        self.resource_store.add_cluster_job_event(
+            job_euid=job.job_euid,
+            event_type="worker-launch",
+            status="QUEUED",
+            summary=f"Spawned cluster worker pid {worker.pid}",
+            details={
+                "pid": int(worker.pid or 0),
+                "command": self._worker_command(job_euid=job.job_euid),
+            },
+            created_by=actor_user_id,
+        )
+        return self.resource_store.get_cluster_job(job.job_euid) or job
+
     @staticmethod
     def _request_payload(
         *,
@@ -454,4 +746,9 @@ class ClusterJobManager:
         return self.resource_store.get_cluster_job(job.job_euid) or job
 
 
-__all__ = ["ClusterJobManager", "region_from_region_az", "run_cluster_create_job"]
+__all__ = [
+    "ClusterJobManager",
+    "region_from_region_az",
+    "run_cluster_create_job",
+    "run_dayoa_dyr_help_job",
+]

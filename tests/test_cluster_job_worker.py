@@ -3,9 +3,14 @@ from __future__ import annotations
 import subprocess
 import uuid
 from dataclasses import replace
+from types import SimpleNamespace
 from pathlib import Path
 
-from daylib_ursa.cluster_jobs import ClusterJobManager, run_cluster_create_job
+from daylib_ursa.cluster_jobs import (
+    ClusterJobManager,
+    run_cluster_create_job,
+    run_dayoa_dyr_help_job,
+)
 from daylib_ursa.cluster_service import ClusterService
 from daylib_ursa.resource_store import ClusterJobEventRecord, ClusterJobRecord
 
@@ -253,6 +258,85 @@ def test_run_cluster_create_job_uses_fake_tools_and_leaves_no_home_state(
     assert updated.cluster["cluster_status"] == "CREATE_COMPLETE"
     assert [event.event_type for event in updated.events] == ["runner", "preflight", "create"]
     assert not (home_dir / ".ursa" / "cluster-create").exists()
+
+
+def test_run_dayoa_dyr_help_job_uses_headnode_tmux_script() -> None:
+    store = MemoryResourceStore()
+    captured: dict[str, object] = {}
+
+    class FakeHeadnodeService:
+        def _run_headnode_script(self, **kwargs):
+            captured.update(kwargs)
+            return (
+                object(),
+                SimpleNamespace(
+                    stdout="Usage: dy-r [OPTIONS]\n__URSA_CLUSTER_JOB_RC__=0\n",
+                    stderr="",
+                    response_code=0,
+                    status="Success",
+                ),
+                None,
+            )
+
+    job = store.create_cluster_job(
+        cluster_name="majors-cluster",
+        region="us-west-2",
+        region_az="us-west-2d",
+        tenant_id=TENANT_ID,
+        owner_user_id="user-1",
+        sponsor_user_id="user-2",
+        request={
+            "command": "dy-r help",
+            "analysis_dir": "/fsx/analysis_results/ubuntu/smoke/daylily-omics-analysis",
+            "executor": "local",
+            "genome_build": "hg38",
+            "tmux_session": "ursa-dyr-help-smoke",
+            "timeout_seconds": 120,
+            "aws_profile": "lsmc",
+        },
+    )
+
+    run_dayoa_dyr_help_job(
+        resource_store=store,
+        cluster_service=FakeHeadnodeService(),
+        job_euid=job.job_euid,
+    )
+
+    updated = store.get_cluster_job(job.job_euid)
+    assert updated is not None
+    assert updated.state == "COMPLETED"
+    assert updated.return_code == 0
+    assert updated.output_summary == "DayOA dy-r help completed"
+    assert updated.cluster["tmux_session"] == "ursa-dyr-help-smoke"
+    script = str(captured["script"])
+    assert "sudo -u ubuntu" in script
+    assert "source dyoainit" in script
+    assert "dy-a local hg38" in script
+    assert "dy-r help" in script
+
+
+def test_run_dayoa_dyr_help_job_fails_hard_on_missing_request_fields() -> None:
+    store = MemoryResourceStore()
+    job = store.create_cluster_job(
+        cluster_name="majors-cluster",
+        region="us-west-2",
+        region_az="us-west-2d",
+        tenant_id=TENANT_ID,
+        owner_user_id="user-1",
+        sponsor_user_id="user-2",
+        request={"command": "dy-r help"},
+    )
+
+    run_dayoa_dyr_help_job(
+        resource_store=store,
+        cluster_service=object(),
+        job_euid=job.job_euid,
+    )
+
+    updated = store.get_cluster_job(job.job_euid)
+    assert updated is not None
+    assert updated.state == "FAILED"
+    assert "analysis_dir is required" in str(updated.error)
 
 
 def test_cluster_job_manager_records_create_dry_run_without_spawning_worker(

@@ -44,6 +44,7 @@ Cluster jobs:
 
 - `GET /api/v1/cluster-jobs`
 - `POST /api/v1/cluster-jobs`
+- `POST /api/v1/cluster-jobs/{cluster_job_euid}/start`
 - `GET /api/v1/cluster-jobs/{cluster_job_euid}`
 
 Existing cluster inspection and create/delete-plan routes remain under
@@ -73,8 +74,24 @@ ursa --json cluster-jobs create \
   --job-name "dy-r help smoke" \
   --job-type slurm \
   --analysis-job-euid M-RGX-ANALYSIS \
-  --scheduler-job-id 12345 \
-  --request-json '{"command":"dy-r help"}'
+  --request-json '{
+    "command":"dy-r help",
+    "analysis_dir":"/fsx/analysis_results/xfer-cluster/M-RGX-9T77/daylily-omics-analysis",
+    "executor":"local",
+    "genome_build":"hg38",
+    "tmux_session":"ursa-dyr-help-smoke",
+    "timeout_seconds":120,
+    "aws_profile":"lsmc"
+  }' \
+  --start
+```
+
+Existing queued jobs can also be started explicitly:
+
+```bash
+ursa --json cluster-jobs start M-RGX-CLUSTER-JOB \
+  --api-base-url https://ursa.day.lsmc.bio \
+  --token "$URSA_BEARER_TOKEN"
 ```
 
 OWY run-directory trigger readback uses the scoped write service token in
@@ -104,6 +121,10 @@ for GUI actions with CLI analogs and includes a copy button. The displayed
 command uses the generic `ursa --json api request ...` form with a `<TOKEN>`
 placeholder, so secrets are not rendered into the page.
 
+Queued cluster jobs have a Start action in the GUI. The Start action maps to
+`POST /api/v1/cluster-jobs/{cluster_job_euid}/start`, and CLI Viz renders that
+API call as a copyable CLI command.
+
 ## OWY `dy-r help` Lifecycle
 
 OWY registers a sequencing run with Bloom, registers the run directory with
@@ -125,6 +146,14 @@ Readback is available through both:
 
 Readback refreshes the returned analysis-job rows from current persisted job
 state. This fixes OWY lifecycle completion polling for run-directory triggers.
+
+For headnode smoke validation, Ursa can start a registered cluster job whose
+request command is exactly `dy-r help`. This path is intentionally narrow:
+`analysis_dir`, `executor`, `genome_build`, `tmux_session`, `timeout_seconds`,
+and `aws_profile` must be supplied explicitly. The worker uses SSM to create an
+`ubuntu` tmux session on the selected headnode, runs `source dyoainit`,
+`dy-a <executor> <genome_build>`, and then `dy-r help`. The captured pane output
+and terminal return code are persisted back to the cluster-job record.
 
 ## DRA And Destructive Gates
 

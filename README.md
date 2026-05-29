@@ -113,7 +113,7 @@ Core API surface:
 - `/api/v1/analysis-jobs` defines, launches, refreshes, and reads analysis workflow jobs.
 - `/api/v1/dewey/run-analysis-triggers` accepts service-token Dewey triggers and can launch catalog-backed analysis jobs when explicit execution context is supplied.
 - `/api/v1/dewey/run-directory-analysis-triggers` accepts OWY run-directory triggers and exposes readback for run-directory analysis lifecycle.
-- `/api/v1/compute-clusters` and `/api/v1/cluster-jobs` persist durable compute placement records with `cluster_euid` and `cluster_job_euid`.
+- `/api/v1/compute-clusters` and `/api/v1/cluster-jobs` persist durable compute placement records with `cluster_euid` and `cluster_job_euid`; queued cluster jobs can be started through `/api/v1/cluster-jobs/{cluster_job_euid}/start`.
 - `/api/v1/clusters` and `/api/v1/clusters/jobs` expose cluster creation, inspection, dry-run delete planning, and cluster job state.
 - `/api/v1/admin/cluster-cleanup-policy` and `/api/v1/admin/cluster-cleanup/run` expose admin-only idle cleanup policy and dry-run/execute controls.
 - `/api/v1/buckets` manages linked S3 buckets and object browsing/upload helper routes.
@@ -125,7 +125,7 @@ Staging jobs run against an existing manifest and capture the remote FSx stage d
 
 Generated analysis manifests and OWY run-directory jobs carry deterministic `analysis_experiment_euid` values for row/cell-defined analysis work. These EUIDs are evidence identifiers, not QC interpretations.
 
-The GUI includes a CLI Viz toggle. When enabled, GUI actions that have CLI analogs render a copyable `ursa --json api request ...` command with a `<TOKEN>` placeholder.
+The GUI includes a CLI Viz toggle. When enabled, GUI actions that have CLI analogs render a copyable `ursa --json api request ...` command with a `<TOKEN>` placeholder. The cluster-jobs surface can start queued DayOA `dy-r help` smoke jobs and persists captured headnode output as evidence.
 
 Cluster auto cleanup is disabled by default. When enabled by an admin, cleanup must export `/fsx/analysis_results/...` to S3 through the DayEC export path before delete; export failure blocks delete.
 

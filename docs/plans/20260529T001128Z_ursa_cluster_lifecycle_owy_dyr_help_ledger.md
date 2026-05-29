@@ -55,10 +55,10 @@ placed on a cluster, complete, and close the Ursa analysis job lifecycle.
 | MODEL-003 | Ursa model | Assign `analysis_experiment_euid` to array-cell-defined analysis work. | SUCCESS | feature_implementation | Gate 1 | Agent 2 | `analysis_samples_manifest.analysis_experiments`; run-directory jobs derive deterministic `URXP-*` from run-context row, command ID, and pipeline order; tests in `test_worksets_api.py` and `test_dewey_run_analysis_triggers.py`. |  | EUIDs are evidence identifiers, not sample identity or QC disposition. |
 | API-001 | Ursa API | Expose compute cluster and cluster job create/read/list/update surfaces without fallback or inferred defaults. | SUCCESS | feature_implementation | Gate 2 | Agent 3 | `GET/POST /api/v1/compute-clusters`, `GET /api/v1/compute-clusters/{cluster_euid}`, `POST /api/v1/compute-clusters/{cluster_euid}/state`, `GET/POST /api/v1/cluster-jobs`, `GET /api/v1/cluster-jobs/{cluster_job_euid}`; route-coverage tests pass. |  | Invalid cluster/job types fail through Pydantic literals and store validation. |
 | API-002 | Ursa API | Fix OWY service-token readback for run-directory triggers and associated analysis job lifecycle. | SUCCESS | feature_implementation | Gate 2 | Agent 3 | `GET /api/v1/dewey/run-directory-analysis-triggers/{trigger_euid}` and `URDT-*` handling in generic `GET /api/v1/dewey/run-analysis-triggers/{trigger_euid}`; test proves readback refreshes `COMPLETED` job state. | Prior production `URDT-*` generic GET returned response-model HTTP 500. | Readback returns run-directory response shape and current analysis job rows. |
-| CLI-001 | Ursa CLI | Add CLI commands for compute-cluster and cluster-job actions matching API behavior. | SUCCESS | feature_implementation | Gate 3 | Agent 4 | `daylib_ursa/cli/api.py`; registry exposes `api request`, `compute-clusters`, `cluster-jobs`, and `run-directory-triggers`; CLI registry tests pass. |  | Commands require explicit `--api-base-url` and `--token`; no environment token fallback. |
+| CLI-001 | Ursa CLI | Add CLI commands for compute-cluster and cluster-job actions matching API behavior. | SUCCESS | feature_implementation | Gate 3 | Agent 4 | `daylib_ursa/cli/api.py`; registry exposes `api request`, `compute-clusters`, `cluster-jobs create/start/get/list`, and `run-directory-triggers`; CLI registry tests pass. |  | Commands require explicit `--api-base-url` and `--token`; no environment token fallback. |
 | GUI-001 | Ursa GUI | Add CLI visualization mode for GUI actions with CLI analogs, floating command popup, and copy button. | SUCCESS | feature_implementation | Gate 3 | Agent 5 | `portal.js` CLI Viz toggle/popup/copy support; `main.css`; static tests and `node --check` pass. |  | GUI renders `<TOKEN>` placeholder instead of secrets. |
-| GUI-002 | Ursa GUI | Surface compute clusters and cluster jobs without card-in-card clutter and preserve existing cluster UX. | SUCCESS | feature_implementation | Gate 3 | Agent 5 | `clusters.html` compute-cluster list/register surface; API route tests pass. |  | Existing cluster page behavior and `/api/v1/clusters` routes are preserved. |
-| LIFE-001 | Lifecycle | Ensure `dy-r help` can be represented, launched, completed, and reflected in Ursa analysis job lifecycle. | SUCCESS_LOCAL | feature_implementation | Gate 4 | Agent 6 | `ClusterJobRecord.request={"command":"dy-r help"}` linked to compute cluster and analysis job; run-directory readback test updates an analysis job to `COMPLETED` with `output_summary="dy-r help completed"`. | Live cluster placement still requires production deploy and explicit live trigger/run. | Local lifecycle contract is implemented and tested; live execution remains in `OWY-001`. |
+| GUI-002 | Ursa GUI | Surface compute clusters and cluster jobs without card-in-card clutter and preserve existing cluster UX. | SUCCESS | feature_implementation | Gate 3 | Agent 5 | `clusters.html` compute-cluster list/register surface plus queued-job Start action; API route tests pass. |  | Existing cluster page behavior and `/api/v1/clusters` routes are preserved. |
+| LIFE-001 | Lifecycle | Ensure `dy-r help` can be represented, launched, completed, and reflected in Ursa analysis job lifecycle. | SUCCESS_LOCAL | feature_implementation | Gate 4 | Agent 6 | `run_dayoa_dyr_help_job` validates explicit request fields, creates an `ubuntu` headnode tmux session through SSM, runs `source dyoainit`, `dy-a`, and `dy-r help`, and persists captured output/return code. Focused worker/API/CLI/GUI tests pass. | Live cluster placement still requires production deploy and explicit live trigger/run. | Local lifecycle contract is implemented and tested; live execution remains in `OWY-001`. |
 | OWY-001 | Live validation | Trigger/register an OWY-style `dy-r help` run on a cluster and verify returned terminal lifecycle. | OPEN | feature_implementation | Gate 5 | Agent 7 |  |  |  |
 | DRA-001 | DRA/export | Verify DRA/export lifecycle or keep blocked only for explicit missing live prerequisite/destructive approval. | OPEN | legitimate_safety_handling | Gate 5 | Agent 8 |  |  |  |
 | DOC-001 | Docs | Document new object model, CLI/GUI usage, OWY `dy-r help` lifecycle, and remaining destructive gate boundaries. | SUCCESS | contract_test | Gate 6 | Agent 9 | `README.md`, `docs/README.md`, `docs/dewey_run_analysis_triggers.md`, `docs/compute_cluster_lifecycle.md`. |  | Docs now state no default cluster placement, CLI/GUI parity, readback routes, and destructive cleanup gate boundaries. |
@@ -83,13 +83,36 @@ placed on a cluster, complete, and close the Ursa analysis job lifecycle.
 - 2026-05-29T00:31Z live read-only Ursa inventory:
   `https://ursa.day.lsmc.bio/healthz` and `/readyz` returned `status=ok`,
   build `4.0.25`; OpenAPI reported version `4.0.25` and 117 paths.
+- 2026-05-29T00:45Z production `4.0.26` readback probe:
+  `GET /api/v1/dewey/run-directory-analysis-triggers/URDT-6844A94027E8A699`
+  and generic `GET /api/v1/dewey/run-analysis-triggers/URDT-...` both returned
+  HTTP 200. The durable OWY job remains `FAILED`.
+- 2026-05-29T00:50Z old OWY failure root cause from headnode Snakemake log:
+  `/fsx/analysis_results/xfer-cluster/M-RGX-9T77/daylily-omics-analysis/config/units.tsv`
+  was missing; this is not a Dewey/Ursa readback failure.
+- 2026-05-29T00:53Z focused local validation for new cluster-job execution:
+  `CONDA_DEFAULT_ENV=URSA-test python -m pytest -q
+  tests/test_cluster_job_worker.py
+  tests/test_admin_gui_and_cluster_routes.py::test_compute_cluster_and_cluster_job_routes_are_first_class_objects
+  tests/test_admin_gui_and_cluster_routes.py::test_gui_static_assets_include_cli_viz_mode_and_compute_cluster_surface
+  tests/test_cli_registry_v2.py::test_cli_registry_exposes_v2_command_tree_and_policies
+  tests/test_cli_registry_v2.py::test_key_command_help_includes_tested_examples
+  tests/test_v1_api_contracts.py` -> `13 passed`.
+- 2026-05-29T00:53Z static checks:
+  `ruff check ...`, `node --check daylib_ursa/gui/static/portal.js`, and
+  `git diff --check` passed.
+- 2026-05-29T00:52Z broader local suite note: the local editable
+  `daylily-ephemeral-cluster` reports `2.0.2` from package metadata and source
+  checkout `5.0.27-dirty`, while Ursa requires exact `5.0.28`. Cluster-create
+  dry-run tests that call the live local DayEC helper fail in this workstation
+  environment; production Ursa is expected to use the pinned `5.0.28` runtime.
 
 ## Release/Live Gate
 
-- Next unused Ursa tag after fetch is `4.0.26`.
-- Production Ursa is currently `4.0.25`, so `OWY-001` requires publishing and
-  deploying the `4.0.26` fix before live `URDT-*` readback and `dy-r help`
-  lifecycle validation can be claimed.
+- `4.0.26` was committed, annotated, pushed, and deployed to production; public
+  health/readiness and OpenAPI returned build/version `4.0.26`.
+- Next release for the explicit headnode `dy-r help` cluster-job execution path
+  is `4.0.27`.
 - No cluster deletion, staged-data deletion, DRA mount deletion, or other
   destructive cleanup is included in this ledger without a second explicit
   approval naming the exact resource.

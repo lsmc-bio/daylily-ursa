@@ -202,6 +202,7 @@ def create_cluster_job(
     analysis_job_euid: str = typer.Option("", "--analysis-job-euid", help="Optional analysis job"),
     scheduler_job_id: str = typer.Option("", "--scheduler-job-id", help="Optional Slurm job ID"),
     request_json: str = typer.Option("{}", "--request-json", help="Job request JSON object"),
+    start: bool = typer.Option(False, "--start", help="Start the cluster job after creation"),
 ) -> None:
     """Create a durable Ursa cluster-job object."""
 
@@ -209,6 +210,7 @@ def create_cluster_job(
         "cluster_euid": cluster_euid,
         "job_type": job_type,
         "request": _parse_json_object(request_json, option_name="--request-json"),
+        "start": bool(start),
     }
     for key, value in {
         "job_name": job_name,
@@ -224,6 +226,24 @@ def create_cluster_job(
             method="POST",
             path="/api/v1/cluster-jobs",
             body=body,
+        )
+    )
+
+
+def start_cluster_job(
+    cluster_job_euid: str = typer.Argument(..., help="Cluster job EUID"),
+    api_base_url: str = typer.Option(..., "--api-base-url", help="Ursa API base URL"),
+    token: str = typer.Option(..., "--token", help="Bearer token"),
+) -> None:
+    """Start a queued Ursa cluster-job worker."""
+
+    cli_output.emit_json(
+        _request(
+            api_base_url=api_base_url,
+            token=token,
+            method="POST",
+            path=f"/api/v1/cluster-jobs/{cluster_job_euid}/start",
+            body={},
         )
     )
 
@@ -290,6 +310,7 @@ def register(registry: CommandRegistry, spec: CliSpec) -> None:
         [
             ("list", list_cluster_jobs, REQUIRED_JSON),
             ("create", create_cluster_job, REQUIRED_MUTATING_JSON),
+            ("start", start_cluster_job, REQUIRED_MUTATING_JSON),
             ("get", get_cluster_job, REQUIRED_JSON),
         ],
     )
@@ -299,4 +320,3 @@ def register(registry: CommandRegistry, spec: CliSpec) -> None:
         "Ursa run-directory trigger operations",
         [("get", get_run_directory_trigger, REQUIRED_JSON)],
     )
-
