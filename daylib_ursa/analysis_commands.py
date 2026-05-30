@@ -8,7 +8,7 @@ from daylib_ursa.ephemeral_cluster.runner import require_daylily_ec_version
 
 
 def load_dayec_command_catalog() -> Any:
-    """Load the day-ec repository command catalog through the ==5.0.31 surface."""
+    """Load the day-ec repository command catalog through the ==5.1.2 surface."""
 
     require_daylily_ec_version()
     module = import_module("daylily_ec.repositories")
@@ -66,6 +66,7 @@ def preview_analysis_command(
     analysis_id: str | None = None,
     executing_entity: str | None = None,
     run_context_file: str | None = None,
+    export_trigger: str = "none",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     command = get_analysis_command(command_id, optional_features=optional_features)
@@ -82,6 +83,7 @@ def preview_analysis_command(
         export_destination_s3_uri=destination,
         project=project,
         run_context_file=run_context_file,
+        export_trigger=export_trigger,
         dry_run=dry_run,
     )
     return {

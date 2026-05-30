@@ -61,6 +61,72 @@ class FakeDaylilyEcClient:
         )
 
 
+class FakeFsxClient:
+    def get_paginator(self, operation_name: str):
+        if operation_name == "describe_file_systems":
+            return SimpleNamespace(
+                paginate=lambda: [
+                    {
+                        "FileSystems": [
+                            {
+                                "FileSystemId": "fs-0123456789abcdef0",
+                                "Lifecycle": "AVAILABLE",
+                                "StorageCapacity": 4800,
+                                "DNSName": "fsx.example.com",
+                                "LustreConfiguration": {"MountName": "abcdefff"},
+                                "Tags": [
+                                    {
+                                        "Key": "parallelcluster:cluster-name",
+                                        "Value": "cluster-1",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            )
+        if operation_name == "describe_data_repository_associations":
+            return SimpleNamespace(
+                paginate=lambda **_kwargs: [
+                    {
+                        "Associations": [
+                            {
+                                "AssociationId": "dra-0123456789abcdef0",
+                                "FileSystemId": "fs-0123456789abcdef0",
+                                "FileSystemPath": "/fsx/run-a",
+                                "DataRepositoryPath": "s3://bucket/run-a/",
+                                "Lifecycle": "AVAILABLE",
+                                "CreationTime": "2026-05-30T00:00:00Z",
+                                "ImportedFileChunkSize": 1024,
+                                "BatchImportMetaDataOnCreate": False,
+                                "S3": {
+                                    "AutoImportPolicy": {"Events": ["NEW"]},
+                                    "AutoExportPolicy": {"Events": ["NEW", "CHANGED"]},
+                                },
+                            },
+                            {
+                                "AssociationId": "dra-deleting",
+                                "FileSystemId": "fs-0123456789abcdef0",
+                                "FileSystemPath": "/fsx/deleting",
+                                "DataRepositoryPath": "s3://bucket/deleting/",
+                                "Lifecycle": "DELETING",
+                            },
+                        ]
+                    }
+                ]
+            )
+        raise AssertionError(f"unexpected paginator: {operation_name}")
+
+
+class FakeBoto3Session:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+
+    def client(self, service_name: str):
+        assert service_name == "fsx"
+        return FakeFsxClient()
+
+
 def _service(*, instance_id: str | None = "i-0123456789abcdef0") -> ClusterService:
     return ClusterService(
         regions=["us-west-2"],
@@ -80,6 +146,58 @@ def test_cluster_payload_includes_pinned_version_console_url_and_cached_probe() 
         "https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2"
         "#InstanceDetails:instanceId=i-0123456789abcdef0"
     )
+
+
+def test_cluster_payload_can_include_fsx_volume_id(monkeypatch) -> None:
+    monkeypatch.setattr("daylib_ursa.cluster_service.boto3.Session", FakeBoto3Session)
+    service = _service()
+    cluster = service.describe_cluster("cluster-1", "us-west-2")
+
+    service.attach_fsx_inventory(cluster)
+    payload = cluster.to_dict()
+
+    assert payload["fsx_file_system_id"] == "fs-0123456789abcdef0"
+    assert payload["fsx_discovery_error"] is None
+
+
+def test_dra_probe_lists_active_associations(monkeypatch) -> None:
+    monkeypatch.setattr("daylib_ursa.cluster_service.boto3.Session", FakeBoto3Session)
+    service = _service()
+
+    result = service.fetch_cluster_dra_probe(cluster_name="cluster-1", region="us-west-2")
+
+    assert result["probe_type"] == "dra"
+    assert result["data"]["file_system_id"] == "fs-0123456789abcdef0"
+    assert result["data"]["association_count"] == 1
+    association = result["data"]["associations"][0]
+    assert association["association_id"] == "dra-0123456789abcdef0"
+    assert association["file_system_path"] == "/fsx/run-a"
+    assert association["data_repository_path"] == "s3://bucket/run-a/"
+    assert association["auto_import_events"] == ["NEW"]
+    assert association["auto_export_events"] == ["NEW", "CHANGED"]
+
+
+def test_dra_probe_reports_empty_when_fsx_is_not_discovered(monkeypatch) -> None:
+    class EmptyFsxClient(FakeFsxClient):
+        def get_paginator(self, operation_name: str):
+            if operation_name == "describe_file_systems":
+                return SimpleNamespace(paginate=lambda: [{"FileSystems": []}])
+            return super().get_paginator(operation_name)
+
+    class EmptySession(FakeBoto3Session):
+        def client(self, service_name: str):
+            assert service_name == "fsx"
+            return EmptyFsxClient()
+
+    monkeypatch.setattr("daylib_ursa.cluster_service.boto3.Session", EmptySession)
+    service = _service()
+
+    result = service.fetch_cluster_dra_probe(cluster_name="cluster-1", region="us-west-2")
+
+    assert result["error"] is None
+    assert result["data"]["file_system_id"] is None
+    assert result["data"]["association_count"] == 0
+    assert "No ParallelCluster FSx filesystem" in result["data"]["message"]
 
 
 def test_cluster_list_and_detail_share_900_second_cache() -> None:
@@ -133,7 +251,7 @@ def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
         return SimpleNamespace(
             stdout=(
                 "__DAYLILY_EC_VERSION_BEGIN__\n"
-                '{"app": "daylily-ec", "version": "5.0.31", "git_hash": "abc123"}\n'
+                '{"app": "daylily-ec", "version": "5.1.2", "git_hash": "abc123"}\n'
                 "__DAYLILY_EC_VERSION_END__\n"
                 "__DAY_CLONE_HELP_BEGIN__\n"
                 "Usage: day-clone [OPTIONS]\n"
@@ -155,7 +273,7 @@ def test_static_probe_uses_ssm_and_caches_until_ttl(monkeypatch) -> None:
     assert first["cached"] is False
     assert second["cached"] is True
     assert listed[0].headnode_probes["static"]["cached"] is True
-    assert second["data"]["remote_daylily_ec_version"] == "5.0.31"
+    assert second["data"]["remote_daylily_ec_version"] == "5.1.2"
     assert second["data"]["remote_git_hash"] == "abc123"
     assert second["data"]["day_clone_available"] is True
     assert "day-clone --help" in calls[0]

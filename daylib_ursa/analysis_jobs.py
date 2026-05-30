@@ -85,7 +85,7 @@ def _is_run_directory_utility_command(command: Any) -> bool:
 
 
 class AnalysisJobManager:
-    """Launch manager for Ursa analysis jobs through daylily-ec ==5.0.31."""
+    """Launch manager for Ursa analysis jobs through daylily-ec ==5.1.2."""
 
     def __init__(
         self,

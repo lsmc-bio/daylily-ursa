@@ -6530,11 +6530,17 @@ def create_app(
         service: ClusterService = Depends(require_cluster_service),
     ) -> dict[str, list[dict[str, Any]]]:
         visible_fetch_ssh_status = bool(fetch_ssh_status and actor.is_admin)
-        items = await run_in_threadpool(
-            lambda: service.get_all_clusters_with_status(
+        def _load_clusters() -> list[Any]:
+            clusters = service.get_all_clusters_with_status(
                 force_refresh=refresh,
                 fetch_ssh_status=visible_fetch_ssh_status,
             )
+            for cluster in clusters:
+                service.attach_fsx_inventory(cluster, refresh=refresh)
+            return clusters
+
+        items = await run_in_threadpool(
+            _load_clusters
         )
         return {
             "items": [item.to_dict(include_sensitive=visible_fetch_ssh_status) for item in items]
@@ -6733,6 +6739,7 @@ def create_app(
             visible_fetch_ssh_status = bool(fetch_ssh_status and actor.is_admin)
             if visible_fetch_ssh_status:
                 cluster = service.fetch_headnode_status(cluster, force_refresh=refresh)
+            service.attach_fsx_inventory(cluster, refresh=refresh)
             payload = cluster.to_dict(include_sensitive=visible_fetch_ssh_status)
             return payload
 
@@ -6795,6 +6802,27 @@ def create_app(
         resolved_region = resolve_cluster_region(cluster_name, region=region, service=service)
         try:
             return service.fetch_headnode_fsx_probe(
+                cluster_name=cluster_name,
+                region=resolved_region,
+                refresh=refresh,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/v1/clusters/{cluster_name}/fsx/dra")
+    async def probe_cluster_fsx_dra(
+        cluster_name: str,
+        actor: RequireAuth,
+        region: str | None = Query(default=None),
+        refresh: bool = Query(default=False),
+        service: ClusterService = Depends(require_cluster_service),
+    ) -> dict[str, Any]:
+        _ = actor
+        resolved_region = resolve_cluster_region(cluster_name, region=region, service=service)
+        try:
+            return service.fetch_cluster_dra_probe(
                 cluster_name=cluster_name,
                 region=resolved_region,
                 refresh=refresh,

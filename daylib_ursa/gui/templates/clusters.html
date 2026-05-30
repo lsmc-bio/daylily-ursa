@@ -645,6 +645,18 @@
                                 <div>{{ cluster.scheduler_type or 'slurm' }}</div>
                             </div>
                             <div>
+                                <span class="text-muted text-xs">FSx Volume</span>
+                                <div>
+                                    {% if cluster.fsx_file_system_id %}
+                                    <code>{{ cluster.fsx_file_system_id }}</code>
+                                    {% elif cluster.fsx_discovery_error %}
+                                    <span class="badge badge-warning">discovery error</span>
+                                    {% else %}
+                                    <span class="text-muted">not discovered</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div>
                                 <span class="text-muted text-xs">Created</span>
                                 <div>{{ cluster.creation_time[:19] if cluster.creation_time else '—' }}</div>
                             </div>
@@ -710,11 +722,15 @@
                                 <button class="btn btn-outline btn-sm" type="button" onclick="runHeadnodeProbe(this, 'fsx', true)">
                                     <i class="fas fa-hard-drive"></i> Check FSx
                                 </button>
+                                <button class="btn btn-outline btn-sm" type="button" onclick="runHeadnodeProbe(this, 'dra', true)">
+                                    <i class="fas fa-link"></i> Check DRA
+                                </button>
                             </div>
 
                             {% set static_probe = cluster.headnode_probes.static if cluster.headnode_probes else none %}
                             {% set scheduler_probe = cluster.headnode_probes.scheduler if cluster.headnode_probes else none %}
                             {% set fsx_probe = cluster.headnode_probes.fsx if cluster.headnode_probes else none %}
+                            {% set dra_probe = cluster.headnode_probes.dra if cluster.headnode_probes else none %}
 
                             <section class="cluster-probe-result" data-probe-result="static">
                                 {% if static_probe %}
@@ -785,6 +801,30 @@
                                 </div>
                                 {% else %}
                                 <div class="text-muted text-sm">FSx probe has not run for this cluster.</div>
+                                {% endif %}
+                            </section>
+
+                            <section class="cluster-probe-result" data-probe-result="dra">
+                                {% if dra_probe %}
+                                <div class="cluster-probe-card">
+                                    <div class="d-flex justify-between align-center flex-wrap gap-sm">
+                                        <strong>DRA Probe</strong>
+                                        <span class="badge badge-outline">{{ 'cache' if dra_probe.cached else 'fresh' }} {{ dra_probe.captured_at[:19] }}</span>
+                                    </div>
+                                    {% if dra_probe.error %}
+                                    <div class="alert alert-danger mt-sm">{{ dra_probe.error }}</div>
+                                    {% endif %}
+                                    <div class="grid grid-2 gap-sm mt-sm">
+                                        <div><span class="text-muted text-xs">FSx Volume</span><div><code>{{ dra_probe.data.file_system_id or cluster.fsx_file_system_id or '—' }}</code></div></div>
+                                        <div><span class="text-muted text-xs">Active DRA Mounts</span><div>{{ dra_probe.data.association_count or 0 }}</div></div>
+                                    </div>
+                                    <div class="cluster-probe-block">
+                                        <div class="text-muted text-xs">Associations JSON</div>
+                                        <pre class="cluster-probe-pre">{{ dra_probe.data.associations or [] }}</pre>
+                                    </div>
+                                </div>
+                                {% else %}
+                                <div class="text-muted text-sm">DRA probe has not run for this cluster.</div>
                                 {% endif %}
                             </section>
                         </details>
@@ -1039,6 +1079,7 @@ function clusterProbeTitle(probeType) {
     if (probeType === 'static') return 'Tools Probe';
     if (probeType === 'scheduler') return 'Slurm Probe';
     if (probeType === 'fsx') return 'FSx Probe';
+    if (probeType === 'dra') return 'DRA Probe';
     return 'Headnode Probe';
 }
 
@@ -1075,6 +1116,15 @@ function headnodeProbeHtml(payload) {
         `;
     } else if (probeType === 'fsx') {
         body = clusterProbeOutputBlock('df -h /fsx', data.df_output);
+    } else if (probeType === 'dra') {
+        body = `
+            <div class="grid grid-2 gap-sm mt-sm">
+                <div><span class="text-muted text-xs">FSx Volume</span><div><code>${escapeHtml(data.file_system_id || '—')}</code></div></div>
+                <div><span class="text-muted text-xs">Active DRA Mounts</span><div>${escapeHtml(String(data.association_count ?? 0))}</div></div>
+            </div>
+            ${data.message ? `<div class="text-muted text-sm mt-sm">${escapeHtml(data.message)}</div>` : ''}
+            ${clusterProbeOutputBlock('Associations JSON', JSON.stringify(data.associations || [], null, 2))}
+        `;
     } else {
         body = clusterProbeOutputBlock('stdout', data.stdout);
     }
@@ -1146,7 +1196,7 @@ function clusterProbeSectionHtml(probeType, payload) {
     if (payload) {
         return `<section class="cluster-probe-result" data-probe-result="${escapeHtml(probeType)}">${headnodeProbeHtml(payload)}</section>`;
     }
-    const title = probeType === 'static' ? 'Tools' : probeType === 'scheduler' ? 'Slurm' : 'FSx';
+    const title = probeType === 'static' ? 'Tools' : probeType === 'scheduler' ? 'Slurm' : probeType === 'fsx' ? 'FSx' : 'DRA';
     return `
         <section class="cluster-probe-result" data-probe-result="${escapeHtml(probeType)}">
             <div class="text-muted text-sm">${title} probe has not run for this cluster.</div>
@@ -1312,6 +1362,16 @@ function renderClusterCard(cluster) {
                         <div>${escapeHtml(cluster?.scheduler_type || 'slurm')}</div>
                     </div>
                     <div>
+                        <span class="text-muted text-xs">FSx Volume</span>
+                        <div>${
+                            cluster?.fsx_file_system_id
+                                ? `<code>${escapeHtml(cluster.fsx_file_system_id)}</code>`
+                                : cluster?.fsx_discovery_error
+                                    ? '<span class="badge badge-warning">discovery error</span>'
+                                    : '<span class="text-muted">not discovered</span>'
+                        }</div>
+                    </div>
+                    <div>
                         <span class="text-muted text-xs">Created</span>
                         <div>${escapeHtml(String(cluster?.creation_time || '—').slice(0, 19) || '—')}</div>
                     </div>
@@ -1342,10 +1402,14 @@ function renderClusterCard(cluster) {
                         <button class="btn btn-outline btn-sm" type="button" onclick="runHeadnodeProbe(this, 'fsx', true)">
                             <i class="fas fa-hard-drive"></i> Check FSx
                         </button>
+                        <button class="btn btn-outline btn-sm" type="button" onclick="runHeadnodeProbe(this, 'dra', true)">
+                            <i class="fas fa-link"></i> Check DRA
+                        </button>
                     </div>
                     ${clusterProbeSectionHtml('static', probes.static)}
                     ${clusterProbeSectionHtml('scheduler', probes.scheduler)}
                     ${clusterProbeSectionHtml('fsx', probes.fsx)}
+                    ${clusterProbeSectionHtml('dra', probes.dra)}
                 </details>
             </div>
         </div>
@@ -1474,9 +1538,9 @@ async function loadClusterInventory(refresh = false) {
 }
 
 async function runHeadnodeProbe(button, probeType, refresh = false) {
-    const allowedProbeTypes = new Set(['static', 'scheduler', 'fsx']);
+    const allowedProbeTypes = new Set(['static', 'scheduler', 'fsx', 'dra']);
     if (!allowedProbeTypes.has(probeType)) {
-        showToast('error', 'Unsupported headnode probe type');
+        showToast('error', 'Unsupported cluster probe type');
         return;
     }
     const panel = button.closest('[data-cluster-diagnostics]');
@@ -1492,10 +1556,13 @@ async function runHeadnodeProbe(button, probeType, refresh = false) {
     const originalDisabled = button.disabled;
     button.disabled = true;
     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
-    container.innerHTML = '<div class="text-muted text-sm">Running headnode probe...</div>';
+    container.innerHTML = '<div class="text-muted text-sm">Running cluster probe...</div>';
     try {
+        const endpoint = probeType === 'dra'
+            ? `/api/v1/clusters/${encodeURIComponent(clusterName)}/fsx/dra?region=${encodeURIComponent(region)}&refresh=${refresh ? 'true' : 'false'}`
+            : `/api/v1/clusters/${encodeURIComponent(clusterName)}/headnode/${encodeURIComponent(probeType)}?region=${encodeURIComponent(region)}&refresh=${refresh ? 'true' : 'false'}`;
         const result = await UrsaPortal.apiRequest(
-            `/api/v1/clusters/${encodeURIComponent(clusterName)}/headnode/${encodeURIComponent(probeType)}?region=${encodeURIComponent(region)}&refresh=${refresh ? 'true' : 'false'}`,
+            endpoint,
             { method: 'POST' },
         );
         renderHeadnodeProbe(container, result);
@@ -1505,8 +1572,8 @@ async function runHeadnodeProbe(button, probeType, refresh = false) {
             showToast('success', `${clusterProbeTitle(probeType)} completed`);
         }
     } catch (error) {
-        container.innerHTML = `<div class="alert alert-danger">${escapeHtml(clusterActionErrorMessage(error, 'Headnode probe failed'))}</div>`;
-        showToast('error', clusterActionErrorMessage(error, 'Headnode probe failed'));
+        container.innerHTML = `<div class="alert alert-danger">${escapeHtml(clusterActionErrorMessage(error, 'Cluster probe failed'))}</div>`;
+        showToast('error', clusterActionErrorMessage(error, 'Cluster probe failed'));
     } finally {
         button.disabled = originalDisabled;
         button.innerHTML = originalHtml;

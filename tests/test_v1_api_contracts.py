@@ -26,6 +26,29 @@ class DummyClusterService:
     regions = ["us-west-2"]
     client = object()
 
+    def attach_fsx_inventory(self, cluster, *, refresh: bool = False):
+        _ = refresh
+        return cluster
+
+    def fetch_cluster_dra_probe(self, *, cluster_name: str, region: str, refresh: bool = False):
+        _ = refresh
+        return {
+            "probe_type": "dra",
+            "cluster_name": cluster_name,
+            "region": region,
+            "instance_id": None,
+            "captured_at": "2026-05-30T00:00:00Z",
+            "cache_expires_at": "2026-05-30T00:05:00Z",
+            "ttl_seconds": 300,
+            "cached": False,
+            "data": {
+                "file_system_id": "fs-0123456789abcdef0",
+                "association_count": 0,
+                "associations": [],
+            },
+            "error": None,
+        }
+
 
 def _settings(*, mount_enabled: bool = False) -> Settings:
     return Settings(
@@ -108,6 +131,7 @@ def test_phase_one_route_families_exist() -> None:
         "/api/v1/clusters/{cluster_name}/headnode/static",
         "/api/v1/clusters/{cluster_name}/headnode/scheduler",
         "/api/v1/clusters/{cluster_name}/headnode/fsx",
+        "/api/v1/clusters/{cluster_name}/fsx/dra",
         "/api/v1/user-tokens",
         "/api/v1/admin/user-tokens",
         "/api/v1/admin/users",

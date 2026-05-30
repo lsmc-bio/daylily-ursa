@@ -696,6 +696,8 @@ class DummyClusterInfo:
         self.creation_time = "2026-03-25T00:00:00Z"
         self.last_updated_time = last_updated_time
         self.error_message = None
+        self.fsx_file_system_id = "fs-0123456789abcdef0"
+        self.fsx_discovery_error = None
         self.job_queue = SimpleNamespace(
             total_jobs=total_jobs,
             running_jobs=1 if total_jobs else 0,
@@ -773,11 +775,13 @@ class DummyClusterInfo:
                 "state": "running",
                 "instance_id": "i-0123456789abcdef0",
             },
-            "daylily_ec_pinned_version": "5.0.31",
+            "daylily_ec_pinned_version": "5.1.2",
             "aws_console_url": (
                 f"https://{self.region}.console.aws.amazon.com/ec2/home?region={self.region}"
                 "#InstanceDetails:instanceId=i-0123456789abcdef0"
             ),
+            "fsx_file_system_id": self.fsx_file_system_id,
+            "fsx_discovery_error": self.fsx_discovery_error,
             "headnode_probes": {
                 "static": {
                     "probe_type": "static",
@@ -789,8 +793,8 @@ class DummyClusterInfo:
                     "ttl_seconds": 86400,
                     "cached": True,
                     "data": {
-                        "daylily_ec_pinned_version": "5.0.31",
-                        "remote_daylily_ec_version": "5.0.31",
+                        "daylily_ec_pinned_version": "5.1.2",
+                        "remote_daylily_ec_version": "5.1.2",
                         "remote_git_hash": "abc123",
                         "day_clone_available": True,
                         "day_clone_help": "Usage: day-clone [OPTIONS]\n  --help",
@@ -823,6 +827,32 @@ class DummyClusterInfo:
                     "cached": True,
                     "data": {
                         "df_output": "Filesystem Size Used Avail Use% Mounted on\nfsx 1.2T 200G 1.0T 17% /fsx"
+                    },
+                    "error": None,
+                },
+                "dra": {
+                    "probe_type": "dra",
+                    "cluster_name": self.cluster_name,
+                    "region": self.region,
+                    "instance_id": "i-0123456789abcdef0",
+                    "captured_at": "2026-03-25T00:33:00Z",
+                    "cache_expires_at": "2026-03-25T00:38:00Z",
+                    "ttl_seconds": 300,
+                    "cached": True,
+                    "data": {
+                        "file_system_id": self.fsx_file_system_id,
+                        "association_count": 1,
+                        "associations": [
+                            {
+                                "association_id": "dra-0123456789abcdef0",
+                                "file_system_id": self.fsx_file_system_id,
+                                "file_system_path": "/fsx/run-a",
+                                "data_repository_path": "s3://bucket/run-a/",
+                                "lifecycle": "AVAILABLE",
+                                "auto_import_events": ["NEW"],
+                                "auto_export_events": ["NEW", "CHANGED"],
+                            }
+                        ],
                     },
                     "error": None,
                 },
@@ -885,6 +915,12 @@ class DummyClusterService:
         _ = force_refresh
         return cluster
 
+    def attach_fsx_inventory(self, cluster, *, refresh: bool = False):
+        _ = refresh
+        cluster.fsx_file_system_id = "fs-0123456789abcdef0"
+        cluster.fsx_discovery_error = None
+        return cluster
+
     def fetch_headnode_static_probe(self, *, cluster_name: str, region: str, refresh: bool = False):
         return {
             "probe_type": "static",
@@ -896,8 +932,8 @@ class DummyClusterService:
             "ttl_seconds": 86400,
             "cached": not refresh,
             "data": {
-                "daylily_ec_pinned_version": "5.0.31",
-                "remote_daylily_ec_version": "5.0.31",
+                "daylily_ec_pinned_version": "5.1.2",
+                "remote_daylily_ec_version": "5.1.2",
                 "remote_git_hash": "abc123",
                 "day_clone_available": True,
                 "day_clone_help": "Usage: day-clone [OPTIONS]",
@@ -936,6 +972,31 @@ class DummyClusterService:
             "cached": not refresh,
             "data": {
                 "df_output": "Filesystem Size Used Avail Use% Mounted on\nfsx 1.2T 200G 1.0T 17% /fsx"
+            },
+            "error": None,
+        }
+
+    def fetch_cluster_dra_probe(self, *, cluster_name: str, region: str, refresh: bool = False):
+        return {
+            "probe_type": "dra",
+            "cluster_name": cluster_name,
+            "region": region,
+            "instance_id": "i-0123456789abcdef0",
+            "captured_at": "2026-03-25T00:33:00Z",
+            "cache_expires_at": "2026-03-25T00:38:00Z",
+            "ttl_seconds": 300,
+            "cached": not refresh,
+            "data": {
+                "file_system_id": "fs-0123456789abcdef0",
+                "association_count": 1,
+                "associations": [
+                    {
+                        "association_id": "dra-0123456789abcdef0",
+                        "file_system_path": "/fsx/run-a",
+                        "data_repository_path": "s3://bucket/run-a/",
+                        "lifecycle": "AVAILABLE",
+                    }
+                ],
             },
             "error": None,
         }
@@ -1469,6 +1530,10 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
             "/api/v1/clusters/cluster-1/headnode/fsx?region=us-west-2",
             headers={"Authorization": "Bearer atlas-token"},
         )
+        cluster_dra_probe = client.post(
+            "/api/v1/clusters/cluster-1/fsx/dra?region=us-west-2",
+            headers={"Authorization": "Bearer atlas-token"},
+        )
         cluster_delete_plan = client.post(
             "/api/v1/clusters/cluster-1/delete-plan?region=us-west-2",
             headers={"Authorization": "Bearer atlas-token"},
@@ -1530,13 +1595,16 @@ def test_admin_routes_cover_me_user_search_client_tokens_and_clusters() -> None:
     assert cluster_aws_check.json()["return_code"] == 0
     assert "PASS iam.policy" in cluster_aws_check.json()["gap_analysis"]
     assert cluster_aws_check.json()["report"]["summary"] == {"PASS": 1, "WARN": 0, "FAIL": 0}
-    assert cluster_detail.json()["daylily_ec_pinned_version"] == "5.0.31"
+    assert cluster_detail.json()["daylily_ec_pinned_version"] == "5.1.2"
     assert cluster_static_probe.status_code == 200
     assert cluster_static_probe.json()["data"]["day_clone_available"] is True
     assert cluster_scheduler_probe.status_code == 200
     assert "JOBID PARTITION" in cluster_scheduler_probe.json()["data"]["squeue_output"]
     assert cluster_fsx_probe.status_code == 200
     assert "df_output" in cluster_fsx_probe.json()["data"]
+    assert cluster_dra_probe.status_code == 200
+    assert cluster_dra_probe.json()["data"]["file_system_id"] == "fs-0123456789abcdef0"
+    assert cluster_dra_probe.json()["data"]["association_count"] == 1
     assert cluster_delete_plan.status_code == 200
     assert cluster_delete.status_code == 200
     assert cluster_delete.json()["result"]["status"] == "DELETE_IN_PROGRESS"
@@ -1721,6 +1789,9 @@ def test_gui_routes_cover_remaining_pages_and_logout() -> None:
     assert "Probe tools" in clusters_page.text
     assert "Refresh Slurm" in clusters_page.text
     assert "Check FSx" in clusters_page.text
+    assert "Check DRA" in clusters_page.text
+    assert "FSx Volume" in clusters_page.text
+    assert "Active DRA Mounts" in clusters_page.text
     assert "day-clone --help" in clusters_page.text
     assert "squeue" in clusters_page.text
     assert "df -h /fsx" in clusters_page.text

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence, cast
 
 DAYLILY_EC_DISTRIBUTION = "daylily-ephemeral-cluster"
-REQUIRED_DAYLILY_EC_VERSION = "5.0.31"
+REQUIRED_DAYLILY_EC_VERSION = "5.1.2"
 MINIMUM_DAYLILY_EC_VERSION = REQUIRED_DAYLILY_EC_VERSION
 DAYLILY_EC_VERSION_REQUIREMENT = f"=={REQUIRED_DAYLILY_EC_VERSION}"
 DAYLILY_EC_INSTALL_SPEC = f"{DAYLILY_EC_DISTRIBUTION}{DAYLILY_EC_VERSION_REQUIREMENT}"
@@ -170,7 +170,7 @@ def _summarize_process_output(
 
 
 class DaylilyEcClient:
-    """Strict Ursa client for the daylily-ephemeral-cluster ==5.0.31 contract."""
+    """Strict Ursa client for the daylily-ephemeral-cluster ==5.1.2 contract."""
 
     def __init__(
         self,

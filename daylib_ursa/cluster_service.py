@@ -1,4 +1,4 @@
-"""Cluster service backed by the daylily-ephemeral-cluster ==5.0.31 contract."""
+"""Cluster service backed by the daylily-ephemeral-cluster ==5.1.2 contract."""
 
 from __future__ import annotations
 
@@ -10,6 +10,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 from daylib_ursa.ephemeral_cluster.runner import (
     REQUIRED_DAYLILY_EC_VERSION,
@@ -192,6 +195,8 @@ class ClusterInfo:
     budget_info: Optional[BudgetInfo] = None
     job_queue: Optional[JobQueueSummary] = None
     headnode_probes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    fsx_file_system_id: Optional[str] = None
+    fsx_discovery_error: Optional[str] = None
 
     MONITOR_BUCKET_TAG = "aws-parallelcluster-monitor-bucket"
 
@@ -283,6 +288,8 @@ class ClusterInfo:
             "daylily_ec_pinned_version": REQUIRED_DAYLILY_EC_VERSION,
             "aws_console_url": self.aws_console_url(),
             "headnode_probes": dict(self.headnode_probes),
+            "fsx_file_system_id": self.fsx_file_system_id,
+            "fsx_discovery_error": self.fsx_discovery_error,
         }
         if include_sensitive:
             result["budget_info"] = self.budget_info.to_dict() if self.budget_info else None
@@ -315,6 +322,7 @@ class ClusterService:
         self._cache_time: float = 0
         self._job_queue_cache: Dict[tuple[str, str], tuple[float, JobQueueSummary]] = {}
         self._probe_cache: Dict[tuple[str, str, str], tuple[float, HeadnodeProbeResult]] = {}
+        self._fsx_inventory_cache: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}
         self._cluster_region_map: Dict[str, str] = {}
         self._delete_tokens: Dict[str, tuple[str, str]] = {}
 
@@ -619,11 +627,12 @@ class ClusterService:
             self._cache = {}
             self._cache_time = 0
             self._job_queue_cache = {}
+            self._fsx_inventory_cache = {}
 
     def _attach_cached_probes(self, cluster: ClusterInfo) -> None:
         probes: Dict[str, Dict[str, Any]] = {}
         now = time.time()
-        for probe_type in ("static", "scheduler", "fsx"):
+        for probe_type in ("static", "scheduler", "fsx", "dra"):
             cached = self._probe_cache.get((probe_type, cluster.region, cluster.cluster_name))
             if not cached:
                 continue
@@ -632,6 +641,114 @@ class ClusterService:
                 continue
             probes[probe_type] = result.to_dict(cached=True)
         cluster.headnode_probes = probes
+
+    def _fsx_client(self, region: str) -> Any:
+        session_kwargs: Dict[str, str] = {"region_name": region}
+        if self.aws_profile:
+            session_kwargs["profile_name"] = self.aws_profile
+        return boto3.Session(**session_kwargs).client("fsx")
+
+    @staticmethod
+    def _resource_tags(resource: Dict[str, Any]) -> Dict[str, str]:
+        return {
+            str(tag.get("Key") or ""): str(tag.get("Value") or "")
+            for tag in resource.get("Tags", []) or []
+            if isinstance(tag, dict) and tag.get("Key")
+        }
+
+    def _fetch_fsx_inventory(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        refresh: bool,
+    ) -> Dict[str, Any]:
+        cache_key = (region, cluster_name)
+        if not refresh:
+            cached = self._fsx_inventory_cache.get(cache_key)
+            if cached and cached[0] > time.time():
+                return dict(cached[1])
+
+        payload: Dict[str, Any] = {
+            "file_system_id": None,
+            "lifecycle": None,
+            "storage_capacity": None,
+            "dns_name": None,
+            "mount_name": None,
+            "error": None,
+        }
+        try:
+            client = self._fsx_client(region)
+            paginator = client.get_paginator("describe_file_systems")
+            for page in paginator.paginate():
+                for filesystem in page.get("FileSystems", []) or []:
+                    if not isinstance(filesystem, dict):
+                        continue
+                    tags = self._resource_tags(filesystem)
+                    if tags.get("parallelcluster:cluster-name") != cluster_name:
+                        continue
+                    lustre = filesystem.get("LustreConfiguration", {}) or {}
+                    payload.update(
+                        {
+                            "file_system_id": filesystem.get("FileSystemId"),
+                            "lifecycle": filesystem.get("Lifecycle"),
+                            "storage_capacity": filesystem.get("StorageCapacity"),
+                            "dns_name": filesystem.get("DNSName"),
+                            "mount_name": lustre.get("MountName"),
+                            "error": None,
+                        }
+                    )
+                    break
+                if payload.get("file_system_id"):
+                    break
+        except (BotoCoreError, ClientError, RuntimeError) as exc:
+            payload["error"] = str(exc)
+
+        self._fsx_inventory_cache[cache_key] = (
+            time.time() + _DYNAMIC_PROBE_TTL_SECONDS,
+            dict(payload),
+        )
+        return payload
+
+    def _attach_fsx_inventory(self, cluster: ClusterInfo, *, refresh: bool) -> None:
+        inventory = self._fetch_fsx_inventory(
+            cluster_name=cluster.cluster_name,
+            region=cluster.region,
+            refresh=refresh,
+        )
+        cluster.fsx_file_system_id = cast(Optional[str], inventory.get("file_system_id"))
+        cluster.fsx_discovery_error = cast(Optional[str], inventory.get("error"))
+
+    def attach_fsx_inventory(self, cluster: ClusterInfo, *, refresh: bool = False) -> ClusterInfo:
+        self._attach_fsx_inventory(cluster, refresh=refresh)
+        return cluster
+
+    @staticmethod
+    def _iso_value(value: Any) -> str | None:
+        if value is None:
+            return None
+        iso = getattr(value, "isoformat", None)
+        if callable(iso):
+            return str(iso())
+        return str(value)
+
+    def _data_repository_association_payload(self, association: Dict[str, Any]) -> Dict[str, Any]:
+        s3_payload = association.get("S3", {}) or {}
+        auto_import = s3_payload.get("AutoImportPolicy", {}) or {}
+        auto_export = s3_payload.get("AutoExportPolicy", {}) or {}
+        return {
+            "association_id": association.get("AssociationId"),
+            "file_system_id": association.get("FileSystemId"),
+            "file_system_path": association.get("FileSystemPath"),
+            "data_repository_path": association.get("DataRepositoryPath"),
+            "lifecycle": association.get("Lifecycle"),
+            "created_at": self._iso_value(association.get("CreationTime")),
+            "imported_file_chunk_size": association.get("ImportedFileChunkSize"),
+            "batch_import_meta_data_on_create": association.get("BatchImportMetaDataOnCreate"),
+            "auto_import_events": list(auto_import.get("Events") or []),
+            "auto_export_events": list(auto_export.get("Events") or []),
+            "failure_details": association.get("FailureDetails"),
+        }
 
     def _resolve_probe_target(self, cluster_name: str, region: str) -> ClusterInfo:
         cluster = self.describe_cluster(cluster_name, region)
@@ -1014,6 +1131,115 @@ class ClusterService:
         )
         self._store_probe(probe_result)
         return probe_result.to_dict(cached=False)
+
+    def fetch_cluster_dra_probe(
+        self,
+        *,
+        cluster_name: str,
+        region: str,
+        refresh: bool = False,
+    ) -> Dict[str, Any]:
+        cached = self._cached_probe(
+            probe_type="dra",
+            cluster_name=cluster_name,
+            region=region,
+            ttl_seconds=_DYNAMIC_PROBE_TTL_SECONDS,
+            refresh=refresh,
+        )
+        if cached:
+            return cached.to_dict(cached=True)
+
+        cluster = self.describe_cluster(cluster_name, region, force_refresh=refresh)
+        inventory = self._fetch_fsx_inventory(
+            cluster_name=cluster_name,
+            region=region,
+            refresh=refresh,
+        )
+        file_system_id = cast(Optional[str], inventory.get("file_system_id"))
+        if inventory.get("error"):
+            result = self._probe_error_result(
+                probe_type="dra",
+                cluster_name=cluster_name,
+                region=region,
+                instance_id=cluster.head_node.instance_id if cluster.head_node else None,
+                ttl_seconds=_DYNAMIC_PROBE_TTL_SECONDS,
+                error=str(inventory["error"]),
+                data={
+                    "file_system_id": file_system_id,
+                    "associations": [],
+                    "association_count": 0,
+                },
+            )
+            self._store_probe(result)
+            return result.to_dict(cached=False)
+
+        if not file_system_id:
+            result = self._build_probe_result(
+                probe_type="dra",
+                cluster_name=cluster_name,
+                region=region,
+                instance_id=cluster.head_node.instance_id if cluster.head_node else None,
+                ttl_seconds=_DYNAMIC_PROBE_TTL_SECONDS,
+                data={
+                    "file_system_id": None,
+                    "associations": [],
+                    "association_count": 0,
+                    "message": "No ParallelCluster FSx filesystem was discovered for this cluster.",
+                },
+            )
+            self._store_probe(result)
+            return result.to_dict(cached=False)
+
+        try:
+            client = self._fsx_client(region)
+            paginator = client.get_paginator("describe_data_repository_associations")
+            associations: list[Dict[str, Any]] = []
+            for page in paginator.paginate(
+                Filters=[{"Name": "file-system-id", "Values": [file_system_id]}]
+            ):
+                for association in page.get("Associations", []) or []:
+                    if not isinstance(association, dict):
+                        continue
+                    lifecycle = str(association.get("Lifecycle") or "").upper()
+                    if lifecycle in {"DELETING", "DELETED"}:
+                        continue
+                    associations.append(self._data_repository_association_payload(association))
+            associations.sort(
+                key=lambda item: (
+                    str(item.get("file_system_path") or ""),
+                    str(item.get("association_id") or ""),
+                )
+            )
+            result = self._build_probe_result(
+                probe_type="dra",
+                cluster_name=cluster_name,
+                region=region,
+                instance_id=cluster.head_node.instance_id if cluster.head_node else None,
+                ttl_seconds=_DYNAMIC_PROBE_TTL_SECONDS,
+                data={
+                    "file_system_id": file_system_id,
+                    "associations": associations,
+                    "association_count": len(associations),
+                },
+            )
+            self._store_probe(result)
+            return result.to_dict(cached=False)
+        except (BotoCoreError, ClientError, RuntimeError) as exc:
+            result = self._probe_error_result(
+                probe_type="dra",
+                cluster_name=cluster_name,
+                region=region,
+                instance_id=cluster.head_node.instance_id if cluster.head_node else None,
+                ttl_seconds=_DYNAMIC_PROBE_TTL_SECONDS,
+                error=str(exc),
+                data={
+                    "file_system_id": file_system_id,
+                    "associations": [],
+                    "association_count": 0,
+                },
+            )
+            self._store_probe(result)
+            return result.to_dict(cached=False)
 
 
 def get_cluster_service(
